@@ -1,0 +1,14 @@
+.idea/
+.idea_modules/
+.devcontainer/
+.vscode/
+*.iws
+*.swp
+*.swo
+*~
+~$*.doc
+rippled.log
+__pycache__/
+*.py[cod]
+.venv/
+pip-log.txt

@@ -1,0 +1,79 @@
+FROM debian:bookworm AS build
+
+# Antithesis supports only x86_64 architecture
+RUN uname -m | grep -E '^x86_64$'
+
+WORKDIR /root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -ex ;\
+    apt-get update ;\
+    apt-get install --yes \
+    clang-16 clang++-16 python3-pip python-is-python3 cmake git wget ;\
+    apt-get clean ;\
+    pip install --no-cache --break-system-packages "conan<2"
+
+RUN set -ex ;\
+    conan config set general.revisions_enabled=1 ;\
+    conan profile new --detect default ;\
+    conan profile update settings.compiler=clang default ;\
+    conan profile update settings.compiler.version=16 default ;\
+    conan profile update settings.compiler.libcxx=libstdc++11 default ;\
+    conan profile update settings.compiler.cppstd=20 default ;\
+    conan profile update options.rocksdb=False default ;\
+    conan profile update 'conf.tools.build:compiler_executables={"c": "/usr/bin/clang-16", "cpp": "/usr/bin/clang++-16"}' default ;\
+    conan profile update 'env.CXXFLAGS="-DBOOST_ASIO_DISABLE_CONCEPTS"' default ;\
+    conan profile update 'conf.tools.build:cxxflags+=["-DBOOST_ASIO_DISABLE_CONCEPTS"]' default
+
+ARG RIPPLED_REPO=https://github.com/Bronek/rippled.git
+ARG RIPPLED_COMMIT=feature/antithesis-instrumentation
+ENV SOURCE_DIR=/root/rippled
+RUN set -ex ;\
+    git clone ${RIPPLED_REPO} ${SOURCE_DIR} ;\
+    git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT} ;\
+    echo ${RIPPLED_REPO} > ${SOURCE_DIR}.txt ;\
+    git -C ${SOURCE_DIR} rev-parse --short HEAD >> ${SOURCE_DIR}.txt ;\
+    rm -rf ${SOURCE_DIR}/.git
+
+WORKDIR ${SOURCE_DIR}
+RUN conan export external/snappy snappy/1.1.10@ ;\
+    conan export external/soci soci/4.0.3@
+
+ENV BUILD_DIR=/root/build
+ENV CC=/usr/bin/clang-16
+ENV CXX=/usr/bin/clang++-16
+RUN set -ex ;\
+    conan install ${SOURCE_DIR} \
+    --output-folder ${BUILD_DIR} \
+    --install-folder ${BUILD_DIR} \
+    --build missing \
+    --settings build_type=Debug
+
+RUN set -ex ;\
+    cmake -S ${SOURCE_DIR} -B ${BUILD_DIR} \
+    -Dvoidstar=ON \
+    -Dxrpld=ON \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DSECP256K1_BUILD_BENCHMARK=OFF \
+    -DSECP256K1_BUILD_TESTS=OFF \
+    -DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
+    -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
+
+RUN cmake --build ${BUILD_DIR}  --parallel $(nproc)
+RUN cmake --install ${BUILD_DIR}  --prefix /opt/ripple
+RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so  -O /usr/lib/libvoidstar.so
+
+FROM debian:bookworm-slim
+
+COPY --from=build /opt/ripple/bin /opt/ripple/bin
+COPY --from=build /opt/ripple/etc /opt/ripple/etc
+COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
+COPY --from=build /root/rippled.txt /opt/ripple/bin/rippled.git-commit.txt
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -ex ;\
+    apt-get update ;\
+    apt-get install --yes curl procps ;\
+    apt-get clean
+
+RUN ln -s /opt/ripple/bin/rippled /usr/local/bin/rippled
+RUN mkdir -p /etc/opt && ln -s /opt/ripple/etc/ /etc/opt/ripple
