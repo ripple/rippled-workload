@@ -8,13 +8,15 @@
     dependencies = [
     "xrpl-py",
     "requests",
+    "matplotlib>=3.9.2",
+    "pyqt6>=6.7.1",
 ]
     readme = "README.md"
     requires-python = ">= 3.11"
     license = { text = "MIT" }
 
 [project.scripts]
-    "workload" = "workload.app:run"
+    "workload" = "workload.app:main"
 
 [build-system]
     requires = ["hatchling"]

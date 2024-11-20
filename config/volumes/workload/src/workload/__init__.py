@@ -2,9 +2,9 @@ import datetime
 import logging
 from pathlib import Path
 
-FORMAT = "%(asctime)s [%(levelname)s] - %(name)+15s:%(lineno)-3d - %(message)s"
-FORMAT_CONSOLE = "%(asctime)s [%(levelname)s] - %(name)+15s:%(lineno)-3d - %(message)s"
-LOG_TO_FILE = False
+FILE_LOG_FORMAT = "%(asctime)s [%(levelname)s] - %(name)s:%(lineno)-3d - %(message)s"
+CONSOLE_LOG_FORMAT_CONSOLE = "[%(levelname)s] %(name)s:%(lineno)-3d - %(message)s"
+LOG_TO_FILE = True
 
 class CustomFormatter(logging.Formatter):
 
@@ -19,7 +19,7 @@ class CustomFormatter(logging.Formatter):
     white = "\x1b[37;20m"
     yellow = "\x1b[33;20m"
     reset = "\x1b[0m"
-    format = FORMAT
+    format = CONSOLE_LOG_FORMAT_CONSOLE
 
     FORMATS = {
         logging.DEBUG: grey + format + reset,
@@ -37,12 +37,12 @@ class CustomFormatter(logging.Formatter):
 
 
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(logging.DEBUG)
 
 running_in_docker = Path("/.dockerenv").is_file()
 
-if LOG_TO_FILE or not running_in_docker:
-    logdir = Path("/var/log/workload/") if running_in_docker else Path(__file__).parent
+if LOG_TO_FILE and not running_in_docker:
+    logdir = Path("/var/log/workload/") if running_in_docker else Path(__file__).parent / "logs"
     Path(logdir).mkdir(parents=True, exist_ok=True)
     tstamp = datetime.datetime.now().strftime("%Y_%j_%H_%M_%S")
 
@@ -52,11 +52,18 @@ if LOG_TO_FILE or not running_in_docker:
 
     file = logging.FileHandler(logfile)
     file.setLevel(file_level)
-    file_formatter = logging.Formatter(fmt=FORMAT)
+    file_formatter = logging.Formatter(fmt=FILE_LOG_FORMAT)
     file_formatter.default_msec_format = "%s.%04d"
     file.setFormatter(file_formatter)
     root_logger.addHandler(file)
 
+logging.getLogger("urllib3").setLevel(logging.ERROR)
+logging.getLogger("requests").setLevel(logging.ERROR)
+logging.getLogger("websockets").setLevel(logging.ERROR)
+logging.getLogger("asyncio").setLevel(logging.ERROR)
+logging.getLogger("httpcore").setLevel(logging.ERROR)
+logging.getLogger("httpx").setLevel(logging.ERROR)
+logging.getLogger("matplotlib").setLevel(logging.ERROR)
 
 console_level = logging.INFO
 
@@ -68,8 +75,5 @@ root_logger.addHandler(console)
 
 log = logging.getLogger(__name__)
 
-logging.getLogger("urllib3").setLevel(logging.DEBUG)
-logging.getLogger("requests").setLevel(logging.DEBUG)
-logging.getLogger("websockets").setLevel(logging.DEBUG)
-logging.getLogger("asyncio").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
+def run():
+    main()
