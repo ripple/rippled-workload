@@ -24,14 +24,15 @@ RUN set -ex ;\
     conan profile update 'env.CXXFLAGS="-DBOOST_ASIO_DISABLE_CONCEPTS"' default ;\
     conan profile update 'conf.tools.build:cxxflags+=["-DBOOST_ASIO_DISABLE_CONCEPTS"]' default
 
-ARG RIPPLED_REPO=https://github.com/Bronek/rippled.git
-ARG RIPPLED_COMMIT=feature/antithesis-instrumentation
+ARG RIPPLED_REPO
+ARG RIPPLED_COMMIT
 ENV SOURCE_DIR=/root/rippled
 RUN set -ex ;\
     git clone ${RIPPLED_REPO} ${SOURCE_DIR} ;\
     git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT} ;\
-    echo ${RIPPLED_REPO} > ${SOURCE_DIR}.txt ;\
-    git -C ${SOURCE_DIR} rev-parse --short HEAD >> ${SOURCE_DIR}.txt ;\
+    printf "REPO=%s\n" ${RIPPLED_REPO} > ${SOURCE_DIR}.txt ;\
+    printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt ;\
+    printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt ;\
     rm -rf ${SOURCE_DIR}/.git
 
 WORKDIR ${SOURCE_DIR}
