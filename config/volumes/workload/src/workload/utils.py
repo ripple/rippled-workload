@@ -1,9 +1,8 @@
 from xrpl.models.amounts import IssuedCurrencyAmount
 from xrpl.models.currencies import IssuedCurrency
-from xrpl.models.transactions import OfferCreate
 
-def quick_setup():
-    pass  # TODO: implement
+from workload import logger
+
 
 def short_address(address: str) -> str:
     length = 5
@@ -11,7 +10,7 @@ def short_address(address: str) -> str:
     return f"{address[:length]}{sep}{address[-length:]}"
 
 
-def format_currency(currency: IssuedCurrency | IssuedCurrencyAmount | str | dict[str, str]) -> str:
+def format_currency(currency: IssuedCurrency | IssuedCurrencyAmount | str | dict[str, str], short: bool = False) -> str:
     if isinstance(currency, str):  # TODO: Fix this
         xrp_balance = currency
         w, d = pieces if len(pieces := xrp_balance.split(".")) > 1 else (0, int(pieces[0]))
@@ -33,8 +32,7 @@ def format_currency(currency: IssuedCurrency | IssuedCurrencyAmount | str | dict
             issuer = currency.issuer
             currency_str = currency.currency
         try:
-            if issuer:
-                issuer_str = short_address(issuer)
+            issuer_str = short_address(issuer) if short else issuer
         finally:
             currency_str = f"{currency_str}.{issuer_str}"
 
@@ -43,5 +41,18 @@ def format_currency(currency: IssuedCurrency | IssuedCurrencyAmount | str | dict
 
     return currency_str
 
-def format_bid_ask(offer_create_txn: OfferCreate) -> dict[str, str]:
-    return {"pays": format_currency(offer_create_txn.taker_pays), "gets": format_currency(offer_create_txn.taker_gets)}
+
+def issue_currencies(issuer: str, currency_code: list[str]) -> list[IssuedCurrency]:
+    """Use a fixed set of currency codes to create IssuedCurrencies for a specific gateway.
+
+    Args:
+        issuer (str): Account_id of the gateway for all currencies
+        currency_code (list[str], optional): _description_. Defaults to config.currency_codes.
+
+    Returns:
+        list[IssuedCurrency]: List of IssuedCurrencies a gateway provides
+
+    """
+    # TODO: format_currency()
+    logger.info("Issuing %s %s", issuer, currency_code)
+    return [IssuedCurrency(issuer=issuer, currency=cc) for cc in currency_code]

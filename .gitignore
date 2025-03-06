@@ -12,3 +12,8 @@ __pycache__/
 *.py[cod]
 .venv/
 pip-log.txt
+logs
+config/docker-compose.yml
+config/volumes/*val*
+config/volumes/*rippled*
+config/volumes/tc/workload.json

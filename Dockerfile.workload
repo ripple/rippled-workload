@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1
 
@@ -8,4 +8,4 @@ COPY . /workload
 
 RUN pip install .
 
-CMD [ "workload" ]
+CMD ["python", "-m", "workload"]
