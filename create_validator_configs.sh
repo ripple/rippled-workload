@@ -6,7 +6,7 @@ set -o nounset
 
 num_keys=${1:-5}
 num_services=$((num_keys + 1))
-rippled_image="rippled_antithesis:latest"
+rippled_image="rippled:latest"
 confs_dir="$PWD/config/volumes"
 conf_file="rippled.cfg"
 validator_name="atval"
