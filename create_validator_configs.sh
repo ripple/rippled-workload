@@ -24,6 +24,9 @@ set +e
 #################################################
 # NOTE: The [features] list will need to be     #
 # modified to suit the version of rippled used  #
+#                                               #
+# NOTE: This list must to be periodically       #
+# updated to match actual enabled amendments    #
 #################################################
 
 read -r -d '' config_template <<-EOF
@@ -72,60 +75,63 @@ read -r -d '' config_template <<-EOF
   { "command": "log_level", "severity": "warning" }
 
 [features]
-  AMM
-  CheckCashMakesTrustLine
-  Checks
-  Clawback
-  DeepFreeze
-  DeletableAccounts
-  DepositAuth
-  DepositPreauth
-  DID
-  DisallowIncoming
-  EnforceInvariants
-  Escrow
-  Flow
-  FlowCross
-  FlowSortStrands
-  HardenedValidations
-  MultiSignReserve
-  NegativeUNL
-  NonFungibleTokensV1
-  PayChan
+  fixReducedOffersV2
+  fixNFTokenPageLinks
+  AMMClawback
+  fixEnforceNFTokenTrustline
+  NFTokenMintOffer
+  fixInnerObjTemplate2
   PriceOracle
-  RequireFullyCanonicalSig
-  SortedDirectories
-  TicketBatch
-  TickSize
-  XChainBridge
-  XRPFees
-
-  fix1201
-  fix1368
-  fix1373
-  fix1512
-  fix1513
-  fix1515
-  fix1523
-  fix1528
-  fix1543
-  fix1571
-  fix1578
-  fix1623
-  fix1781
-  fixAmendmentMajorityCalc
-  fixCheckThreading
-  fixInnerObjTemplate
-  fixMasterKeyAsRegularKey
-  fixNFTokenNegOffer
+  fixPreviousTxnID
+  fixAMMv1_1
+  fixEmptyDID
+  fixAMMOverflowOffer
   fixNFTokenReserve
+  fixInnerObjTemplate
+  fixFillOrKill
+  fixDisallowIncomingV1
+  DID
+  AMM
+  Clawback
+  fixReducedOffersV1
+  fixNFTokenRemint
+  fixTrustLinesToSelf
+  DisallowIncoming
+  ImmediateOfferKilled
+  XRPFees
   fixNonFungibleTokensV1_2
-  fixPayChanRecipientOwnerDir
-  fixQualityUpperBound
+  fixUniversalNumber
+  fixRemoveNFTokenAutoTrustLine
+  NonFungibleTokensV1_1
+  ExpandedSignerList
+  CheckCashMakesTrustLine
+  NegativeUNL
   fixRmSmallIncreasedQOffers
   fixSTAmountCanonicalize
+  FlowSortStrands
+  TicketBatch
+  HardenedValidations
+  fix1781
+  fixAmendmentMajorityCalc
+  RequireFullyCanonicalSig
+  fixQualityUpperBound
+  fixPayChanRecipientOwnerDir
+  fixCheckThreading
+  DeletableAccounts
+  fixMasterKeyAsRegularKey
   fixTakerDryOfferRemoval
-  fixUniversalNumber
+  MultiSignReserve
+  fix1578
+  fix1515
+  DepositPreauth
+  fix1571
+  fix1623
+  fix1543
+  DepositAuth
+  fix1513
+  Checks
+  FlowCross
+  Flow
 
 [ssl_verify]
   0
