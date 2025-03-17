@@ -4,9 +4,10 @@ set -o errexit
 set +o xtrace
 set -o nounset
 
-num_keys=${1:-5}
+num_keys=${NUM_VALIDATORS:-5}
 num_services=$((num_keys + 1))
-rippled_image="rippled:latest"
+rippled_image="${RIPPLED_IMAGE:-rippled_antithesis:latest}"
+workload_image="${WORKLOAD_IMAGE:-workload:latest}"
 confs_dir="$PWD/config/volumes"
 conf_file="rippled.cfg"
 validator_name="atval"
@@ -298,7 +299,7 @@ tee -a "${compose_file}" <<-EOF
   workload:
     hostname: workload
     init: true
-    image: workload:latest
+    image: ${workload_image}
     container_name: workload
     volumes:
       - ./volumes/tc:/opt/antithesis/test/v1/
