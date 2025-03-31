@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 def get_all_account_lines(account: Wallet, client: JsonRpcClient) -> list[dict[str, Any]]:
     account_lines_response = client.request(AccountLines(account=account.address))
-    return account_lines_response.result.get("lines")
+    return account_lines_response.result["lines"]
 
 
 # def get_tokens_issued(account: Wallet, client: JsonRpcClient | None) -> list[dict[str, str]] | None:
@@ -31,7 +31,7 @@ def get_account_tokens(account: Wallet, client: JsonRpcClient) -> list[dict[str,
         "issued": {},
         "held": {},
     }
-    logger.info("Looking up %s's tokens...", account.address)
+    logger.debug("Looking up %s's tokens...", account.address)
     all_account_lines = get_all_account_lines(account, client)
     for al in all_account_lines:
         currency = al["currency"]
@@ -49,12 +49,12 @@ def get_account_tokens(account: Wallet, client: JsonRpcClient) -> list[dict[str,
         else:
             issuer = al["account"]
             holder = account.address
-            ica = IssuedCurrencyAmount.from_dict({"issuer": issuer, "value": balance, "currency": al["currency"]})
+            ica = IssuedCurrencyAmount(issuer=issuer, value=balance, currency=al["currency"])
             if accounts_tokens["held"].get(issuer):
                 accounts_tokens["held"][issuer].append(ica)
             else:
                 accounts_tokens["held"][issuer] = [ica]
-            logger.info("%s holds %s %s %s tokens", holder, balance, currency, issuer)
+            logger.debug("%s holds %s %s %s tokens", holder, balance, currency, issuer)
     return accounts_tokens
 
 # def print_all_account_token_balances(accounts, client):

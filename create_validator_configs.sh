@@ -6,7 +6,7 @@ set -o nounset
 
 num_keys=${NUM_VALIDATORS:-5}
 num_services=$((num_keys + 1))
-rippled_image="${RIPPLED_IMAGE:-rippled_antithesis:latest}"
+rippled_image="${RIPPLED_IMAGE:-rippled:latest}"
 workload_image="${WORKLOAD_IMAGE:-workload:latest}"
 confs_dir="$PWD/config/volumes"
 conf_file="rippled.cfg"
@@ -144,7 +144,6 @@ read -r -d '' config_template <<-EOF
   0
 
 #[validation_quorum]
-#
 
 EOF
 set -x
@@ -248,7 +247,7 @@ for i in $(seq $num_keys); do
     gen=""
     if [ "$i" -eq "1" ]; then
         gen=', "--start"'
-        extra=${healthcheck}
+        extra=""
     else
         extra="${depends_on}"
     fi
@@ -263,6 +262,7 @@ for i in $(seq $num_keys); do
     hostname: ${valname}
     entrypoint: ["rippled"${gen}]
     init: true
+    ${healthcheck}
     ${extra}
     volumes:
       - ./volumes/${valname}:/etc/opt/ripple
@@ -285,6 +285,7 @@ tee -a "${compose_file}" <<-EOF
     image: ${rippled_image}
     container_name: ${rippled_name}
     entrypoint: ["rippled"]
+    ${healthcheck}
     ${depends_on}
     volumes:
       - ./volumes/${rippled_name}:/etc/opt/ripple
@@ -295,6 +296,7 @@ EOF
 echo -e "    ${rippled_ports}\n" >> "${compose_file}"
 
 ## Add the workload service
+# TODO: Have the workload depend on _all_ the validators being healthy?
 tee -a "${compose_file}" <<-EOF
   workload:
     hostname: workload
@@ -305,6 +307,13 @@ tee -a "${compose_file}" <<-EOF
       - ./volumes/tc:/opt/antithesis/test/v1/
     environment:
       RIPPLED_NAME: ${rippled_name}
+      VALIDATOR_NAME: ${validator_name}
+      NUM_VALIDATORS: ${NUM_VALIDATORS}
+    depends_on:
+      ${validator_name}${NUM_VALIDATORS}:
+        condition: service_healthy
+      ${rippled_name}:
+        condition: service_healthy
     networks:
       ${network_name}:
         ipv4_address: ${network}.$((num_keys + 3))

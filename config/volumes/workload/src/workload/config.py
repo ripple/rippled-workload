@@ -1,9 +1,5 @@
 import json
-import logging
-import logging.config
 import pathlib
-from datetime import UTC, datetime
-from typing import Any
 
 pkg_root = pathlib.Path(__file__).parent
 config_file = pkg_root / "config.json"

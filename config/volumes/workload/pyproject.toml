@@ -20,18 +20,17 @@
 
 [tool.ruff]
     target-version = "py313"
+    select = [
+        "ANN201", # methods must have return types
+        "COM812", # Remove whenever Ruff formatter being used
+    ]
+    exclude = [
+        ".git",
+    ]
 
-# [tool.hatch.metadata]
-#     allow-direct-references = true
-
-# [tool.hatch.build.targets.sdist]
-#     include = [
-#         "src/workload",
-#         "config.json",
-#     ]
-# [tool.hatch.build.targets.wheel]
-#     packages = ["src/workload"]
-#     include = ["config.json"]
-
-# [tool.hatch.build.targets.wheel.force-include]
-# "config.json" = "workload/config.json"
+[tool.ruff.lint]
+    select = [
+        "E", 
+        "F",
+    ]
+    ignore = []

@@ -1,14 +1,7 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from itertools import count
-from typing import ClassVar
-
-from xrpl.models.amounts import IssuedCurrencyAmount
 from xrpl.models.currencies import XRP, IssuedCurrency
 from xrpl.wallet import Wallet
-
-# from xrpl.models.amounts import MPTAmount
 
 @dataclass
 class Account:
@@ -34,3 +27,9 @@ class Gateway(Account):
 @dataclass
 class UserAccount(Account):
     balances: dict = field(default_factory=dict)
+
+@dataclass
+class Amm:
+    account: str
+    assets: list[IssuedCurrency]
+    lp_token: list[IssuedCurrency]

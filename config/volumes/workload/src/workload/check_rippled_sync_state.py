@@ -6,14 +6,6 @@ import urllib.request
 
 from workload import logger
 
-start_command = {
-    "rippled": "/opt/ripple/bin/rippled --conf ./configs/clio/devnet/rippled/rippled.cfg",
-}
-
-timeout = 1200
-server_info_command = {"method": "server_info"}
-
-
 def make_request(url: str, command: dict):
     payload = bytes(json.dumps(command), encoding="utf-8")
     try:
@@ -29,19 +21,12 @@ def make_request(url: str, command: dict):
 
 
 def get_server_info(url: str, params: list[str] | None = None) -> dict[str, dict]:
-    response = make_request(url, server_info_command)
+    response = make_request(url, {"method": "server_info"})
     if response:
         server_info_result = json.loads(response)["result"]["info"]
         server_info = {p: server_info_result[p] for p in params} if params else server_info_result
         # logger.debug(f"{params or 'Full'} server_info:\n{json.dumps(server_info, indent=2)}")
     return server_info
-
-
-# def get_latest_ledger(url: str):
-#     server_info_response = get_server_info(url)
-#     complete_ledgers = server_info_response.get("complete_ledgers")
-#     l = complete_ledgers.split("-")[-1]
-#     return l
 
 
 def is_rippled_synced(url: str) -> bool:
@@ -59,10 +44,6 @@ def is_rippled_synced(url: str) -> bool:
     except Exception:
         logger.exception("Couldn't get server_info")
     return synced
-
-# def start_server(server):
-#     logger.debug(server)
-#     subprocess.Popen(start_command[server].split(), start_new_session=True, stdout=logfile)
 
 # TODO: get_latest_ledger_{rippled,clio}
 # TODO: report if ledgers even advancing

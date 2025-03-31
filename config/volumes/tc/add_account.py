@@ -5,6 +5,7 @@ import os
 import pathlib
 from time import sleep
 
+from client import workload_json
 from antithesis.assertions import always
 from workload import logger
 from workload.config import conf_file
@@ -15,10 +16,11 @@ from xrpl.clients import JsonRpcClient
 rippled_config = conf_file["workload"]["rippled"]
 
 docker_path = "/opt/antithesis/test/v1/workload.json"
-local_path = pathlib.Path(pathlib.Path(__file__).parents[1] / "workload.json")
+local_path = pathlib.Path(pathlib.Path(__file__).parent / "workload.json")
 path = docker_path if os.environ.get("RIPPLED_NAME") else local_path
 
-with open(path, encoding="utf-8") as json_data:
+
+with open(workload_json, encoding="utf-8") as json_data:
     accounts = json.load(json_data)
 
 rippled_host = os.environ.get("RIPPLED_NAME") or rippled_config["local"]
@@ -27,8 +29,6 @@ rippled = f"http://{rippled_host}:{rippled_rpc_port}"
 
 client = JsonRpcClient(rippled)
 
-for a in accounts:
-    logger.info("Found accuont: %s", a)
 wallets, responses = create_accounts(5, client)
 sleep(6)
 

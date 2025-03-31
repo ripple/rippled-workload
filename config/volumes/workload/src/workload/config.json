@@ -10,11 +10,13 @@
         },
         "accounts": {
             "number": 4,
-            "default_balance": "100_000_000000"
+            "default_balance": "100_000_000000",
+            "default_crypto_algorithm": "SECP256K1"
         },
         "amm": {
             "xrp_chance": 0.10,
-            "trading_fee": 10
+            "trading_fee": 10,
+            "default_amm_token_deposit": 1000
         },
         "currencies": {
             "token_distribution": 1000000,
@@ -41,7 +43,7 @@
             }
         },
         "rippled": {
-            "local": "10.20.20.7",
+            "local": "localhost",
             "json_rpc_port": 5005,
             "timeout": 600
         }
@@ -53,6 +55,9 @@
         "formatters": {
             "simple": {
                 "format": "[%(levelname)s] %(message)s"
+            },
+            "simple_debug": {
+                "format": "[%(levelname)s] [%(filename)s:%(lineno)d] %(message)s"
             },
             "not_simple": {
                 "format": "[%(levelname)s] %(filename)s %(funcName)s %(message)s"
@@ -66,7 +71,7 @@
             "stdout": {
                 "class": "logging.StreamHandler",
                 "level": "INFO",
-                "formatter": "simple",
+                "formatter": "simple_debug",
                 "stream": "ext://sys.stdout"
             },
             "stderr": {
@@ -77,7 +82,7 @@
             },
             "file": {
                 "class": "logging.handlers.RotatingFileHandler",
-                "level": "DEBUG",
+                "level": "INFO",
                 "formatter": "detailed",
                 "maxBytes": 10000000,
                 "backupCount": 3

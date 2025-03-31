@@ -16,4 +16,4 @@ logs
 config/docker-compose.yml
 config/volumes/*val*
 config/volumes/*rippled*
-config/volumes/tc/workload.json
+config/volumes/tc/*.json

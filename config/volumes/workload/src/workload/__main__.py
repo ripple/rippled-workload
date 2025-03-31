@@ -2,72 +2,34 @@ import json
 import os
 import pathlib
 import time
+from antithesis import lifecycle
 from typing import Any
-from workload.check_rippled_sync_state import is_rippled_synced
+from workload.check_rippled_sync_state import is_rippled_synced # TODO:git use rippled_sync.py
 from workload.create import create_accounts
-from workload.models import Gateway, UserAccount
-from xrpl.account import does_account_exist, get_balance
+from workload.models import Gateway, UserAccount, Amm
+from xrpl.account import does_account_exist
 from xrpl.clients import JsonRpcClient
-from xrpl.ledger import get_latest_validated_ledger_sequence
 from xrpl.models.currencies import IssuedCurrency
 from xrpl.models.transactions import (
     AccountSet,
     AccountSetAsfFlag,
+    AMMCreate,
     Payment,
     TrustSet,
 )
+from xrpl.asyncio.transaction.reliable_submission import XRPLReliableSubmissionException
+import sys
+from xrpl.models.requests import AMMInfo
+from xrpl.models.currencies import XRP, IssuedCurrency
+from itertools import combinations
+from workload.randoms import randint
+
 from xrpl.transaction import sign_and_submit, submit_and_wait
-from xrpl.wallet import Wallet
 from workload.balances import get_account_tokens
-from workload.config import conf_file
+from workload.config import conf_file, config_file
 from workload import utils, logger
 
-conf = conf_file["workload"]
 
-def set_default_ripple(gateway: Wallet, client: JsonRpcClient):
-    accountset_txn = AccountSet(
-        account=gateway.address,
-        set_flag=AccountSetAsfFlag.ASF_DEFAULT_RIPPLE,
-    )
-    return submit_and_wait(accountset_txn, client, gateway)
-
-
-def distribute_token(gateway: Wallet, accounts: list[Wallet], currency_code: str, client: JsonRpcClient | None = None):
-
-    trustset_tx_responses = []
-    payment_txns = []
-    payment_txn_responses = []
-    for account in accounts:
-        logger.info("Distributing %s to %s", currency_code, account.address)
-
-    for idx, account in enumerate(accounts):
-        balance = get_balance(account.address, client)
-        logger.debug("%s: %s", account.address, balance)
-        currency = IssuedCurrency(
-                currency=currency_code,
-                issuer=gateway.address,
-            )
-        trust_amount = currency.to_amount(value=conf["transactions"]["trustset"]["trust_limit"])
-        payment_amount = currency.to_amount(value=conf["currencies"]["token_distribution"])
-
-        trustset_tx = TrustSet(
-            account=account.address,
-            limit_amount=trust_amount,
-        )
-        logger.info("[%s/%s] Setting trust for %s to %s", idx + 1, len(accounts), account.address, trust_amount)
-        trustset_tx_responses.append(sign_and_submit(trustset_tx, client, account))
-        payment_txns.append(Payment(
-            account=gateway.address,
-            amount=payment_amount,
-            destination=account.address,
-            send_max=payment_amount,
-        ))
-
-
-def wait_for_ledger_close(client: JsonRpcClient) -> None:
-    target_ledger = get_latest_validated_ledger_sequence(client) + 1
-    while (get_latest_validated_ledger_sequence(client)) < target_ledger:
-        time.sleep(2)
 
 
 class Workload:
@@ -75,6 +37,7 @@ class Workload:
         self.config = conf
         self.accounts = []
         self.gateways = []
+        self.amms = []
         self.currencies = []
         self.currency_codes = conf["currencies"]["codes"]
         self.start_time = time.time()
@@ -82,23 +45,83 @@ class Workload:
         rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT") or conf["rippled"]["json_rpc_port"]
         self.rippled = f"http://{rippled_host}:{rippled_rpc_port}"
         logger.info("Connecting to rippled at: %s", self.rippled)
-        self.client = JsonRpcClient(self.rippled)
+        self.client = JsonRpcClient(self.rippled) # TODO: Go back to asyncio
+
         self.wait_for_network(self.rippled)
+        utils.check_validator_proposing() or sys.exit("All validators not in 'proposing' state!")
 
         logger.info("Initializing workload")
         default_gateway_balance = str(int(self.config["gateways"]["default_balance"]))
         default_account_balance = str(int(self.config["accounts"]["default_balance"]))
-        self.configure_gateways(number=self.config["gateways"]["number"], balance=default_gateway_balance)
-        self.configure_accounts(number=self.config["accounts"]["number"], balance=default_account_balance)
+        # TODO: fix try/except
+        try:
+            self.configure_gateways(number=self.config["gateways"]["number"], balance=default_gateway_balance)
+        except:
+            logger.exception("Failed to configure gateways")
+            utils.check_validator_proposing() or sys.exit(1)
+        try:
+            self.configure_accounts(number=self.config["accounts"]["number"], balance=default_account_balance)
+        except:
+            logger.exception("Failed to configure accounts")
+            utils.check_validator_proposing() or sys.exit(1)
+
+
+        trading_fee = randint(0, 1000) if len(self.amms) > 1 else self.config["amm"]["trading_fee"]
+        ### First time around only gateways create AMMs
+        for gw in self.gateways:
+            for asset_pool in list(combinations([*list(gw.issued_currencies.values()), XRP()], 2)):
+                asset_1, asset_2 = asset_pool
+                if xrp_asset := asset_1 if XRP() in asset_pool and asset_2 != XRP() else asset_2 if asset_2 == XRP() else None:
+                    token = asset_1 if asset_2 == XRP() else asset_1
+                    rate = float(self.config["currencies"]["rate"][token.currency])
+                token_value = self.config["amm"]["default_amm_token_deposit"]
+                amount = asset_1.to_amount(value=token_value)
+                amount2 = asset_2.to_amount(value=token_value)
+                try:
+                    logger.info("%s creating amm of %s %s", gw.address, amount, amount2)
+                    response = submit_and_wait(AMMCreate(
+                        account=gw.address,
+                        amount=amount,
+                        amount2=amount2,
+                        trading_fee=trading_fee,
+                    ), self.client, gw.wallet)
+                    utils.wait_for_ledger_close(self.client)
+                    try:
+                        amminfo = self.client.request(AMMInfo(asset=asset_1, asset2=asset_2)).result["amm"]
+                        self.amms.append(
+                            Amm(
+                                account=amminfo["account"],
+                                assets=[amminfo["amount"], amminfo["amount2"]],
+                                lp_token=amminfo["lp_token"]))
+                        logger.debug("AMM %s ", self.amms[-1])
+                    except KeyError:
+                        logger.error("AmmInfo() failed")
+
+                except XRPLReliableSubmissionException as err:  # Probably Transaction failed: tecDUPLICATE
+                    logger.info("err %s", err)
+                    logger.info("AMM already exists for %s - %s", *asset_pool)
+
+
         logger.info("%s after %ss", "Workload initialization complete", int(time.time() - self.start_time))
+        logger.info("Workload going to sleep...")
+        ### Dump the network data so test_composer directory can find it # TODO: get_workload_info()
         docker_path = "/opt/antithesis/test/v1/workload.json"
-        local_path = pathlib.Path(pathlib.Path.cwd() / "config/volumes/tc/workload.json")
+        # local_path = pathlib.Path(pathlib.Path.cwd() / "config/volumes/tc/workload.json")
+        local_path = pathlib.Path(pathlib.Path(__file__).parents[3] / "tc/workload.json")
         path = docker_path if os.environ.get("RIPPLED_NAME") else local_path
-        workload_data = [(a.address, a.wallet.seed) for a in self.accounts]
-        with pathlib.Path(path).open("w", encoding="UTF-8") as target:
-            json.dump(workload_data, target)
-        pass
-        # else ... what? Where to put locally?
+        logger.debug("Dumping workload info to path %s", path)
+
+        workload_data = {}
+        workload_data["accounts"] = [(a.address, a.wallet.seed) for a in self.accounts]
+        workload_data["gateway"] = [(a.address, a.wallet.seed) for a in self.gateways]
+        workload_data["issued_currencies"] = [(ic.currency, ic.issuer) for ic in self.currencies]
+        workload_data["currency_codes"] = self.currency_codes
+        with pathlib.Path(path).open("w", encoding="utf-8") as wl_data:
+            json.dump(workload_data, wl_data, indent=2)
+        logger.info("Calling lifecycle setup_complete()")
+
+        lifecycle.setup_complete(details={"message": "Workload initialization complete"})
+        logger.info("Called lifecycle setup_complete()")
 
     def configure_gateways(self, number: int, balance: str) -> None:
         """Configure the gateways for the network.
@@ -112,18 +135,20 @@ class Workload:
         self.gateways = [Gateway(wallet) for idx, wallet in enumerate(gateway_wallets)]
         for gateway in self.gateways:
             logger.info("Setting up gateway %s", gateway.address)
+            # Enable rippling on gateway's trustlines so tokens can be transferred
             accountset_txn = AccountSet(
                 account=gateway.address,
                 set_flag=AccountSetAsfFlag.ASF_DEFAULT_RIPPLE,
             )
-            wait_for_ledger_close(self.client)
+            utils.wait_for_ledger_close(self.client)
+            response = submit_and_wait(accountset_txn, self.client, gateway.wallet)
 
             for ic in utils.issue_currencies(gateway.address, self.currency_codes):
                 gateway.issued_currencies[ic.currency] = ic
                 self.currencies.append(ic)
         logger.info("%s gateways configured in %ss", len(self.gateways), int(time.time() - gateway_config_start))
 
-    def configure_accounts(self, number: int, balance: str):
+    def configure_accounts(self, number: int, balance: str) -> None:
         # TODO: Too many variables, too complex
         trustset_limit = self.config["transactions"]["trustset"]["limit"]
         logger.info("Configuring %s accounts", number)
@@ -132,12 +157,12 @@ class Workload:
         self.accounts = [UserAccount(wallet=wallet) for wallet in wallets]
         for account in self.accounts:
             does_account_exist(account.address, self.client)
-        logger.debug("%s accounts created in %ss", number, int(time.time() - account_create_start))
-        wait_for_ledger_close(self.client)
+        logger.debug("%s accounts created in %s ms", number, time.time() - account_create_start)
+        utils.wait_for_ledger_close(self.client)
         accounts = self.accounts
         trustset_txns = []
         c = 1
-        wait_for_ledger_close(self.client)
+        utils.wait_for_ledger_close(self.client)
         for gateway in self.gateways:
             for ic in gateway.issued_currencies.values():
                 for account in accounts:
@@ -156,7 +181,7 @@ class Workload:
                     rate = self.config["currencies"]["rate"][ic.currency]
                     token_disbursement = str(round(usd_deposit * 1e6 / int(rate), 10))
                     payment_amount = ic.to_amount(value=token_disbursement)
-                    logger.debug("Simulating account %s depositing %s USD for %s",
+                    logger.info("Account %s depositing %s fiat USD for %s",
                                 account.address, usd_deposit, utils.format_currency(payment_amount)
                     )
                     payments.append((gateway, Payment(account=gateway.address,
@@ -187,8 +212,6 @@ class Workload:
                 logger.debug(c)
         return issued_currencies
 
-    def last_validated_ledger(self):
-        return int(get_latest_validated_ledger_sequence(self.client))
 
     def wait_for_network(self, rippled) -> None:
         timeout = self.config["rippled"]["timeout"]  # Wait at most 10 minutes
@@ -199,45 +222,20 @@ class Workload:
                 logger.info("rippled ready after %ss", rippled_ready_time)
             logger.info("Waited %ss so far", int(time.time() - wait_start))
             wait_time = 10
-            # logger.info("Sleeping %s seconds to wait for rippled to synced", wait_time)  # TODO: Don't spam this
             time.sleep(wait_time)
         logger.info("rippled ready...")
 
-    def add_more_after(self, add_after_n_ledgers): # TODO: Implement in test composer
-        try:
-            if ledgers_elapsed := self.ledgers.get("runs_completed"):
-                ledgers_elapsed = ledgers_elapsed[-1] - self.ledgers.get("first_seen")
-                if ledgers_elapsed > add_after_n_ledgers:
-                    self.add_more_accounts()
-                    logger.info("Workload has %s accounts now", len(self.accounts))
-        except Exception as err:
-            logger.error(err)
 
-    def add_more_accounts(self, number_of_accounts: int): # TODO: Implement in test_composer
-        max_to_add = 50
-        number_of_accounts = round((self.ledgers["runs_completed"][-1] - self.ledgers["first_seen"]) / 10)
-        number_of_accounts = max_to_add if number_of_accounts > max_to_add else number_of_accounts
-        if not number_of_accounts:
-            logger.warning(f"Calculated number of accounts to create was: {number_of_accounts}")
-            return
-        logger.info("Adding %s more accounts...", number_of_accounts)
-        accounts_configured = self.configure_accounts(number_of_accounts)
-        new_accounts = self.accounts[-number_of_accounts:]
-        if not all(does_account_exist(a.address, self.client) for a in new_accounts):
-            error_msg = "Couldn't create additional accounts"
-            logger.error(error_msg)
-        elif accounts_configured:
-            logger.info("Added %s more accounts", len(new_accounts))
-        else:
-            logger.error("Couldn't configure more accounts")
-
-    def run(self):
-        logger.info("wl just sleeping....")
+    def run(self) -> None:
+        logger.debug("wl just sleeping....")
         time.sleep(20)
 
 
-def main():
-    logger.info("Instantiating workload...")
+def main() -> None:
+    logger.debug("Loaded config from %s", config_file)
+    conf = conf_file["workload"]
+    logger.info("Config %s", json.dumps(conf, indent=2))
+
     wl = Workload(conf)
     while True:
         wl.run()
