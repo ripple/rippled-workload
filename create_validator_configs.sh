@@ -73,7 +73,7 @@ read -r -d '' config_template <<-EOF
   1
 
 [rpc_startup]
-  { "command": "log_level", "severity": "debug" }
+  { "command": "log_level", "severity": "info" }
 
 [features]
   fixReducedOffersV2
