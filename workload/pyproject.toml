@@ -7,8 +7,8 @@
     ]
     dependencies = [
         "xrpl-py",
-        "requests",
         "antithesis>=0.1.17",
+        "requests>=2.32.4",
 ]
     readme = "README.md"
     requires-python = ">= 3.13"
@@ -30,7 +30,10 @@
 
 [tool.ruff.lint]
     select = [
-        "E", 
+        "E",
         "F",
     ]
     ignore = []
+
+# [tool.uv.sources]
+# xrpl-py = { path = "libs/xrpl-py", editable = true }

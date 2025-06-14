@@ -14,13 +14,7 @@ validator_name="atval"
 rippled_name="atrippled"
 network_name="${rippled_name}-net"
 peer_port=51235
-# Only need to define "network" on macOS. You may need to change this if it
-# conflicts with your local network.
-macos="true" # antithesis for now
-# if [ $(uname -s) = "Darwin" ]; then
-#     macos="true"
-    network="10.20.20"
-# fi
+
 set +e
 #################################################
 # NOTE: The [features] list will need to be     #
@@ -251,10 +245,6 @@ for i in $(seq $num_keys); do
     else
         extra="${depends_on}"
     fi
-
-    if [ $macos = "true" ]; then
-        macos_address="ipv4_address: ${network}.$((i + 1))"
-    fi
     tee -a "${compose_file}" << EOF
   ${valname}:
     image: ${rippled_image}
@@ -268,15 +258,10 @@ for i in $(seq $num_keys); do
       - ./volumes/${valname}:/etc/opt/ripple
     networks:
       ${network_name}:
-        ${macos_address}
 
 EOF
 done
 rippled_ip_address=""
-if [ "$macos" = "true" ]; then
-    k=$((num_keys + 2))
-    rippled_ip_address="ipv4_address: ${network}.$((k))"
-fi
 
 tee -a "${compose_file}" <<-EOF
   ${rippled_name}:
@@ -291,12 +276,11 @@ tee -a "${compose_file}" <<-EOF
       - ./volumes/${rippled_name}:/etc/opt/ripple
     networks:
       ${network_name}:
-        ${rippled_ip_address}
+        # ${rippled_ip_address}
 EOF
 echo -e "    ${rippled_ports}\n" >> "${compose_file}"
 
 ## Add the workload service
-# TODO: Have the workload depend on _all_ the validators being healthy?
 tee -a "${compose_file}" <<-EOF
   workload:
     hostname: workload
@@ -314,7 +298,6 @@ tee -a "${compose_file}" <<-EOF
         condition: service_healthy
     networks:
       ${network_name}:
-        ipv4_address: ${network}.$((num_keys + 3))
 EOF
 
 ## Define the network
@@ -324,14 +307,3 @@ networks:
   ${network_name}:
     name: ${network_name}
 EOF
-
-if [ $macos == "true" ]; then
-    tee -a "${compose_file}" <<-EOF
-    # driver: bridge should be the default?
-    driver: bridge
-    ipam:
-      config:
-        - subnet: "${network}.0/24"
-          # gateway: ${network}.1
-EOF
-fi
