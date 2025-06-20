@@ -105,7 +105,7 @@ class Workload:
         logger.info("%s after %ss", "Workload initialization complete", int(time.time() - self.start_time))
         logger.info("Workload going to sleep...")
         ### Dump the network data so test_composer directory can find it # TODO: get_workload_info()
-        docker_path = "/opt/antithesis/test/v1/workload.json"
+        docker_path = "/opt/antithesis/workload.json"
         # local_path = pathlib.Path(pathlib.Path.cwd() / "config/volumes/tc/workload.json")
         local_path = pathlib.Path(pathlib.Path(__file__).parents[3] / "tc/workload.json")
         path = docker_path if os.environ.get("RIPPLED_NAME") else local_path

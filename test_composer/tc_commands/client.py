@@ -21,12 +21,12 @@ rippled = AsyncJsonRpcClient(rippled_)
 
 # States of the workload
 workload_json_file = "workload.json"
-docker_path = f"/opt/antithesis/test/v1/{workload_json_file}"
+docker_path = f"/opt/antithesis/{workload_json_file}"
 local_workload_json_path = pathlib.Path(pathlib.Path(__file__).parent / workload_json_file)
 workload_json = docker_path if os.environ.get("RIPPLED_NAME") else local_workload_json_path
 
 txns_file = "txns.json"
-docker_path = f"/opt/antithesis/test/v1/{txns_file}"
+docker_path = f"/opt/antithesis/{txns_file}"
 local_txns_file_path = pathlib.Path(pathlib.Path(__file__).parent / txns_file)
 txns_json = docker_path if os.environ.get("RIPPLED_NAME") else local_txns_file_path
 

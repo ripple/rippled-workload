@@ -2,10 +2,14 @@ FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1
 
-WORKDIR /workload
+WORKDIR /opt/antithesis/catalog/workload
 
-COPY . /workload
+COPY workload /opt/antithesis/catalog/workload
 
 RUN pip install .
+
+COPY test_composer/tc_commands /opt/antithesis/catalog/tc_commands
+
+COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
 
 CMD ["python", "-m", "workload"]

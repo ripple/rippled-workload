@@ -15,7 +15,7 @@ from xrpl.clients import JsonRpcClient
 
 rippled_config = conf_file["workload"]["rippled"]
 
-docker_path = "/opt/antithesis/test/v1/workload.json"
+docker_path = "/opt/antithesis/workload.json"
 local_path = pathlib.Path(pathlib.Path(__file__).parent / "workload.json")
 path = docker_path if os.environ.get("RIPPLED_NAME") else local_path
 

@@ -303,8 +303,6 @@ tee -a "${compose_file}" <<-EOF
     init: true
     image: ${workload_image}
     container_name: workload
-    volumes:
-      - ./volumes/tc:/opt/antithesis/test/v1/
     environment:
       RIPPLED_NAME: ${rippled_name}
       VALIDATOR_NAME: ${validator_name}
