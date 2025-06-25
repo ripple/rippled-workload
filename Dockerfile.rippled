@@ -55,7 +55,9 @@ RUN <<EOF
    conan export --version 9.7.3  ${SOURCE_DIR}/external/rocksdb
 EOF
 
-RUN which python && conan --version && mkdir -p $(conan config home)/profiles
+RUN which python
+RUN which conan --version
+RUN mkdir -p $(conan config home)/profiles
 COPY ./conan_default /root/.conan2/profiles/default
 
 COPY <<EOF some_file
