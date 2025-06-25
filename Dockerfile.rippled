@@ -56,7 +56,8 @@ RUN <<EOF
 EOF
 
 RUN which python
-RUN which conan --version
+RUN which conan
+RUN conan --version
 RUN mkdir -p $(conan config home)/profiles
 COPY ./conan_default /root/.conan2/profiles/default
 
