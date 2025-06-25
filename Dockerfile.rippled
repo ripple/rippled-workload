@@ -3,78 +3,118 @@ FROM debian:bookworm AS build
 # Antithesis supports only x86_64 architecture
 RUN uname -m | grep -E '^x86_64$'
 
-WORKDIR /root
-ENV DEBIAN_FRONTEND=noninteractive
-RUN set -ex ;\
-    apt-get update ;\
+ARG RIPPLED_REPO="https://github.com/XRPLF/rippled.git"
+ARG RIPPLED_COMMIT="develop"
+ARG CONAN_VERSION=2.17.0
+ARG CLANG_VERSION=16
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    SOURCE_DIR=/root/rippled \
+    BUILD_DIR=/root/build
+
+# Required because Conan and CMake will choose GCC first
+ENV CC=/usr/bin/clang-16 \
+    CXX=/usr/bin/clang++-16
+
+RUN <<EOF
+    set -ex
+    apt-get update && \
     apt-get install --yes \
-    clang-16 clang++-16 python3-pip python-is-python3 cmake git wget ;\
-    apt-get clean ;\
-    pip install --no-cache --break-system-packages "conan<2"
+        clang-${CLANG_VERSION} \
+        clang++-${CLANG_VERSION} \
+        cmake \
+        git \
+        python-is-python3 \
+        python3-pip \
+        wget
+    apt-get clean
+    pip install --break-system-packages "conan==${CONAN_VERSION}"
+EOF
 
-RUN set -ex ;\
-    conan config set general.revisions_enabled=1 ;\
-    conan profile new --detect default ;\
-    conan profile update settings.compiler=clang default ;\
-    conan profile update settings.compiler.version=16 default ;\
-    conan profile update settings.compiler.libcxx=libstdc++11 default ;\
-    conan profile update settings.compiler.cppstd=20 default ;\
-    conan profile update options.rocksdb=False default ;\
-    conan profile update 'conf.tools.build:compiler_executables={"c": "/usr/bin/clang-16", "cpp": "/usr/bin/clang++-16"}' default ;\
-    conan profile update 'env.CXXFLAGS="-DBOOST_ASIO_DISABLE_CONCEPTS"' default ;\
-    conan profile update 'conf.tools.build:cxxflags+=["-DBOOST_ASIO_DISABLE_CONCEPTS"]' default
+RUN <<EOF
+    set -ex
+    conan remote add --index 0 ripple http://18.143.149.228:8081/artifactory/api/conan/dev
+    echo "core.download:parallel=$(nproc)" > "$(conan config home)/global.conf"
+    ## Ninja make OOM CI machines
+    #echo "tools.build:jobs=$(($(nproc) * 4/5))" > "$(conan config home)/global.conf"
+EOF
 
-ARG RIPPLED_REPO
-ARG RIPPLED_COMMIT
-ENV SOURCE_DIR=/root/rippled
-RUN set -ex ;\
-    git clone ${RIPPLED_REPO} ${SOURCE_DIR} ;\
-    git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT} ;\
-    printf "REPO=%s\n" ${RIPPLED_REPO} > ${SOURCE_DIR}.txt ;\
-    printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt ;\
-    printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt ;\
+RUN <<EOF
+    set -ex
+    git clone --depth 1 --branch ${RIPPLED_COMMIT} ${RIPPLED_REPO} ${SOURCE_DIR}
+    git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT}
+    printf "REPO=%s\n" ${RIPPLED_REPO} > ${SOURCE_DIR}.txt
+    printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt
+    printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt
     rm -rf ${SOURCE_DIR}/.git
+EOF
 
 WORKDIR ${SOURCE_DIR}
-RUN conan export external/snappy snappy/1.1.10@ ;\
-    conan export external/soci soci/4.0.3@
 
-ENV BUILD_DIR=/root/build
-ENV CC=/usr/bin/clang-16
-ENV CXX=/usr/bin/clang++-16
-RUN set -ex ;\
+RUN <<EOF
+   conan export --version 1.1.10 ${SOURCE_DIR}/external/snappy
+   conan export --version 2.0.8  ${SOURCE_DIR}/external/nudb
+   conan export --version 4.0.3  ${SOURCE_DIR}/external/soci
+   conan export --version 9.7.3  ${SOURCE_DIR}/external/rocksdb
+EOF
+
+COPY ./conan.lock ${SOURCE_DIR}
+
+RUN mkdir -p $(conan config home)/profiles
+COPY <<EOF /root/.conan2/profiles/default
+{% set compiler, version, compiler_exe = detect_api.detect_default_compiler() %}
+{% set compiler_version = detect_api.default_compiler_version(compiler, version) %}
+
+[settings]
+os=Linux
+arch={{ detect_api.detect_arch() }}
+build_type=Debug
+compiler={{ compiler }}
+compiler.version={{ compiler_version }}
+compiler.cppstd=20
+compiler.libcxx=libstdc++11
+
+[conf]
+tools.build:compiler_executables = {'c': '/usr/bin/clang-{{ compiler_version }}', 'cpp': '/usr/bin/clang++-{{ compiler_version }}'}
+tools.build:cxxflags+=["-DBOOST_ASIO_DISABLE_CONCEPTS"]
+
+[buildenv]
+CC=/usr/bin/clang-{{ compiler_version }}
+CXX=/usr/bin/clang++-{{ compiler_version }}
+CXXFLAGS=-DBOOST_ASIO_DISABLE_CONCEPTS
+EOF
+
+RUN <<EOF
+    set -ex
     conan install ${SOURCE_DIR} \
-    --output-folder ${BUILD_DIR} \
-    --install-folder ${BUILD_DIR} \
-    --build missing \
-    --settings build_type=Debug
+        --output-folder ${BUILD_DIR} \
+        --build missing
+EOF
 
-RUN set -ex ;\
+RUN <<EOF
+    set -ex
     cmake -S ${SOURCE_DIR} -B ${BUILD_DIR} \
-    -Dvoidstar=ON \
-    -Dxrpld=ON \
-    -DCMAKE_BUILD_TYPE=Debug \
-    -DSECP256K1_BUILD_BENCHMARK=OFF \
-    -DSECP256K1_BUILD_TESTS=OFF \
-    -DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
-    -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
+        -Dvoidstar=ON \
+        -Dxrpld=ON \
+        -DCMAKE_BUILD_TYPE=Debug \
+        -DSECP256K1_BUILD_BENCHMARK=OFF \
+        -DSECP256K1_BUILD_TESTS=OFF \
+        -DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
+        -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
+EOF
 
-RUN cmake --build ${BUILD_DIR}  --parallel $(nproc)
-RUN cmake --install ${BUILD_DIR}  --prefix /opt/ripple
+RUN cmake --build ${BUILD_DIR} --parallel && cmake --install ${BUILD_DIR} --prefix /opt/ripple
+
 RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so  -O /usr/lib/libvoidstar.so
 
 FROM debian:bookworm-slim
 
-COPY --from=build /opt/ripple/bin /opt/ripple/bin
-COPY --from=build /opt/ripple/etc /opt/ripple/etc
+COPY --from=build /opt/ripple /opt/ripple
 COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
 COPY --from=build /root/rippled.txt /opt/ripple/bin/rippled.git-commit.txt
 
-ENV DEBIAN_FRONTEND=noninteractive
-RUN set -ex ;\
-    apt-get update ;\
-    apt-get install --yes curl procps ;\
-    apt-get clean
-
 RUN ln -s /opt/ripple/bin/rippled /usr/local/bin/rippled
 RUN mkdir -p /etc/opt && ln -s /opt/ripple/etc/ /etc/opt/ripple
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -ex; apt-get update && apt-get install --yes curl procps && rm -rf /var/lib/apt/lists/*
