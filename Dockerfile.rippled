@@ -28,7 +28,7 @@ RUN <<EOF
         python3-pip \
         wget
     apt-get clean
-    pip install --no-cache --break-system-packages "conan==${CONAN_VERSION}"
+    pip install --break-system-packages "conan==${CONAN_VERSION}"
 EOF
 
 RUN <<EOF
@@ -55,7 +55,7 @@ RUN <<EOF
    conan export --version 9.7.3  ${SOURCE_DIR}/external/rocksdb
 EOF
 
-RUN conan version && mkdir -p $(conan config home)/profiles
+RUN which python && conan --version && mkdir -p $(conan config home)/profiles
 COPY ./conan_default /root/.conan2/profiles/default
 
 COPY <<EOF some_file
