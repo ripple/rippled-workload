@@ -1,0 +1,20 @@
+{% set compiler, version, compiler_exe = detect_api.detect_default_compiler() %}
+{% set compiler_version = detect_api.default_compiler_version(compiler, version) %}
+
+[settings]
+os=Linux
+arch={{ detect_api.detect_arch() }}
+build_type=Debug
+compiler={{ compiler }}
+compiler.version={{ compiler_version }}
+compiler.cppstd=20
+compiler.libcxx=libstdc++11
+
+[conf]
+tools.build:compiler_executables = {'c': '/usr/bin/clang-{{ compiler_version }}', 'cpp': '/usr/bin/clang++-{{ compiler_version }}'}
+tools.build:cxxflags+=["-DBOOST_ASIO_DISABLE_CONCEPTS"]
+
+[buildenv]
+CC=/usr/bin/clang-{{ compiler_version }}
+CXX=/usr/bin/clang++-{{ compiler_version }}
+CXXFLAGS=-DBOOST_ASIO_DISABLE_CONCEPTS
