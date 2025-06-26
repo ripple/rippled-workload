@@ -2,15 +2,17 @@ import json
 import os
 import pathlib
 import sys
+
 import anyio
-from workload import logger
-from workload.config import conf_file
-from workload.models import UserAccount
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.constants import CryptoAlgorithm
 from xrpl.core import keypairs
 from xrpl.models.currencies import IssuedCurrency
 from xrpl.wallet import Wallet
+
+from workload import logger
+from workload.config import conf_file
+from workload.models import UserAccount
 
 rippled_config = conf_file["workload"]["rippled"]
 rippled_host = os.environ.get("RIPPLED_NAME") or rippled_config["local"]
@@ -32,24 +34,22 @@ txns_json = docker_path if os.environ.get("RIPPLED_NAME") else local_txns_file_p
 
 default_algo = CryptoAlgorithm[conf_file["workload"]["accounts"]["default_crypto_algorithm"]]
 
+
 async def load_workload_data(workload_json):
-    logger.info("Loading workload data at %s", workload_json)
+    logger.debug("Loading workload data at %s", workload_json)
     async with await anyio.open_file(workload_json) as json_data:
         data = await json_data.read()
-        workload_data = json.loads(data)
-    return workload_data
+        return json.loads(data)
 
 
 async def load_txn_data(txns_json):
     if pathlib.Path(txns_json).is_file():
-        logger.info("Loading transaction data from %s", txns_json)
+        logger.debug("Loading transaction data from %s", txns_json)
         async with await anyio.open_file(txns_json) as json_data:
             data = await json_data.read()
-            txns_data = json.loads(data)
-        return txns_data
-    else:
-        logger.info("No transactions file found! No transactions have been submitted yet?")
-        sys.exit(0)
+            return json.loads(data)
+    logger.debug("No transactions file found! No transactions have been submitted yet?")
+    sys.exit(0)
 
 
 async def get_issued_currencies():

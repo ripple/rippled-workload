@@ -5,11 +5,11 @@
             "master_seed": "snoPBrXtMeMyMHUVTgbuqAfg1SUTb"
         },
         "gateways": {
-            "number": 3,
+            "number": 1,
             "default_balance": "250_000_000_000000"
         },
         "accounts": {
-            "number": 4,
+            "number": 2,
             "default_balance": "100_000_000000",
             "default_crypto_algorithm": "SECP256K1"
         },
@@ -26,15 +26,7 @@
             ],
             "rate":{
                 "USD": "1_000000",
-                "PLN": "250000",
-                "BTC": "1000_000000",
-                "ETH": "20_000000",
-                "ADA": "1_000000",
-                "BHD": "145_000000",
-                "CNY": "621_000000",
-                "DEM": "51_000000",
-                "GBP": "149_000000",
-                "JOD": "1030_000000"
+                "BTC": "1000_000000"
             }
         },
         "transactions": {
@@ -57,7 +49,7 @@
                 "format": "[%(levelname)s] %(message)s"
             },
             "simple_debug": {
-                "format": "[%(levelname)s] [%(filename)s:%(lineno)d] %(message)s"
+                "format": "[%(levelname)s] [%(module)s.%(funcName)s:%(lineno)d] %(message)s"
             },
             "not_simple": {
                 "format": "[%(levelname)s] %(filename)s %(funcName)s %(message)s"

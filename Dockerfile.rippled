@@ -101,7 +101,7 @@ RUN <<EOF
         -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
 EOF
 
-RUN cmake --build ${BUILD_DIR} --parallel && cmake --install ${BUILD_DIR} --prefix /opt/ripple
+RUN cmake --build ${BUILD_DIR} --parallel 20 && cmake --install ${BUILD_DIR} --prefix /opt/ripple
 
 RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so  -O /usr/lib/libvoidstar.so
 

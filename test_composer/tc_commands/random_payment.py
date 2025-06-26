@@ -1,18 +1,17 @@
 import asyncio
 
-from client import rippled, get_wallets
-
-from workload import logger
-from workload.randoms import sample, randint
-from xrpl.asyncio.account import get_next_valid_seq_number, get_balance, get_account_root
+from client import get_wallets, rippled
+from xrpl.asyncio.account import get_balance, get_next_valid_seq_number
 from xrpl.asyncio.transaction import sign_and_submit
 from xrpl.models.currencies import XRP
-from xrpl.models.requests import AccountInfo
-
 from xrpl.models.transactions import Payment
-from xrpl.utils import drops_to_xrp, xrp_to_drops
+from xrpl.utils import drops_to_xrp
 
-min_payment = 100000 # 0.1 XRP
+from workload import logger
+from workload.randoms import randint, sample
+
+min_payment = 100000  # 0.1 XRP
+
 
 async def main():
     wallets = await get_wallets()
@@ -27,12 +26,17 @@ async def main():
     logger.debug("Payment from %s to %s for %s submitted.", account.address, destination.address, amount)
     return response, account.address, destination.address, amount
 
-response, account, destination, amount = asyncio.run(main())
-result = response.result
-payment_data = account, destination, f"{drops_to_xrp(amount):,}"
-if result["applied"]:
-    logger.debug("Payment result %s", result["engine_result"])
-    logger.info("Successful payment from %s to %s for %s.", *payment_data )
-else:
-    logger.error("Payment %s failed!", *payment_data)
 
+def random_payment():
+    response, account, destination, amount = asyncio.run(main())
+    result = response.result
+    payment_data = account, destination, f"{drops_to_xrp(amount):,}"
+    if result["applied"]:
+        logger.debug("Payment result %s", result["engine_result"])
+        logger.info("Successful payment from %s to %s for %s.", *payment_data)
+    else:
+        logger.error("Payment %s failed!", *payment_data)
+
+
+if __name__ == "__main__":
+    random_payment()

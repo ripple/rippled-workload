@@ -9,6 +9,7 @@
         "xrpl-py",
         "antithesis>=0.1.17",
         "requests>=2.32.4",
+        "anyio>=4.9.0",
 ]
     readme = "README.md"
     requires-python = ">= 3.13"

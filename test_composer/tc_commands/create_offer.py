@@ -4,12 +4,13 @@ import pathlib
 import sys
 
 from client import txns_json, workload_json
+from xrpl.clients import JsonRpcClient
+from xrpl.transaction import sign_and_submit
+
 from workload import logger
 from workload.config import conf_file
 from workload.create import generate_wallet_from_seed
 from workload.offer import generate_offers
-from xrpl.clients import JsonRpcClient
-from xrpl.transaction import sign_and_submit
 
 rippled_config = conf_file["workload"]["rippled"]
 
@@ -23,7 +24,7 @@ rippled = f"http://{rippled_host}:{rippled_rpc_port}"
 
 client = JsonRpcClient(rippled)
 
-NUM_OFFERS = 4
+NUM_OFFERS = 1
 
 offer_responses = []
 if __name__ == "__main__":

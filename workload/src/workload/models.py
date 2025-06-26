@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from xrpl.models.currencies import XRP, IssuedCurrency
 from xrpl.wallet import Wallet
 
+def short_address(address):
+    return "..".join([address[:6], address[-5:]])
 @dataclass
 class Account:
     wallet: Wallet
@@ -20,6 +22,8 @@ class Account:
             print("checking...")
             # log.info("Checking %s balance of %s", self.address, c)
 
+    def __str__(self) -> str:
+        return short_address(self.address)
 @dataclass
 class Gateway(Account):
     issued_currencies: dict = field(default_factory=dict)

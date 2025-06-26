@@ -20,6 +20,9 @@ def generate_wallet_from_seed(seed: str, algorithm: CryptoAlgorithm = default_al
     logger.debug("Wallet %s from seed %s. CryptoAlgorithm: [%s] Wallet.algorithm: [%s]", wallet, seed, algorithm.name, wallet.algorithm.name)
     return wallet
 
+def generate_wallet(seed: str, algorithm: CryptoAlgorithm = default_algo) -> Wallet:
+    return generate_wallet_from_seed(seed, algorithm)
+
 def generate_wallets(n: int = 1, algorithm: CryptoAlgorithm = default_algo) -> list[Wallet]:
     wallets = []
     for _ in range(n):
@@ -48,7 +51,7 @@ def create_accounts(number: int, client: JsonRpcClient, amount: str = default_ba
     wallets = generate_wallets(n=number)
     sequence = get_next_valid_seq_number(genesis_wallet.address, client)
     for wallet in wallets:
-        logger.info("Creating %s", wallet.address)
+        logger.debug("Creating %s", wallet.address)
         payment_txns.append(Payment(
             account=genesis_wallet.address,
             amount=amount,
