@@ -58,8 +58,6 @@ RUN <<EOF
    conan export --version 9.7.3  ${SOURCE_DIR}/external/rocksdb
 EOF
 
-COPY ./conan.lock ${SOURCE_DIR}
-
 RUN mkdir -p $(conan config home)/profiles
 COPY <<EOF /root/.conan2/profiles/default
 {% set compiler, version, compiler_exe = detect_api.detect_default_compiler() %}
