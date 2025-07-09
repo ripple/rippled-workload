@@ -1,40 +1,62 @@
 [project]
-    name = "workload"
-    version = "0.1.0"
-    description = "Add your description here"
-    authors = [
-        { name = "Michael Legleux", email = "mlegleux@ripple.com" }
-    ]
-    dependencies = [
-        "xrpl-py",
-        "antithesis>=0.1.17",
-        "requests>=2.32.4",
-        "anyio>=4.9.0",
+name = "workload"
+version = "0.1.1"
+description = "Add your description here"
+authors = [
+    { name = "Michael Legleux", email = "mlegleux@ripple.com" }
 ]
-    readme = "README.md"
-    requires-python = ">= 3.13"
-    license = { text = "MIT" }
+dependencies = [
+    "xrpl-py",
+    "antithesis>=0.1.17",
+    "requests>=2.32.4",
+    "anyio>=4.9.0",
+    "ruamel-yaml>=0.18.14",
+    "generate-ledger>=0.0.4a2",
+]
+readme = "README.md"
+requires-python = ">= 3.13"
+license = { text = "MIT" }
+
+[project.scripts]
+# generate_ledger = "workload.gen:generate_ledger"
+gen_con = "workload:main"
+# gen_ledger = "workload.gen.ledger:main"
+# gen_compose = "workload.gen.compose:main"
+# start = "workload.start:wait_for_sync"
+
 
 [build-system]
-    requires = ["hatchling"]
-    build-backend = "hatchling.build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.ruff]
-    target-version = "py313"
-    select = [
-        "ANN201", # methods must have return types
-        "COM812", # Remove whenever Ruff formatter being used
-    ]
-    exclude = [
-        ".git",
-    ]
+target-version = "py313"
+select = [
+    "ANN201", # methods must have return types
+    "COM812", # Remove whenever Ruff formatter being used
+]
+exclude = [
+    ".git",
+]
 
 [tool.ruff.lint]
-    select = [
-        "E",
-        "F",
-    ]
-    ignore = []
+select = [
+    "E",
+    "F",
+]
 
-# [tool.uv.sources]
-# xrpl-py = { path = "libs/xrpl-py", editable = true }
+ignore = []
+
+[tool.uv]
+default-index = "pypi"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
+[tool.uv.sources]
+generate_ledger = { index = "generate_ledger" }
+
+[[tool.uv.index]]
+name = "generate_ledger"
+url = "https://test.pypi.org/simple/"
