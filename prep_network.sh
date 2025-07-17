@@ -2,7 +2,7 @@
 
 # Generate the testnet
 uvx --from git+https://github.com/legleux/generate_ledger@test_github gen
-
+mv accounts.json test_network
 # build the images
 docker build sidecar -t sidecar
 docker build . -f Dockerfile.workload -t workload
