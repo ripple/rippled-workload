@@ -87,5 +87,5 @@ async def get_wallets():
     async with await anyio.open_file(workload_json) as json_data:
         data = await json_data.read()
         workload_data = json.loads(data)
-        wallets = [UserAccount(wallet=generate_wallet_from_seed(seed=seed)) for account, seed in workload_data["accounts"]]
+        wallets = [UserAccount(wallet=generate_wallet_from_seed(seed=seed)) for account, seed in workload_data]
     return wallets

@@ -12,7 +12,8 @@ RUN uv sync
 COPY test_composer/tc_commands /opt/antithesis/catalog/tc_commands
 
 COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
+COPY accounts.json /opt/antithesis/workload.json
 
 ENV PATH="/opt/antithesis/catalog/workload/.venv/bin:/opt/antithesis/test/v1/all_transactions:$PATH"
 
-CMD ["python", "workload"]
+CMD ["uv", "run", "workload"]

@@ -4,7 +4,6 @@ import logging.config
 import pathlib
 from datetime import UTC, datetime
 from typing import Any
-from generate_ledger import generate_compose_file, generate_ledger_file
 
 pkg_root = pathlib.Path(__file__).parent
 config_file = pkg_root / "config.json"
@@ -31,7 +30,3 @@ def setup_logging(logging_config: dict[str, Any]) -> None:
 
 setup_logging(conf_file["logging"])
 logger = logging.getLogger(__name__)
-
-def main():
-    generate_ledger_file()
-    generate_compose_file()

@@ -16,7 +16,7 @@ rippled_config = conf_file["workload"]["rippled"]
 
 with open(workload_json, encoding="utf-8") as json_data:
     accounts_list = json.load(json_data)
-    accounts = [generate_wallet_from_seed(a[1]) for a in accounts_list["accounts"]]
+    accounts = [generate_wallet_from_seed(a[1]) for a in accounts_list]
 
 rippled_host = os.environ.get("RIPPLED_NAME") or rippled_config["local"]
 rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT") or rippled_config["json_rpc_port"]

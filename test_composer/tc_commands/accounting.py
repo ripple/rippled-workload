@@ -19,7 +19,7 @@ async def get_all_nfts(account):
 
 
 def get_initial_accounts():
-    return json.loads(Path(workload_json).read_text(encoding="utf-8"))["accounts"]
+    return json.loads(Path(workload_json).read_text(encoding="utf-8"))
 
 
 def log_object(path: str, ledger_object: str) -> bool:
@@ -59,10 +59,13 @@ def get_object(object_type: str):
 
 
 def get_nft_owners():
-    owners_dir = get_object("nfts/owners")
-    owners = [i.name for i in owners_dir]
-    logger.debug("NFT owners: %s", owners)
-    return owners
+    try:
+        owners_dir = get_object("nfts/owners")
+        owners = [i.name for i in owners_dir]
+        logger.debug("NFT owners: %s", owners)
+        return owners
+    except FileNotFoundError:
+        return None
 
 
 def get_nft_minters():
@@ -81,12 +84,15 @@ def get_nfts(address: str) -> list[str]:
 
 
 def get_nft_sell_offers() -> list[str]:
-    nft_sell_offers_dir = get_object("nfts/offers/sell")
-    offers = [offer.name for offer in nft_sell_offers_dir]
-    logger.info("NFT Sell offers")
-    for o in offers:
-        logger.info("\t%s", o)
-    return offers
+    try:
+        nft_sell_offers_dir = get_object("nfts/offers/sell")
+        offers = [offer.name for offer in nft_sell_offers_dir]
+        logger.info("NFT Sell offers")
+        for o in offers:
+            logger.info("\t%s", o)
+        return offers
+    except FileNotFoundError:
+        return []
 
 
 def get_accounts():

@@ -7,7 +7,7 @@ from xrpl.models.currencies import IssuedCurrency
 from xrpl.ledger import get_latest_validated_ledger_sequence
 from xrpl.clients import JsonRpcClient
 
-import time 
+import time
 from workload import logger
 
 def short_address(address: str) -> str:
@@ -75,8 +75,8 @@ def wait_for_ledger_close(client: JsonRpcClient) -> None:
     logger.debug("Arrived at %s", target_ledger)
 
 def check_validator_proposing(val_to_check: int | None = None) -> bool:
-    val_name = os.environ.get("VALIDATOR_NAME")
-    num_validators = int(os.environ["NUM_VALIDATORS"])
+    val_name = os.environ.get("VALIDATOR_NAME", "val")
+    num_validators = int(os.environ.get("NUM_VALIDATORS", 5))
     requests_timeout = 5 # No way rippled shouldn't respond by then
     if val_to_check and val_to_check > num_validators:
         logger.error("Validator [%s] outside number of validators range [%s]", val_to_check, num_validators)
@@ -91,7 +91,7 @@ def check_validator_proposing(val_to_check: int | None = None) -> bool:
         val_range = range(num_validators)
     validators_proposing = {}
     for v in val_range:
-        vnum = v + 1
+        vnum = v
         url = f"http://{val_name}{vnum}:5005" # TODO: Magic port
         try:
             response = requests.post(url, json={"method": "server_info"}, timeout=requests_timeout)
@@ -124,4 +124,3 @@ def check_validator_proposing(val_to_check: int | None = None) -> bool:
                 logger.debug("Validator %s not proposing", vnum)
                 validators_proposing[vnum] = False
     return all(validators_proposing.values())
-
