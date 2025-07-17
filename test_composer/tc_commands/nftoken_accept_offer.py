@@ -25,6 +25,9 @@ async def nftoken_accept_sell_offer(account, offer_id, wallet):
 
 def accept_random_sell_offer():
     nft_sell_offers = accounting.get_nft_sell_offers()
+    if not nft_sell_offers:
+        logger.info("No NFT offers yet...")
+        return
     nft_sell_offer = choice(nft_sell_offers)
     seller, offer_id = nft_sell_offer.split("-")
     accounts = accounting.get_accounts()
