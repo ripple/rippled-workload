@@ -10,16 +10,17 @@ from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction import submit_and_wait
 from xrpl.models.requests import AccountObjects, AccountObjectType
 from xrpl.wallet import Wallet
-
+import os
 from workload import logger
 from workload.create import create_accounts
 from workload.randoms import choice, randint
 
+rippled_name = os.environ.get("RIPPLED_NAME")
 wallets, _ = create_accounts(1, rippled)
 time.sleep(3)
 wallet = wallets.pop()
 ticket_sequence = int
-rippled = AsyncJsonRpcClient("http://atrippled:5005")
+rippled = AsyncJsonRpcClient(f"http://{rippled_name}:5005")
 
 amount = "1000000"
 
@@ -57,7 +58,7 @@ async def use_ticket(wallet: Wallet, ticket_sequence: ticket_sequence):
     return await submit_and_wait(payment_txn, rippled, wallet)
 
 
-accounts = json.loads(Path(workload_json).read_text(encoding="utf-8"))["accounts"]
+accounts = json.loads(Path(workload_json).read_text(encoding="utf-8"))
 
 destination, _ = accounts[randint(0, len(accounts)) - 1]
 

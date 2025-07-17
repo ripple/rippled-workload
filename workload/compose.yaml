@@ -1,0 +1,14 @@
+services:
+  workload:
+    image: workload:latest
+    container_name: workload
+    hostname: workload
+    environment:
+      - RIPPLED_NAME
+      - VAL_NAME
+      - NUM_VALIDATORS
+    depends_on:
+      rippled:
+        condition: service_healthy
+    networks:
+      antithesis_net:
