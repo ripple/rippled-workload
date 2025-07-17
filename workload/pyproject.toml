@@ -47,8 +47,8 @@ select = [
 
 ignore = []
 
-[tool.uv]
-default-index = "pypi"
+# [tool.uv]
+# default-index = "pypi"
 
 [[tool.uv.index]]
 name = "pypi"
