@@ -41,7 +41,7 @@ class Workload:
         self.currencies = []
         self.currency_codes = conf["currencies"]["codes"]
         self.start_time = time.time()
-        rippled_host = os.environ.get("RIPPLED_NAME") or conf["rippled"]["local"]
+        rippled_host = os.environ.get("RIPPLED_NAME", conf["rippled"]["local"])
         rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT") or conf["rippled"]["json_rpc_port"]
         self.rippled = f"http://{rippled_host}:{rippled_rpc_port}"
         logger.info("Connecting to rippled at: %s", self.rippled)

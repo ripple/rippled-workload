@@ -4,8 +4,8 @@
 uvx --from git+https://github.com/legleux/generate_ledger@test_github gen
 mv accounts.json test_network
 # build the images
-docker build sidecar -t sidecar
-docker build . -f Dockerfile.workload -t workload
+# docker build sidecar -t sidecar
+# docker build . -f Dockerfile.workload -t workload
 
 # update the generated compose file
 sed -i '1i \
@@ -27,5 +27,5 @@ test_network_dir="test_network"
 for i in sidecar workload; do
     target_dir="${test_network_dir}/${i}"
     mkdir "${target_dir}"
-    cp "${i}/compose.yaml" "${target_dir}/compose.yaml"
+    cp "${i}/compose.yml" "${target_dir}/compose.yml"
 done
