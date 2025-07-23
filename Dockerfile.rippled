@@ -5,7 +5,7 @@ RUN uname -m | grep -E '^x86_64$'
 
 ARG RIPPLED_REPO="https://github.com/XRPLF/rippled.git"
 ARG RIPPLED_COMMIT="develop"
-ARG CONAN_VERSION=2.18.1
+ARG CONAN_VERSION=2.19.0
 ARG CLANG_VERSION=16
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -33,7 +33,7 @@ EOF
 
 RUN <<EOF
     set -ex
-    conan remote add --index 0 ripple http://18.143.149.228:8081/artifactory/api/conan/dev
+    conan remote add --index 0 ripple https://conan.ripplex.io
     echo "core.download:parallel=$(nproc)" > "$(conan config home)/global.conf"
     ## Ninja may make CI machines OOM
     #echo "tools.build:jobs=$(($(nproc) * 4/5))" > "$(conan config home)/global.conf"

@@ -6,118 +6,69 @@ from antithesis import lifecycle
 from typing import Any
 from workload.check_rippled_sync_state import is_rippled_synced # TODO:git use rippled_sync.py
 from workload.create import create_accounts
-from workload.models import Gateway, UserAccount, Amm
+from xrpl.models import IssuedCurrency
+import asyncio
+import httpx
+from asyncio import TaskGroup
+from xrpl.asyncio.account import get_next_valid_seq_number
+from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.asyncio.ledger import get_latest_validated_ledger_sequence
+from xrpl.core.binarycodec import encode_for_signing, encode
+from xrpl.core.keypairs import sign
+from xrpl.models.transactions import Payment
+from xrpl.constants import CryptoAlgorithm
+from xrpl.wallet import Wallet
 from xrpl.account import does_account_exist
-from xrpl.clients import JsonRpcClient
-from xrpl.models.currencies import IssuedCurrency
-from xrpl.models.transactions import (
-    AccountSet,
-    AccountSetAsfFlag,
-    AMMCreate,
-    Payment,
-    TrustSet,
-)
+from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction.reliable_submission import XRPLReliableSubmissionException
 import sys
-from xrpl.models.requests import AMMInfo
-from xrpl.models.currencies import XRP, IssuedCurrency
-from itertools import combinations
-from workload.randoms import randint
-
+import xrpl
 from xrpl.transaction import sign_and_submit, submit_and_wait
 from workload.balances import get_account_tokens
 from workload.config import conf_file, config_file
+from workload.randoms import sample
 from workload import utils, logger
+from pathlib import Path
+from fastapi import FastAPI, Depends
+import uvicorn
 
+app = FastAPI()
 
+RIPPLED_URL = "http://172.17.0.4:5005"
+src_s = "ssQ8xmh7jZTBk1JxZv3QesF5v7yps"
+dst_s = "spoNRkYPtpEYVQ7v4k5MPxf9w22cy"
+
+src_w = Wallet.from_secret(src_s, algorithm=CryptoAlgorithm.SECP256K1)
+dst_w = Wallet.from_secret(dst_s, algorithm=CryptoAlgorithm.SECP256K1)
+rippled = AsyncJsonRpcClient(RIPPLED_URL)
 
 
 class Workload:
     def __init__(self, conf: dict[str, Any]):
+        self.account_data = json.loads(Path("accounts.json").read_text())
         self.config = conf
         self.accounts = []
         self.gateways = []
         self.amms = []
         self.currencies = []
+        self.counter = 0
         self.currency_codes = conf["currencies"]["codes"]
         self.start_time = time.time()
         rippled_host = os.environ.get("RIPPLED_NAME", conf["rippled"]["local"])
         rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT") or conf["rippled"]["json_rpc_port"]
         self.rippled = f"http://{rippled_host}:{rippled_rpc_port}"
         logger.info("Connecting to rippled at: %s", self.rippled)
-        self.client = JsonRpcClient(self.rippled) # TODO: Go back to asyncio
-
+        self.client = AsyncJsonRpcClient(self.rippled)
+        xrpl.models.requests.Ledger()
         self.wait_for_network(self.rippled)
         utils.check_validator_proposing() or sys.exit("All validators not in 'proposing' state!")
 
-        # logger.info("Initializing workload")
-        # default_gateway_balance = str(int(self.config["gateways"]["default_balance"]))
-        # default_account_balance = str(int(self.config["accounts"]["default_balance"]))
-        # TODO: fix try/except
-        # try:
-            # self.configure_gateways(number=self.config["gateways"]["number"], balance=default_gateway_balance)
-        # except:
-            # logger.exception("Failed to configure gateways")
-            # utils.check_validator_proposing() or sys.exit(1)
-        # try:
-            # self.configure_accounts(number=self.config["accounts"]["number"], balance=default_account_balance)
-        # except:
-            # logger.exception("Failed to configure accounts")
-            # utils.check_validator_proposing() or sys.exit(1)
-
-
-        # trading_fee = randint(0, 1000) if len(self.amms) > 1 else self.config["amm"]["trading_fee"]
-        ### First time around only gateways create AMMs
-        # for gw in self.gateways:
-        #     for asset_pool in list(combinations([*list(gw.issued_currencies.values()), XRP()], 2)):
-        #         asset_1, asset_2 = asset_pool
-        #         if xrp_asset := asset_1 if XRP() in asset_pool and asset_2 != XRP() else asset_2 if asset_2 == XRP() else None:
-        #             token = asset_1 if asset_2 == XRP() else asset_1
-        #             rate = float(self.config["currencies"]["rate"][token.currency])
-        #         token_value = self.config["amm"]["default_amm_token_deposit"]
-        #         amount = asset_1.to_amount(value=token_value)
-        #         amount2 = asset_2.to_amount(value=token_value)
-        #         try:
-        #             logger.info("%s creating amm of %s %s", gw.address, amount, amount2)
-        #             response = submit_and_wait(AMMCreate(
-        #                 account=gw.address,
-        #                 amount=amount,
-        #                 amount2=amount2,
-        #                 trading_fee=trading_fee,
-        #             ), self.client, gw.wallet)
-        #             utils.wait_for_ledger_close(self.client)
-        #             try:
-        #                 amminfo = self.client.request(AMMInfo(asset=asset_1, asset2=asset_2)).result["amm"]
-        #                 self.amms.append(
-        #                     Amm(
-        #                         account=amminfo["account"],
-        #                         assets=[amminfo["amount"], amminfo["amount2"]],
-        #                         lp_token=amminfo["lp_token"]))
-        #                 logger.info("AMM %s ", self.amms[-1])
-        #             except KeyError:
-        #                 logger.error("AmmInfo() failed")
-
-        #         except XRPLReliableSubmissionException as err:  # Probably Transaction failed: tecDUPLICATE
-        #             logger.info("err %s", err)
-        #             logger.info("AMM already exists for %s - %s", *asset_pool)
-
+        account_type = xrpl.models.requests.LedgerEntryType.ACCOUNT
+        ledger_data_request = xrpl.models.requests.LedgerData(type=account_type)
 
         logger.info("%s after %ss", "Workload initialization complete", int(time.time() - self.start_time))
         logger.info("Workload going to sleep...")
-        # ### Dump the network data so test_composer directory can find it # TODO: get_workload_info()
-        # docker_path = "/opt/antithesis/workload.json"
-        # # local_path = pathlib.Path(pathlib.Path.cwd() / "config/volumes/tc/workload.json")
         local_path = pathlib.Path(__file__).parents[3] / "tc/workload.json"
-        # path = docker_path if os.environ.get("RIPPLED_NAME") else local_path
-        # logger.debug("Dumping workload info to path %s", path)
-
-        # workload_data = {}
-        # workload_data["accounts"] = [(a.address, a.wallet.seed) for a in self.accounts]
-        # workload_data["gateway"] = [(a.address, a.wallet.seed) for a in self.gateways]
-        # workload_data["issued_currencies"] = [(ic.currency, ic.issuer) for ic in self.currencies]
-        # workload_data["currency_codes"] = self.currency_codes
-        # with pathlib.Path(path).open("w", encoding="utf-8") as wl_data:
-        #     json.dump(workload_data, wl_data, indent=2)
         workload_ready_msg =  "Workload initialization complete"
         lifecycle.setup_complete(details={"message": workload_ready_msg})
         logger.info("Called lifecycle setup_complete()")
@@ -227,20 +178,86 @@ class Workload:
             time.sleep(wait_time)
         logger.info("rippled ready...")
 
+    async def submit_payments(self, n: int, wallet: Wallet, dest: Wallet):
+        seq = await get_next_valid_seq_number(wallet.address, client=rippled)
+        latest_ledger = await get_latest_validated_ledger_sequence(client=rippled)
 
-    def run(self) -> None:
-        logger.debug("wl sleeping....")
-        time.sleep(20)
+        signed_blobs = []
+        for i in range(n):
+            tx_json = Payment(
+                account=wallet.address,
+                amount="1000000",
+                destination=dest.address,
+                sequence=seq + i,
+                fee="500",
+                last_ledger_sequence=latest_ledger + 10,
+                signing_pub_key=wallet.public_key
+            ).to_xrpl()
 
+            signing_blob = encode_for_signing(tx_json)
+            signature = sign(signing_blob, wallet.private_key)
+            tx_json["TxnSignature"] = signature
 
-def main() -> None:
+            signed_blob = encode(tx_json)
+            signed_blobs.append(signed_blob)
+
+        responses = []
+        async with TaskGroup() as tg:
+            for blob in signed_blobs:
+                tg.create_task(self.submit_via_http(blob, responses))
+
+        return responses
+
+    async def submit_via_http(self, blob: str, responses: list):
+        payload = {
+            "method": "submit",
+            "params": [{"tx_blob": blob}]
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(RIPPLED_URL, json=payload)
+                responses.append(resp.json())
+            except Exception as e:
+                responses.append({"error": str(e)})
+
+    async def pay(self):
+        src, dst = sample(account_data, 2)
+
+        responses = await self.submit_payments(100, src_w, dst_w)
+        return self.accounts
+
+def create_app(workload: Workload) -> FastAPI:
+    app = FastAPI()
+
+    # Dependency to inject the workload instance
+    def get_workload():
+        return workload
+
+    # @app.get("/increment")
+    # def increment_endpoint(w: Workload = Depends(get_workload)):
+    #     return {"name": w.name, "count": w.increment()}
+    @app.get("/increment")
+    def increment_endpoint(w: Workload = Depends(get_workload)):
+        return {"count": w.increment()}
+
+    @app.get("/pay")
+    async def make_payment(w: Workload = Depends(get_workload)):
+        return await w.pay()
+
+    return app
+
+def main():
     logger.info("Loaded config from %s", config_file)
     conf = conf_file["workload"]
     logger.info("Config %s", json.dumps(conf, indent=2))
+    # Create and configure your workload instance
+    workload = Workload(conf)
 
-    wl = Workload(conf)
-    while True:
-        wl.run()
+    # Build the FastAPI app, injecting workload
+    app = create_app(workload)
+
+    # Run the server
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
