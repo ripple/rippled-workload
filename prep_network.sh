@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -x
 # Generate the testnet
 # uvx --from git+https://github.com/legleux/generate_ledger@test_github gen
 # mv accounts.json test_network
@@ -26,6 +26,10 @@ test_network_dir="test_network"
 
 for i in sidecar workload; do
     target_dir="${test_network_dir}/${i}"
+    echo "making ${target_dir}"
     mkdir "${target_dir}"
+    echo "copying ${i}/compose.yml to ${target_dir}/compose.yml"
     cp "${i}/compose.yml" "${target_dir}/compose.yml"
 done
+
+ls -l test_network
