@@ -10,8 +10,8 @@
 # update the generated compose file
 sed -i '1i \
 include:\
-  - sidecar/compose.yaml\
-  - workload/compose.yaml\
+  - sidecar/compose.yml\
+  - workload/compose.yml\
 ' test_network/docker-compose.yml
 
 sed -i '/^\s*hostname:\s*rippled\s*$/c\
