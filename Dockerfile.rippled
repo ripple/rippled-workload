@@ -1,35 +1,14 @@
-FROM debian:bookworm AS build
+FROM ghcr.io/xrplf/ci/ubuntu-noble:clang-16 AS build
 
 # Antithesis supports only x86_64 architecture
 RUN uname -m | grep -E '^x86_64$'
 
 ARG RIPPLED_REPO="https://github.com/XRPLF/rippled.git"
 ARG RIPPLED_COMMIT="develop"
-ARG CONAN_VERSION=2.17.0
-ARG CLANG_VERSION=16
 
 ENV DEBIAN_FRONTEND=noninteractive \
     SOURCE_DIR=/root/rippled \
     BUILD_DIR=/root/build
-
-# Required because Conan and CMake will choose GCC first
-ENV CC=/usr/bin/clang-16 \
-    CXX=/usr/bin/clang++-16
-
-RUN <<EOF
-    set -ex
-    apt-get update && \
-    apt-get install --yes \
-        clang-${CLANG_VERSION} \
-        clang++-${CLANG_VERSION} \
-        cmake \
-        git \
-        python-is-python3 \
-        python3-pip \
-        wget
-    apt-get clean
-    pip install --break-system-packages "conan==${CONAN_VERSION}"
-EOF
 
 RUN <<EOF
     set -ex
@@ -52,34 +31,11 @@ EOF
 WORKDIR ${SOURCE_DIR}
 
 RUN <<EOF
+   set -ex
    conan export --version 1.1.10 ${SOURCE_DIR}/external/snappy
-   conan export --version 2.0.8  ${SOURCE_DIR}/external/nudb
    conan export --version 4.0.3  ${SOURCE_DIR}/external/soci
    conan export --version 9.7.3  ${SOURCE_DIR}/external/rocksdb
-EOF
-
-RUN mkdir -p $(conan config home)/profiles
-COPY <<EOF /root/.conan2/profiles/default
-{% set compiler, version, compiler_exe = detect_api.detect_default_compiler() %}
-{% set compiler_version = detect_api.default_compiler_version(compiler, version) %}
-
-[settings]
-os=Linux
-arch={{ detect_api.detect_arch() }}
-build_type=Debug
-compiler={{ compiler }}
-compiler.version={{ compiler_version }}
-compiler.cppstd=20
-compiler.libcxx=libstdc++11
-
-[conf]
-tools.build:compiler_executables = {'c': '/usr/bin/clang-{{ compiler_version }}', 'cpp': '/usr/bin/clang++-{{ compiler_version }}'}
-tools.build:cxxflags+=["-DBOOST_ASIO_DISABLE_CONCEPTS"]
-
-[buildenv]
-CC=/usr/bin/clang-{{ compiler_version }}
-CXX=/usr/bin/clang++-{{ compiler_version }}
-CXXFLAGS=-DBOOST_ASIO_DISABLE_CONCEPTS
+   conan config install conan/profiles/ -tf $(conan config home)/profiles/
 EOF
 
 RUN <<EOF
