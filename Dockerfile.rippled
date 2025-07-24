@@ -1,4 +1,4 @@
-FROM ghcr.io/xrplf/ci/ubuntu-noble:clang-16 AS build
+FROM ghcr.io/xrplf/ci/ubuntu-noble:clang-17 AS build
 
 # Antithesis supports only x86_64 architecture
 RUN uname -m | grep -E '^x86_64$'
@@ -9,14 +9,6 @@ ARG RIPPLED_COMMIT="develop"
 ENV DEBIAN_FRONTEND=noninteractive \
     SOURCE_DIR=/root/rippled \
     BUILD_DIR=/root/build
-
-RUN <<EOF
-    set -ex
-    conan remote add --index 0 ripple http://18.143.149.228:8081/artifactory/api/conan/dev
-    echo "core.download:parallel=$(nproc)" > "$(conan config home)/global.conf"
-    ## Ninja make OOM CI machines
-    #echo "tools.build:jobs=$(($(nproc) * 4/5))" > "$(conan config home)/global.conf"
-EOF
 
 RUN <<EOF
     set -ex
