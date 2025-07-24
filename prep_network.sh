@@ -3,7 +3,9 @@ set -x
 
 TEST_NETWORK_DIR="test_network"
 mv ../$TEST_NETWORK_DIR .
-mv ../accounts.json $TEST_NETWORK_DIR/
+
+## Can't do this here because we need to move it before copying between jobs in github workflow
+#mv ../accounts.json $TEST_NETWORK_DIR/
 
 # update the generated compose file
 sed -i '1i \
