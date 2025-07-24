@@ -33,15 +33,9 @@ from pathlib import Path
 from fastapi import FastAPI, Depends
 import uvicorn
 
-app = FastAPI()
-
-RIPPLED_URL = "http://172.17.0.4:5005"
-
-rippled = AsyncJsonRpcClient("http://rippled:5005")
-
-
 class Workload:
     def __init__(self, conf: dict[str, Any]):
+        print("Starting workload")
         self.account_data = json.loads(Path("/accounts.json").read_text())
         print(json.dumps(self.account_data, indent=2))
         self.config = conf
@@ -49,15 +43,14 @@ class Workload:
         self.gateways = []
         self.amms = []
         self.currencies = []
-        self.counter = 0
         self.currency_codes = conf["currencies"]["codes"]
         self.start_time = time.time()
         rippled_host = os.environ.get("RIPPLED_NAME", conf["rippled"]["local"])
-        rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT") or conf["rippled"]["json_rpc_port"]
+        rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT", conf["rippled"]["json_rpc_port"])
         self.rippled = f"http://{rippled_host}:{rippled_rpc_port}"
         logger.info("Connecting to rippled at: %s", self.rippled)
+        print("Connecting to rippled at: %s", self.rippled)
         self.client = AsyncJsonRpcClient(self.rippled)
-        xrpl.models.requests.Ledger()
         self.wait_for_network(self.rippled)
         utils.check_validator_proposing() or sys.exit("All validators not in 'proposing' state!")
 
@@ -66,9 +59,10 @@ class Workload:
 
         logger.info("%s after %ss", "Workload initialization complete", int(time.time() - self.start_time))
         logger.info("Workload going to sleep...")
-        local_path = pathlib.Path(__file__).parents[3] / "tc/workload.json"
+        # local_path = pathlib.Path(__file__).parents[3] / "tc/workload.json"
         workload_ready_msg =  "Workload initialization complete"
         lifecycle.setup_complete(details={"message": workload_ready_msg})
+        print('{"antithesis_setup": { "status": "complete", "details": "" }}')
         logger.info("Called lifecycle setup_complete()")
 
     def configure_gateways(self, number: int, balance: str) -> None:
@@ -177,8 +171,8 @@ class Workload:
         logger.info("rippled ready...")
 
     async def submit_payments(self, n: int, wallet: Wallet, destination_address: str):
-        seq = await get_next_valid_seq_number(wallet.address, client=rippled)
-        latest_ledger = await get_latest_validated_ledger_sequence(client=rippled)
+        seq = await get_next_valid_seq_number(wallet.address, client=self.client)
+        latest_ledger = await get_latest_validated_ledger_sequence(client=self.client)
 
         signed_blobs = []
         for i in range(n):
@@ -213,7 +207,7 @@ class Workload:
         }
         async with httpx.AsyncClient() as client:
             try:
-                resp = await client.post(RIPPLED_URL, json=payload)
+                resp = await client.post(self.rippled, json=payload)
                 responses.append(resp.json())
             except Exception as e:
                 responses.append({"error": str(e)})
@@ -231,16 +225,8 @@ class Workload:
 def create_app(workload: Workload) -> FastAPI:
     app = FastAPI()
 
-    # Dependency to inject the workload instance
     def get_workload():
         return workload
-
-    # @app.get("/increment")
-    # def increment_endpoint(w: Workload = Depends(get_workload)):
-    #     return {"name": w.name, "count": w.increment()}
-    @app.get("/increment")
-    def increment_endpoint(w: Workload = Depends(get_workload)):
-        return {"count": w.increment()}
 
     @app.get("/pay")
     async def make_payment(w: Workload = Depends(get_workload)):
@@ -249,18 +235,15 @@ def create_app(workload: Workload) -> FastAPI:
     return app
 
 def main():
+    print("IN main()")
     logger.info("Loaded config from %s", config_file)
     conf = conf_file["workload"]
     logger.info("Config %s", json.dumps(conf, indent=2))
-    # Create and configure your workload instance
     workload = Workload(conf)
-
-    # Build the FastAPI app, injecting workload
     app = create_app(workload)
-
-    # Run the server
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
+    print("Calling main()")
     main()
