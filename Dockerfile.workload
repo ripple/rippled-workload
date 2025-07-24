@@ -14,3 +14,5 @@ COPY test_composer/tc_commands /opt/antithesis/catalog/tc_commands
 COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
 
 ENV PATH="/opt/antithesis/catalog/workload/.venv/bin:/opt/antithesis/test/v1/all_transactions:$PATH"
+
+CMD [ "workload" ]
