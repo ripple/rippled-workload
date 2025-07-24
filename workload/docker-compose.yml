@@ -16,7 +16,3 @@ services:
       - ./ledger.json:/ledger.json
     networks:
       antithesis_net:
-
-networks:
-  antithesis_net:
-    name: antithesis_net
