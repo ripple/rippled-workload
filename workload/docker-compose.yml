@@ -12,5 +12,6 @@ services:
         condition: service_healthy
     volumes:
       - ./accounts.json:/accounts.json
+      - ./ledger.json:/ledger.json
     networks:
       antithesis_net:

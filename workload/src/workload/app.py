@@ -23,6 +23,7 @@ from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction.reliable_submission import XRPLReliableSubmissionException
 import sys
 import xrpl
+import json
 from xrpl.transaction import sign_and_submit, submit_and_wait
 from workload.balances import get_account_tokens
 from workload.config import conf_file, config_file
@@ -35,17 +36,14 @@ import uvicorn
 app = FastAPI()
 
 RIPPLED_URL = "http://172.17.0.4:5005"
-src_s = "ssQ8xmh7jZTBk1JxZv3QesF5v7yps"
-dst_s = "spoNRkYPtpEYVQ7v4k5MPxf9w22cy"
 
-src_w = Wallet.from_secret(src_s, algorithm=CryptoAlgorithm.SECP256K1)
-dst_w = Wallet.from_secret(dst_s, algorithm=CryptoAlgorithm.SECP256K1)
-rippled = AsyncJsonRpcClient(RIPPLED_URL)
+rippled = AsyncJsonRpcClient("http://rippled:5005")
 
 
 class Workload:
     def __init__(self, conf: dict[str, Any]):
-        self.account_data = json.loads(Path("accounts.json").read_text())
+        self.account_data = json.loads(Path("/accounts.json").read_text())
+        print(json.dumps(self.account_data, indent=2))
         self.config = conf
         self.accounts = []
         self.gateways = []
@@ -178,7 +176,7 @@ class Workload:
             time.sleep(wait_time)
         logger.info("rippled ready...")
 
-    async def submit_payments(self, n: int, wallet: Wallet, dest: Wallet):
+    async def submit_payments(self, n: int, wallet: Wallet, destination_address: str):
         seq = await get_next_valid_seq_number(wallet.address, client=rippled)
         latest_ledger = await get_latest_validated_ledger_sequence(client=rippled)
 
@@ -187,7 +185,7 @@ class Workload:
             tx_json = Payment(
                 account=wallet.address,
                 amount="1000000",
-                destination=dest.address,
+                destination=destination_address,
                 sequence=seq + i,
                 fee="500",
                 last_ledger_sequence=latest_ledger + 10,
@@ -221,10 +219,14 @@ class Workload:
                 responses.append({"error": str(e)})
 
     async def pay(self):
-        src, dst = sample(account_data, 2)
-
-        responses = await self.submit_payments(100, src_w, dst_w)
-        return self.accounts
+        src, dst = sample(self.account_data, 2)
+        src_secret = src[1]
+        dst_address = dst[0]
+        src_wallet = Wallet.from_secret(src_secret, algorithm=CryptoAlgorithm.SECP256K1)
+        responses = await self.submit_payments(100, src_wallet, dst_address)
+        for i in responses:
+            print(i)
+        return {"cool": "beans"}
 
 def create_app(workload: Workload) -> FastAPI:
     app = FastAPI()
