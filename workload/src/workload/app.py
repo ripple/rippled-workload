@@ -36,6 +36,11 @@ import uvicorn
 class Workload:
     def __init__(self, conf: dict[str, Any]):
         print("Starting workload")
+        aod = str(os.environ.get("ANTITHESIS_OUTPUT_DIR"))
+        outfile = Path(aod) / "sdk.jsonl"
+        m = {"antithesis_setup": { "status": "complete", "details": {"message": "Set up complete - ready for testing!" }}}
+        with outfile.open("w", encoding="utf-8") as f:
+            f.writelines(json.dumps(m))
         self.account_data = json.loads(Path("/accounts.json").read_text())
         print(json.dumps(self.account_data, indent=2))
         self.config = conf

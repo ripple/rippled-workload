@@ -3,13 +3,14 @@ services:
     image: $WORKLOAD_IMAGE
     container_name: workload
     hostname: workload
+    entrypoint: ["uv", "run", "workload"]
     environment:
-      - RIPPLED_NAME # defaults to "rippled"
-      - VALIDATOR_NAME # defaults to "val"
-      - NUM_VALIDATORS # default 5
-    depends_on:
-      rippled:
-        condition: service_healthy
+      - RIPPLED_NAME=rippled  # defaults to "rippled"
+      - VALIDATOR_NAME=val # defaults to "val"
+      - NUM_VALIDATORS=5 # default 5
+    # depends_on:
+    #   rippled:
+    #     condition: service_healthy
     volumes:
       - ./accounts.json:/accounts.json
       - ./ledger.json:/ledger.json
