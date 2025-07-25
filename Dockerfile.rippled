@@ -1,4 +1,5 @@
-FROM ghcr.io/xrplf/ci/ubuntu-noble:clang-16 AS build
+ARG CODENAME=noble
+FROM ghcr.io/xrplf/ci/ubuntu-${CODENAME}:clang-16 AS build
 
 # Antithesis supports only x86_64 architecture
 RUN uname -m | grep -E '^x86_64$'
@@ -34,7 +35,6 @@ RUN <<EOF
    set -ex
    conan export --version 1.1.10 ${SOURCE_DIR}/external/snappy
    conan export --version 4.0.3  ${SOURCE_DIR}/external/soci
-   conan export --version 9.7.3  ${SOURCE_DIR}/external/rocksdb
    conan config install conan/profiles/ -tf $(conan config home)/profiles/
 EOF
 
@@ -61,7 +61,7 @@ RUN cmake --build ${BUILD_DIR} --parallel && cmake --install ${BUILD_DIR} --pref
 
 RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so  -O /usr/lib/libvoidstar.so
 
-FROM debian:trixie-slim
+FROM ubuntu:${CODENAME}
 
 COPY --from=build /opt/ripple /opt/ripple
 COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
