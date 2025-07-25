@@ -61,7 +61,7 @@ RUN cmake --build ${BUILD_DIR} --parallel && cmake --install ${BUILD_DIR} --pref
 
 RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so  -O /usr/lib/libvoidstar.so
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 COPY --from=build /opt/ripple /opt/ripple
 COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
