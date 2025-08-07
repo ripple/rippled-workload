@@ -9,5 +9,5 @@ COPY . /app
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Command to run the application (modify as needed)
-ENTRYPOINT ["python", "sidecar.py", "-t", "1"]
+# # Command to run the application (modify as needed)
+# ENTRYPOINT ["python", "sidecar.py", "-t", "1"]
