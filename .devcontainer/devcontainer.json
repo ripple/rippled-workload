@@ -1,0 +1,21 @@
+{
+  "name": "workload-dev",
+  "dockerComposeFile": ["../workload/docker-compose.devcontainer.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "runServices": ["app"],
+  "overrideCommand": false,
+  "forwardPorts": [8000],
+  "postCreateCommand": "cd workload && uv sync",
+  // I tried this and it does work but I'm not super-psyched about it...
+  "initializeCommand": "bash -lc 'uv run prepare-workload/main.py && docker compose -f prepare-workload/testnet/compose.yml up -d || true'",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.debugpy"],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/workload/.venv/bin/python",
+        "python.terminal.activateEnvironment": false
+      }
+    }
+  }
+}

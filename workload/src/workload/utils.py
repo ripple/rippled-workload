@@ -1,21 +1,38 @@
-import requests
 import json
 import os
 import sys
+import time
+from collections.abc import Sequence
+from typing import Any, Sequence, TypeVar
+
+import requests
+from xrpl.clients import JsonRpcClient
+from xrpl.ledger import get_latest_validated_ledger_sequence
 from xrpl.models.amounts import IssuedCurrencyAmount
 from xrpl.models.currencies import IssuedCurrency
-from xrpl.ledger import get_latest_validated_ledger_sequence
-from xrpl.clients import JsonRpcClient
+from xrpl.models.transactions.transaction import Transaction
 
-import time 
 from workload import logger
+from workload.randoms import choice, sample
+
+T = TypeVar("T")
+
+
+def sample_omit(seq: Sequence[Any], k: int, omit: Any):
+    return sample([x for x in seq if x != omit], k)
+
+
+def choice_omit(seq: Sequence[T], omit: T) -> T:
+    pool = [x for x in seq if x != omit]
+    if not pool:
+        raise ValueError(f"no choices from {seq} after omitting {omit}")
+    return choice(pool)
+
 
 def short_address(address: str) -> str:
     length = 7
     return address[:length]
-    # return f"{address[:length]}"
-    # sep = "..."
-    # return f"{address[:length]}{sep}{address[-length:]}"
+
 
 def format_currency(currency: IssuedCurrency | IssuedCurrencyAmount | str | dict[str, str], short: bool = False) -> str:
     if isinstance(currency, str):  # TODO: Fix this
@@ -48,8 +65,12 @@ def format_currency(currency: IssuedCurrency | IssuedCurrencyAmount | str | dict
 
     return currency_str
 
-def format_currency_short(currency: IssuedCurrency | IssuedCurrencyAmount | str | dict[str, str], short: bool = True) -> str:
+
+def format_currency_short(
+    currency: IssuedCurrency | IssuedCurrencyAmount | str | dict[str, str], short: bool = True
+) -> str:
     return format_currency(currency=currency, short=True)
+
 
 def issue_currencies(issuer: str, currency_code: list[str]) -> list[IssuedCurrency]:
     """Use a fixed set of currency codes to create IssuedCurrencies for a specific gateway.
@@ -62,37 +83,39 @@ def issue_currencies(issuer: str, currency_code: list[str]) -> list[IssuedCurren
         list[IssuedCurrency]: List of IssuedCurrencies a gateway provides
 
     """
-    # TODO: format_currency()
     logger.info("Issuing %s %s", issuer, currency_code)
     return [IssuedCurrency(issuer=issuer, currency=cc) for cc in currency_code]
 
-def wait_for_ledger_close(client: JsonRpcClient) -> None:
 
+def wait_for_ledger_close(client: JsonRpcClient) -> None:
     target_ledger = get_latest_validated_ledger_sequence(client) + 1
     while (last_ledger := get_latest_validated_ledger_sequence(client)) < target_ledger:
         logger.debug("At %s waiting for ledger %s", last_ledger, target_ledger)
         time.sleep(3)
     logger.debug("Arrived at %s", target_ledger)
 
+
 def check_validator_proposing(val_to_check: int | None = None) -> bool:
-    val_name = os.environ.get("VALIDATOR_NAME")
-    num_validators = int(os.environ["NUM_VALIDATORS"])
-    requests_timeout = 5 # No way rippled shouldn't respond by then
+    val_name = os.environ.get("VALIDATOR_NAME", "val")
+    num_validators = int(os.environ.get("NUM_VALIDATORS", 5))
+    requests_timeout = 5  # No way rippled shouldn't respond by then
     if val_to_check and val_to_check > num_validators:
         logger.error("Validator [%s] outside number of validators range [%s]", val_to_check, num_validators)
         return False
+
     def get_last_ledger(url: str) -> int:
         response = requests.post(url, json={"method": "ledger", "params": [{"ledger_index": "validated"}]})
         last_ledger = response.json()["result"]["ledger"]["ledger_index"]
         return int(last_ledger)
+
     if val_to_check is not None:
         val_range = range(val_to_check - 1, val_to_check)
     else:
         val_range = range(num_validators)
     validators_proposing = {}
     for v in val_range:
-        vnum = v + 1
-        url = f"http://{val_name}{vnum}:5005" # TODO: Magic port
+        vnum = v
+        url = f"http://{val_name}{vnum}:5005"  # TODO: Magic port
         try:
             response = requests.post(url, json={"method": "server_info"}, timeout=requests_timeout)
         except requests.exceptions.ConnectTimeout:
@@ -113,7 +136,6 @@ def check_validator_proposing(val_to_check: int | None = None) -> bool:
             start = time.perf_counter()
             if server_info.get("server_state") == "proposing":
                 last_ledger = get_last_ledger(url)
-                # REVIEW: Is this any better than wait_for_ledger_close()?
                 while (current_ledger := get_last_ledger(url)) <= last_ledger:
                     logger.debug("Waiting for ledger %s", last_ledger + 1)
                     logger.debug("Last ledger %s current ledger %s", last_ledger, current_ledger)
@@ -124,4 +146,3 @@ def check_validator_proposing(val_to_check: int | None = None) -> bool:
                 logger.debug("Validator %s not proposing", vnum)
                 validators_proposing[vnum] = False
     return all(validators_proposing.values())
-

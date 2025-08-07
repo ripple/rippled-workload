@@ -1,6 +1,6 @@
+.DS_Store
 .idea/
 .idea_modules/
-.devcontainer/
 .vscode/
 *.iws
 *.swp
@@ -16,3 +16,5 @@ logs
 config/docker-compose.yml
 config/volumes/*val*
 config/volumes/*rippled*
+testnet/
+state.db

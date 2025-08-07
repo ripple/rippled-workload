@@ -1,0 +1,16 @@
+include:
+  - xrpl_net.yml
+services:
+  workload:
+    image: WORKLOAD_IMAGE
+    build:
+      dockerfile: Dockerfile
+    container_name: workload
+    hostname: workload
+    ports: ["8000:8000"]
+    command: uv run uvicorn workload.app:app --host 0.0.0.0 --port 8000
+    networks:
+      xrpl_net:
+    depends_on:
+      rippled:
+        condition: service_healthy

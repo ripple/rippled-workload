@@ -1,0 +1,254 @@
+
+<!doctype html><meta charset="utf-8">
+<title>XRPL streams</title>
+<style>
+  :root{--bg:#001b00; --fg:#00ff7b; --dim:#00cc62; --glow:#00ff7b88; --mut:#00663a}
+  html,body{height:100%}
+  body{margin:0;background:radial-gradient(1200px 800px at 50% 35%, #002900 0%, var(--bg) 60%, #000 100%);
+       color:var(--fg);font:16px/1.35 ui-monospace,Menlo,Consolas,monospace;
+       text-shadow:0 0 6px var(--glow),0 0 2px var(--glow);
+       display:flex;align-items:stretch;justify-content:center;padding:24px}
+  .crt{position:relative;width:min(1200px,96vw);height:calc(96vh - 48px);
+       border-radius:12px;padding:12px 12px 16px;background:#000a;
+       box-shadow:inset 0 0 0 1px #0a3,0 20px 60px #000,0 0 120px #001;overflow:hidden}
+  .chrome{position:absolute;inset:6px;border-radius:10px;
+          box-shadow:inset 0 0 40px #0a2,inset 0 0 140px #052;pointer-events:none}
+  .scanline{position:absolute;left:0;right:0;height:30%;
+            background:linear-gradient(to bottom,transparent 0%,rgba(255,255,255,.04) 2%,transparent 8%);
+            animation:scan 6s linear infinite;opacity:.25;pointer-events:none}
+  @keyframes scan{0%{top:-30%}100%{top:100%}}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .title{letter-spacing:.08em;color:var(--dim);margin:2px 0 8px;opacity:.85}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap}
+  .tab{cursor:pointer;user-select:none;border:1px solid #0a3;border-radius:8px;padding:4px 8px;
+       color:var(--dim);background:#00140a;box-shadow:inset 0 0 10px #042}
+  .tab.active{color:var(--fg);background:#002612}
+  .badge{font-size:.85em;color:var(--fg);padding:0 6px;margin-left:6px;background:#013;border-radius:999px}
+  .muted{color:var(--mut)}
+  .btn{cursor:pointer;user-select:none;border:1px solid #0a3;border-radius:8px;padding:4px 10px;
+       color:var(--fg);background:#022;box-shadow:inset 0 0 10px #042}
+  .btn[aria-pressed="true"]{background:#240;border-color:#6a3}
+  #out{position:relative;white-space:pre-wrap;word-break:break-word;height:100%;overflow:auto;padding:8px 6px 0 2px;margin-top:8px}
+  #out::-webkit-scrollbar{width:10px} #out::-webkit-scrollbar-thumb{background:rgba(0,255,123,.25);border-radius:8px;box-shadow:0 0 10px var(--glow)}
+  .cursor::after{content:"▌";margin-left:6px;animation:blink 1s steps(1,end) infinite;text-shadow:inherit;color:var(--fg)}
+  @keyframes blink{50%{opacity:0}}
+  .bezel{position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(transparent 0%,rgba(255,255,255,.05) 2%,transparent 3%) 0 0/100% 4px,
+               repeating-linear-gradient(0deg,rgba(0,0,0,.15) 0 2px,rgba(255,255,255,.04) 2px 3px,rgba(0,0,0,.15) 3px 4px);
+    mix-blend-mode:screen;opacity:.55}
+  .paused-indicator{
+    position:absolute;top:8px;right:12px;font-size:.9em;color:#fffa;
+    padding:2px 8px;border:1px solid #0a3;border-radius:8px;background:#220;display:none;
+  }
+  .paused .paused-indicator{display:block}
+</style>
+
+<div class="crt" id="crt">
+  <div class="chrome"></div>
+  <div class="scanline"></div>
+  <div class="bezel"></div>
+
+  <div class="row">
+    <div class="title">XRPL rippled stream ▒ online</div>
+    <button class="btn" id="pause-btn" aria-pressed="false" title="toggle pause (P)">
+      pause
+    </button>
+    <span class="muted" id="pending-info" style="display:none">(queued: <span id="pending-count">0</span>)</span>
+  </div>
+
+  <div class="row" style="margin:4px 0 2px">
+    <div class="muted">servers:</div>
+    <div class="tabs" id="server-tabs"></div>
+    <div class="muted" style="margin-left:auto">Shift ← / →</div>
+  </div>
+
+  <div class="row" style="margin:4px 0 6px">
+    <div class="muted">types:</div>
+    <div class="tabs" id="type-tabs"></div>
+    <div class="muted" style="margin-left:auto">← / →</div>
+  </div>
+
+  <pre id="out" class="cursor"></pre>
+  <div class="paused-indicator">PAUSED</div>
+</div>
+
+<script>
+const out = document.getElementById('out');
+const crt = document.getElementById('crt');
+const serverTabsEl = document.getElementById('server-tabs');
+const typeTabsEl   = document.getElementById('type-tabs');
+const pauseBtn     = document.getElementById('pause-btn');
+const pendingInfo  = document.getElementById('pending-info');
+const pendingCount = document.getElementById('pending-count');
+
+const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws');
+
+// per-server -> per-type -> lines
+const STORE = new Map();
+const MAX_PER_TAB = 500;
+const MAX_CHARS   = 400000;
+let activeServer = null;
+let activeType   = 'all';
+
+// pause state
+let paused = false;
+let pending = 0;
+
+function setPaused(v){
+  paused = v;
+  pauseBtn.setAttribute('aria-pressed', v ? 'true' : 'false');
+  pauseBtn.textContent = v ? 'resume' : 'pause';
+  crt.classList.toggle('paused', v);
+  pendingInfo.style.display = v ? 'inline' : 'none';
+  if (!v) {
+    pending = 0;
+    pendingCount.textContent = '0';
+    render(); // flush once on resume
+  }
+}
+
+pauseBtn.addEventListener('click', () => setPaused(!paused));
+window.addEventListener('keydown', (e) => {
+  if ((e.key === 'p' || e.key === 'P')) setPaused(!paused);
+});
+
+// stick-to-top handling
+let stickToTop = true;
+out.addEventListener('scroll', () => { stickToTop = out.scrollTop < 20; });
+
+// tabs
+function addServerTab(name){
+  const btn = document.createElement('div');
+  btn.className = 'tab';
+  btn.dataset.server = name;
+  btn.tabIndex = 0;
+  btn.innerHTML = `${name} <span class="badge" data-sbadge="${name}">0</span>`;
+  btn.onclick = ()=> setActiveServer(name);
+  btn.onkeydown = (e)=>{ if (e.key==='Enter' || e.key===' ') btn.click(); };
+  serverTabsEl.appendChild(btn);
+}
+function addTypeTab(name){
+  const btn = document.createElement('div');
+  btn.className = 'tab';
+  btn.dataset.type = name;
+  btn.tabIndex = 0;
+  btn.innerHTML = `${name} <span class="badge" data-tbadge="${name}">0</span>`;
+  btn.onclick = ()=> setActiveType(name);
+  btn.onkeydown = (e)=>{ if (e.key==='Enter' || e.key===' ') btn.click(); };
+  typeTabsEl.appendChild(btn);
+}
+function setActiveServer(name){
+  activeServer = name;
+  for (const el of document.querySelectorAll('.tab[data-server]')) el.classList.toggle('active', el.dataset.server === name);
+  typeTabsEl.innerHTML = '';
+  for (const k of TYPE_SEED) addTypeTab(k);
+  if (!TYPE_SEED.includes(activeType)) activeType = 'all';
+  setActiveType(activeType);
+  if (!paused) render();
+}
+function setActiveType(name){
+  activeType = name;
+  for (const el of document.querySelectorAll('.tab[data-type]')) el.classList.toggle('active', el.dataset.type === name);
+  if (!paused) render();
+}
+function ensureServer(name){
+  if (!STORE.has(name)) STORE.set(name, new Map());
+  if (!document.querySelector(`[data-server="${name}"]`)) addServerTab(name);
+}
+function incBadge(attr, key){
+  const span = document.querySelector(`[${attr}="${key}"]`);
+  if (!span) return;
+  span.textContent = (parseInt(span.textContent || '0', 10) + 1).toString();
+}
+function push(server, type, line){
+  ensureServer(server);
+  const types = STORE.get(server);
+  if (!types.has('all')) types.set('all', []);
+  if (!types.has(type)) types.set(type, []);
+  const dstAll = types.get('all');
+  const dstTyp = types.get(type);
+  dstAll.unshift(line);
+  dstTyp.unshift(line);
+  if (dstAll.length > MAX_PER_TAB) dstAll.length = MAX_PER_TAB;
+  if (dstTyp.length > MAX_PER_TAB) dstTyp.length = MAX_PER_TAB;
+  incBadge('data-sbadge', server);
+  incBadge('data-tbadge', type);
+}
+function render(){
+  if (!activeServer){ out.textContent = 'waiting for servers…'; return; }
+  const types = STORE.get(activeServer) || new Map();
+
+  const prevTop = out.scrollTop;
+  const prevH   = out.scrollHeight;
+
+  let text = '';
+  if (activeType === 'all'){
+    for (const [k, buf] of types) {
+      if (!buf.length) continue;
+      text += `\n[[ ${k} ]]  (${buf.length})\n` + buf.join('\n') + '\n';
+    }
+  } else {
+    const buf = types.get(activeType) || [];
+    text = buf.join('\n');
+  }
+  out.textContent = text.slice(0, MAX_CHARS);
+
+  requestAnimationFrame(() => {
+    if (stickToTop) out.scrollTop = 0;
+    else            out.scrollTop = prevTop + (out.scrollHeight - prevH);
+  });
+}
+function route(envelope){
+  const server = envelope.server || 'unknown';
+  let type = envelope.type || 'other';
+  let pretty = typeof envelope.data === 'string' ? envelope.data : JSON.stringify(envelope.data, null, 2);
+  push(server, type, pretty);
+  if (!activeServer) setActiveServer(server);
+  if (paused){
+    pending = Math.min(pending + 1, 1_000_000);
+    pendingCount.textContent = String(pending);
+  } else {
+    render();
+  }
+}
+
+// keyboard cycling
+function cycle(listSelector, activeKey, setActive, attr){
+  const btns = [...document.querySelectorAll(listSelector)];
+  if (!btns.length) return;
+  const idx = btns.findIndex(b => (b.getAttribute(attr) === activeKey));
+  const next = (idx < 0 ? 0 : (idx + 1) % btns.length);
+  setActive(btns[next].getAttribute(attr));
+}
+function cyclePrev(listSelector, activeKey, setActive, attr){
+  const btns = [...document.querySelectorAll(listSelector)];
+  if (!btns.length) return;
+  const idx = btns.findIndex(b => (b.getAttribute(attr) === activeKey));
+  const prev = (idx < 0 ? 0 : (idx - 1 + btns.length) % btns.length);
+  setActive(btns[prev].getAttribute(attr));
+}
+window.addEventListener('keydown', e=>{
+  if (e.shiftKey && e.key === 'ArrowRight') cycle('.tab[data-server]', activeServer, setActiveServer, 'data-server');
+  if (e.shiftKey && e.key === 'ArrowLeft')  cyclePrev('.tab[data-server]', activeServer, setActiveServer, 'data-server');
+  if (!e.shiftKey && e.key === 'ArrowRight') cycle('.tab[data-type]', activeType, setActiveType, 'data-type');
+  if (!e.shiftKey && e.key === 'ArrowLeft')  cyclePrev('.tab[data-type]', activeType, setActiveType, 'data-type');
+});
+
+ws.onopen    = ()=> ws.send('ping');
+ws.onclose   = ()=> route({server:'client', type:'other', data:'[ws closed]'});
+ws.onerror   = ()=> route({server:'client', type:'other', data:'[ws error]'});
+ws.onmessage = (e)=> { try { route(JSON.parse(e.data)); } catch { route({server:'unknown', type:'other', data:e.data}); } };
+
+// seed type tabs with message types (not stream names)
+const TYPE_SEED = [
+  'all',
+  'ledgerClosed',
+  'transaction',
+  'validationReceived',
+  'manifestReceived',
+  'serverStatus',
+  'peerStatusChange',
+  'other'
+];
+for (const k of TYPE_SEED) addTypeTab(k);
+</script>

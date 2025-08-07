@@ -1,0 +1,73 @@
+include:
+  - prepare-workload/testnet/compose.yml
+services:
+  workload:
+
+    image: workload:dev
+    build:
+      # context: ../workload
+      dockerfile: Dockerfile
+    container_name: workload
+    hostname: workload
+    ports: ["8000:8000"]
+    # command: >
+    #   uv run uvicorn workload.app:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./workload:/workload:cached
+    # volumes:
+      # - ./accounts.json:/accounts.json
+      # - ./workload/ledger.json:/ledger.json
+    # stop_signal: SIGINT
+    init: true
+    # depends_on: [rippled]
+    # networks: { xrpl_net: {} }
+
+    develop:
+      watch:
+        - action: rebuild
+          path: ./workload/pyproject.toml
+        - action: rebuild
+          path: ./Dockerfile
+
+# networks:
+#   xrpl_net:
+#     name: xrpl_net
+#     external: true
+  # proxy:
+  #   cap_add: [NET_ADMIN]
+  #   container_name: workload_proxy
+  #   hostname: workload_proxy
+  #   image: workload_frontend_proxy:latest
+  #   build:
+  #     dockerfile: Dockerfile.proxy
+  #     context: workload
+  #   # ports:
+  #   #   - 80:80
+  #   environment:
+  #     TARGET_HOST: workload
+  #     TARGET_PORT: "8000"
+  #     LISTEN_PORT: "80"     # what the LAN will hit
+  #   depends_on: [workload]
+  #   restart: unless-stopped
+  #   stop_signal: SIGINT
+  #   networks:
+  #     xrpl_net:
+  #     lan:
+  #       ipv4_address: 10.0.0.145
+
+  #   develop:
+  #     watch:
+  #       - action: sync
+  #         path: ./proxy.py
+  #         target: /proxy/py
+# networks:
+#   xrpl_net:
+#     external: true
+  # lan:
+  #   driver: macvlan
+  #   driver_opts:
+  #     parent: wlp7s0 # Your acutal NIC
+  #   ipam:
+  #     config:
+  #       - subnet: 10.0.0.0/24
+  #         gateway: 10.0.0.1

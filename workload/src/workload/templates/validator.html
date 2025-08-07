@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Info</title>
+    <style>
+        /* General page styling */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* Main container for the table */
+        #table-container {
+            max-width: 900px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            overflow: hidden; /* Ensures border-radius clips a full-width table */
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            padding: 20px 0;
+            margin: 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        /* Styling for all tables (main and nested) */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #ececec;
+            vertical-align: top;
+            line-height: 1.5;
+        }
+
+        /* Main table row styling */
+        table > tbody > tr:last-child > td {
+            border-bottom: none; /* Remove border from last item in any table */
+        }
+
+        /* Key column (first-child td in a row) */
+        table > tbody > tr > td:first-child {
+            width: 30%;
+            font-weight: 600;
+            color: #555;
+            /* Prevent line breaks in keys */
+            white-space: nowrap;
+        }
+
+        /* Nested tables (for objects) */
+        table table {
+            margin-top: -12px;
+            margin-bottom: -12px;
+            background-color: #fdfdfd;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+
+        table table td {
+             border: none;
+             border-bottom: 1px dotted #eee;
+        }
+
+        /* Styling for arrays */
+        ul {
+            list-style-type: none;
+            padding-left: 0;
+            margin: -12px 0; /* Align with cell padding */
+        }
+
+        ul li {
+            padding: 10px 0;
+            border-bottom: 1px dashed #e0e0e0;
+        }
+
+        ul li:last-child {
+            border-bottom: none;
+        }
+
+        /* Give array-items a bit of breathing room */
+        ul li table {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="table-container">
+        <h1>Server Info</h1>
+    </div>
+
+    <script>
+        // Your provided JSON data
+        const jsonData = {
+            "result": {
+                "info": {
+                    "build_version": "2.6.1",
+                    "complete_ledgers": "5-41530",
+                    "git": {
+                        "branch": "master",
+                        "hash": "70d5c624e8cf732a362335642b2f5125ce4b43c1"
+                    },
+                    "hostid": "val0",
+                    "initial_sync_duration_us": "36228807",
+                    "io_latency_ms": 1,
+                    "jq_trans_overflow": "0",
+                    "last_close": {
+                        "converge_time_s": 2,
+                        "proposers": 4
+                    },
+                    "load": {
+                        "job_types": [{
+                            "in_progress": 1,
+                            "job_type": "clientRPC"
+                        }, {
+                            "job_type": "ledgerRequest",
+                            "per_second": 2
+                        }, {
+                            "job_type": "ledgerData",
+                            "per_second": 1
+                        }, {
+                            "job_type": "trustedProposal",
+                            "per_second": 1
+                        }, {
+                            "job_type": "peerCommand",
+                            "per_second": 17
+                        }, {
+                            "job_type": "SyncReadNode",
+                            "per_second": 3
+                        }, {
+                            "job_type": "WriteNode",
+                            "per_second": 3
+                        }],
+                        "threads": 14
+                    },
+                    "load_factor": 1,
+                    "node_size": "huge",
+                    "peer_disconnects": "0",
+                    "peer_disconnects_resources": "0",
+                    "peers": 4,
+                    "ports": [{
+                        "port": "5005",
+                        "protocol": ["http"]
+                    }, {
+                        "port": "2459",
+                        "protocol": ["peer"]
+                    }, {
+                        "port": "6006",
+                        "protocol": ["ws"]
+                    }],
+                    "pubkey_node": "n9JvcVG5HzJtZ9zgwZhjuoMh84oXbVgFUFGESbCXCQzMdKnkMMPT",
+                    "pubkey_validator": "n9KCH6TCSoV2H6P7VgJDSxYYJiA6AQQFZysfkUSRRMDzERBSyC4Z",
+                    "server_state": "proposing",
+                    "server_state_duration_us": "124706619800",
+                    "state_accounting": {
+                        "connected": {
+                            "duration_us": "35002558",
+                            "transitions": "1"
+                        },
+                        "disconnected": {
+                            "duration_us": "1226242",
+                            "transitions": "1"
+                        },
+                        "full": {
+                            "duration_us": "124706619800",
+                            "transitions": "1"
+                        },
+                        "syncing": {
+                            "duration_us": "0",
+                            "transitions": "0"
+                        },
+                        "tracking": {
+                            "duration_us": "6",
+                            "transitions": "1"
+                        }
+                    },
+                    "time": "2025-Oct-22 17:00:53.211560 UTC",
+                    "uptime": 124742,
+                    "validated_ledger": {
+                        "age": 2,
+                        "base_fee_xrp": 1e-05,
+                        "hash": "B4F3820581199E56151DCCFD784249611D3A9E1EAAFEF8E573B1F58A3068FD11",
+                        "reserve_base_xrp": 1,
+                        "reserve_inc_xrp": 2,
+                        "seq": 41530
+                    },
+                    "validation_quorum": 4,
+                    "validator_list": {
+                        "count": 2,
+                        "expiration": "2026-Oct-22 06:21:35.000000000 UTC",
+                        "status": "active"
+                    }
+                },
+                "status": "success"
+            }
+        };
+
+        /**
+         * Recursively creates an HTML table from an object.
+         * @param {object} obj - The object to render.
+         * @returns {HTMLTableElement} - The generated table element.
+         */
+        function createTable(obj) {
+            const table = document.createElement('table');
+            const tbody = document.createElement('tbody');
+
+            for (const [key, value] of Object.entries(obj)) {
+                const tr = document.createElement('tr');
+
+                // Create key cell
+                const keyCell = document.createElement('td');
+                keyCell.textContent = key;
+                tr.appendChild(keyCell);
+
+                // Create value cell
+                const valueCell = document.createElement('td');
+
+                // Recursively handle values
+                if (value === null) {
+                    valueCell.textContent = 'null';
+                } else if (Array.isArray(value)) {
+                    valueCell.appendChild(formatArray(value));
+                } else if (typeof value === 'object') {
+                    valueCell.appendChild(createTable(value));
+                } else {
+                    valueCell.textContent = value;
+                }
+
+                tr.appendChild(valueCell);
+                tbody.appendChild(tr);
+            }
+
+            table.appendChild(tbody);
+            return table;
+        }
+
+        /**
+         * Formats an array for display within a table cell.
+         * @param {Array<any>} arr - The array to format.
+         * @returns {HTMLElement} - An HTML element (UL or text).
+         */
+        function formatArray(arr) {
+            // Handle empty array
+            if (arr.length === 0) {
+                const emptyNode = document.createElement('span');
+                emptyNode.textContent = '[]';
+                return emptyNode;
+            }
+
+            // If array contains objects, create a list of tables
+            if (typeof arr[0] === 'object' && arr[0] !== null) {
+                const ul = document.createElement('ul');
+                arr.forEach(item => {
+                    const li = document.createElement('li');
+                    li.appendChild(createTable(item)); // Each item gets its own table
+                    ul.appendChild(li);
+                });
+                return ul;
+            } else {
+                // If array contains primitives, join them
+                const textNode = document.createElement('span');
+                textNode.textContent = arr.join(', ');
+                return textNode;
+            }
+        }
+
+        // Wait for the DOM to load before running the script
+        document.addEventListener('DOMContentLoaded', () => {
+            const dataToRender = jsonData.result.info;
+            const container = document.getElementById('table-container');
+
+            // Generate the main table and add it to the page
+            const mainTable = createTable(dataToRender);
+            container.appendChild(mainTable);
+        });
+    </script>
+</body>
+</html>

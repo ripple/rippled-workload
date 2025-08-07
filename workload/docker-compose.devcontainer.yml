@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: ./workload/Dockerfile
+      target: dev
+    container_name: workload
+    networks: [xrpl_net]
+    # ports:
+    #   - 8000:8000
+    volumes:
+      - ..:/workspace:cached
+    working_dir: /workspace/workload/src
+    command: ["sleep", "infinity"]
+
+# This gets created by the testnet generation already created it
+networks:
+  xrpl_net:
+    external: true

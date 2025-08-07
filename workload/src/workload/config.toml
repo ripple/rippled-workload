@@ -1,0 +1,127 @@
+######################################################
+############## General defaults ######################
+######################################################
+funding_seed = false
+# Default is genesis account. Must be specified with generated ledger.
+[funding_account]
+#address = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
+#seed    = "snoPBrXtMeMyMHUVTgbuqAfg1SUTb"
+
+[gateways]
+names = [
+    "all-crypto",
+    "bit-bank",
+    "coin-thang",
+    "digi-bux"
+]
+# TODO: Instead of 4, get from the number of names?
+number = 4
+default_balance = 100_000_000_000000
+require_auth = false
+default_ripple = true
+
+[users]
+number = 96
+default_balance = 100_000_000000
+
+[amm]
+xrp_chance = 0.50
+trading_fee = 10
+default_amm_token_deposit = 1_000
+
+[currencies]
+token_distribution = 1_000_000
+codes = [
+    "USD", "CNY", "BTC", "ETH", "GBP",
+    "PNY", "DJF", "DKK", "GYD", "AUD",
+    "KPW", "INR", "SOL", "TRX", "ADA",
+    "XLM", "SUI", "LTC", "XMR", "DOT",
+]
+
+[currencies.rate]
+USD = 1_000_000
+BTC = 1_000_000_000
+
+######################################################
+########### Transaction context defaults #############
+######################################################
+[transactions]
+# Maximum pending transactions per account (rippled queue limit)
+# Higher values = more throughput but more risk of sequence errors
+# Default: 10 (matches rippled's per-account queue limit) #TODO: Confirm in docs/source/Slack if this is still accurate
+max_pending_per_account = 10
+
+# Disable specific transaction types (all types in _BUILDERS are enabled by default)
+disabled = [
+    "AMMCreate",  # Expensive fee, creates AMM pool
+    # Batch now handled: sequences synced from ledger after validation/rejection/expiry
+]
+
+# Transaction type percentages for random selection (0.0 to 1.0)
+# Types not listed share the remaining percentage evenly
+# Example: Payment=0.5, TrustSet=0.3 means 50% Payment, 30% TrustSet, and remaining 20% split evenly among all other
+# enabled types
+[transactions.percentages]
+Payment = 0.4
+OfferCreate = 0.3
+
+[transactions.mptoken.issuance_create]
+transfer_fee = 1000
+
+[transactions.payment]
+amount = 100_000_000
+
+[transactions.trustset]
+limit = 1_000_000_000_000000
+
+[timeout]
+overall = 6
+startup = 180
+initial_ledgers = 1
+
+[rippled]
+docker = "rippled"
+local = "172.17.0.6"
+rpc_port = 5005
+ws_port = 6006
+timeout = 600
+
+[logging]
+version = 1
+disable_existing_loggers = true
+
+[logging.formatters.simple]
+format = "[%(levelname)s] %(message)s"
+
+[logging.formatters.simple_debug]
+format = "[%(levelname)s] [%(module)s.%(funcName)s:%(lineno)d] %(message)s"
+
+[logging.formatters.not_simple]
+format = "[%(levelname)s] %(filename)s %(funcName)s %(message)s"
+
+[logging.formatters.detailed]
+format = "%(asctime)s [%(levelname)s] %(module)s|L%(lineno)d: %(message)s"
+datefmt = "%Y-%m-%dT%H:%M:%S%z"
+
+[logging.handlers.stdout]
+class = "logging.StreamHandler"
+level = "DEBUG"  # Changed from INFO to see debug messages
+formatter = "simple_debug"
+stream = "ext://sys.stdout"
+
+[logging.handlers.stderr]
+class = "logging.StreamHandler"
+level = "ERROR"
+formatter = "simple"
+stream = "ext://sys.stdout"
+
+[logging.handlers.file]
+class = "logging.handlers.RotatingFileHandler"
+level = "INFO"
+formatter = "detailed"
+maxBytes = 10000000
+backupCount = 3
+
+[logging.loggers.root]
+level = "DEBUG"
+handlers = ["stdout", "stderr", "file"]

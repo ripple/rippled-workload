@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>server_info dashboard</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#0f1620; --text:#e6edf3; --muted:#9fb0c0; --key:#8ab4f8; --accent:#7ee787; --border:#253042; }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,Consolas,monospace}
+  .wrap{max-width:1000px;margin:24px auto;padding:16px;background:var(--panel);border:1px solid var(--border);border-radius:14px}
+  h1{margin:0 0 8px;font-size:16px;color:var(--muted)}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  input[type=number]{width:90px;background:#0b1220;color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:8px}
+  button{background:#1b2430;color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:8px;cursor:pointer}
+  button:hover{background:#1e2a38}
+  .meta{color:var(--muted);font-size:12px;margin:6px 0}
+  .err{color:#ff7b72}
+  .json{white-space:normal}
+  .item{margin-left:14px;border-left:1px dashed var(--border);padding-left:10px}
+  .kv{display:flex;gap:8px;align-items:baseline}
+  .key{color:var(--key)}
+  .type{color:var(--muted);font-size:12px}
+  .val-scalar{color:var(--accent)}
+  details{margin:4px 0}
+  details>summary{cursor:pointer;list-style:none}
+  details>summary::before{content:"▶";display:inline-block;width:1em;color:var(--muted);transition:transform .15s ease}
+  details[open]>summary::before{transform:rotate(90deg)}
+  .braces{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>XRPL server_info</h1>
+  <div class="controls">
+    <button id="refresh">Refresh now</button>
+    <button id="expand">Expand all</button>
+    <button id="collapse">Collapse large</button>
+    <label>Interval(ms) <input id="interval" type="number" min="500" step="500" value="5000"></label>
+    <button id="start">Start</button>
+    <button id="stop">Stop</button>
+  </div>
+  <div id="status" class="meta"></div>
+  <div id="root" class="json"></div>
+</div>
+
+<script>
+const THRESHOLD = 3;
+const $ = s => document.querySelector(s);
+const root = $("#root"), statusEl = $("#status");
+let timer = null;
+let inFlight = null;
+
+$("#refresh").onclick = () => fetchAndRender();
+$("#expand").onclick  = () => document.querySelectorAll('#root details').forEach(d => d.open = true);
+$("#collapse").onclick= () => document.querySelectorAll('#root details').forEach(d => d.open = false);
+$("#start").onclick   = () => { const n = Math.max(500, Number($("#interval").value)||5000); clearInterval(timer); timer=setInterval(fetchAndRender,n); fetchAndRender(); };
+$("#stop").onclick    = () => { clearInterval(timer); timer=null; setStatus("stopped"); };
+
+async function fetchAndRender() {
+  if (inFlight) inFlight.abort();
+  inFlight = new AbortController();
+  setStatus("requesting…");
+
+  const openBefore = getOpenPaths();
+
+  try {
+    const res = await fetch("/server_info/{{val}}", { method:"POST", signal: inFlight.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = await res.json();
+    const data = raw?.result?.info ?? raw; // skip outer result/info if present
+
+    root.innerHTML = "";
+    root.append(renderJSON(data, null, "root"));
+    restoreOpenPaths(openBefore);
+    setStatus(`ok · ${new Date().toLocaleTimeString()}`);
+  } catch (e) {
+    if (e.name !== "AbortError") setStatus(`error: ${e.message}`, true);
+    if (timer) {
+      clearInterval(timer);
+      setTimeout(() => { const n = Math.max(500, Number($("#interval").value)||5000); timer=setInterval(fetchAndRender,n); }, 2000);
+    }
+  } finally {
+    inFlight = null;
+  }
+}
+
+function setStatus(msg, err=false){ statusEl.textContent = msg; statusEl.className = "meta"+(err?" err":""); }
+
+function getOpenPaths() {
+  return Array.from(root.querySelectorAll('details[open]')).map(d => d.dataset.path);
+}
+function restoreOpenPaths(paths) {
+  paths.forEach(p => {
+    const d = root.querySelector(`details[data-path="${cssEscape(p)}"]`);
+    if (d) d.open = true;
+  });
+}
+// CSS.escape polyfill (minimal)
+function cssEscape(s){ return String(s).replace(/"/g,'\\"'); }
+
+function renderJSON(value, key=null, path="root"){
+  const c = div('item');
+  if (isScalar(value)) {
+    const row = div('kv');
+    if (key!==null) row.append(span('key', key+':'));
+    row.append(span('val-scalar', format(value)));
+    c.append(row); return c;
+  }
+  const arr = Array.isArray(value);
+  const entries = arr ? value.map((v,i)=>[i,v]) : Object.entries(value);
+  const n = entries.length;
+
+  const currPath = key===null ? path : `${path}.${String(key)}`;
+
+  const summary = document.createElement('summary');
+  const label = key!==null ? key : (arr?'Array':'Object');
+  summary.append(span('key',label), span('type',` ${arr?'[ ]':'{ }'} · ${n} item${n!==1?'s':''}`));
+
+  const body = div('');
+  for (const [k,v] of entries) body.append(renderJSON(v,k, currPath));
+
+  if (n > THRESHOLD) {
+    const d = document.createElement('details');
+    d.dataset.path = currPath;
+    d.append(summary, body);
+    c.append(d);
+  } else {
+    const h = div('kv'); if (key!==null) h.append(span('key', key+':')); h.append(span('braces', arr?'[':'{'));
+    c.append(h, body);
+    const f = div('kv'); f.append(span('braces', arr?']':'}')); c.append(f);
+  }
+  return c;
+}
+
+const isScalar = v => v===null || typeof v!=='object';
+const format = v => typeof v==='string' ? JSON.stringify(v) : String(v);
+const span=(cls,txt)=>{const e=document.createElement('span'); e.className=cls; e.textContent=txt; return e;};
+const div = cls => { const e=document.createElement('div'); e.className=cls; return e; };
+
+// optional: auto-start
+// document.getElementById('start').click();
+</script>
+</body>
+</html>
