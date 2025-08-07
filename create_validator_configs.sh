@@ -8,6 +8,7 @@ num_keys=${NUM_VALIDATORS:-5}
 num_services=$((num_keys + 1))
 rippled_image="${RIPPLED_IMAGE:-rippled:latest}"
 workload_image="${WORKLOAD_IMAGE:-workload:latest}"
+sidecar_image="${SIDECAR_IMAGE:-sidecar:latest}"
 confs_dir="$PWD/config/volumes"
 conf_file="rippled.cfg"
 validator_name="atval"
@@ -236,8 +237,10 @@ EOF
 set -e
 
 # Write the services to the compose file
+sidecar_entrypoint='["python", "sidecar.py", "-t", "3", "-v"'
 for i in $(seq $num_keys); do
     valname="${validator_name}${i}"
+    sidecar_entrypoint+=", \"${valname}\""
     gen=""
     if [ "$i" -eq "1" ]; then
         gen=', "--start"'
@@ -262,6 +265,7 @@ for i in $(seq $num_keys); do
 EOF
 done
 rippled_ip_address=""
+sidecar_entrypoint+="]"
 
 tee -a "${compose_file}" <<-EOF
   ${rippled_name}:
@@ -296,6 +300,21 @@ tee -a "${compose_file}" <<-EOF
         condition: service_healthy
       ${rippled_name}:
         condition: service_healthy
+    networks:
+      ${network_name}:
+
+EOF
+
+## Add the sidecar service
+tee -a "${compose_file}" <<-EOF
+  sidecar:
+    hostname: sidecar
+    image: ${sidecar_image}
+    container_name: sidecar
+    entrypoint: ${sidecar_entrypoint}
+    depends_on:
+      workload:
+        condition: service_started
     networks:
       ${network_name}:
 EOF
