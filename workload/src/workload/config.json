@@ -30,13 +30,17 @@
             }
         },
         "transactions": {
+            "payment": {
+                "default_amount": "100000000"
+            },
             "trustset": {
                 "limit": "1000000000000000"
             }
         },
         "rippled": {
-            "local": "rippled",
+            "local": "172.17.0.3",
             "json_rpc_port": 5005,
+            "ws_port": 6006,
             "timeout": 600
         }
     },
