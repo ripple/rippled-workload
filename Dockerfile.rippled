@@ -67,4 +67,4 @@ RUN ln -s /opt/ripple/bin/rippled /usr/local/bin/rippled
 RUN mkdir -p /etc/opt && ln -s /opt/ripple/etc/ /etc/opt/ripple
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN set -ex; apt-get update && apt-get install --yes curl jq procps && rm -rf /var/lib/apt/lists/*
+RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb && rm -rf /var/lib/apt/lists/*
