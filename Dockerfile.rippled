@@ -6,6 +6,7 @@ RUN uname -m | grep -E '^x86_64$'
 
 ARG RIPPLED_REPO="https://github.com/XRPLF/rippled.git"
 ARG RIPPLED_COMMIT="develop"
+ARG RIPPLED_CREDENTIALS=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
     SOURCE_DIR=/root/rippled \
@@ -21,7 +22,12 @@ EOF
 
 RUN <<EOF
     set -ex
-    git clone --depth 1 --branch ${RIPPLED_COMMIT} ${RIPPLED_REPO} ${SOURCE_DIR}
+    if [ -n "$RIPPLED_CREDENTIALS" ]; then 
+        REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
+    else 
+        REPO_URL="$RIPPLED_REPO"; 
+    fi
+    git clone --depth 1 --branch ${RIPPLED_COMMIT} ${REPO_URL} ${SOURCE_DIR}
     git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT}
     printf "REPO=%s\n" ${RIPPLED_REPO} > ${SOURCE_DIR}.txt
     printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt
