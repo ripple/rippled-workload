@@ -1,5 +1,9 @@
-FROM python:3
+FROM ghcr.io/astral-sh/uv:0.9.12-python3.13-trixie-slim
 
-COPY run.py /run.py
-RUN pip install antithesis
-CMD ["python3", "/run.py"]
+ADD simple /simple
+
+WORKDIR /simple
+RUN uv sync --locked
+ENV PATH=$PATH:/simple/.venv/bin
+WORKDIR /simple/src/simple
+CMD ["uvicorn", "simple.main:app", "--host", "0.0.0.0", "--port", "8000"]
