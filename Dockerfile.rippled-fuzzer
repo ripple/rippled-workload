@@ -18,7 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FUZZER_BUILD_DIR=/root/fuzzer-build
 
 # Clone and build rippled
-    RUN <<EOF
+RUN <<EOF
     set -ex
     if [ -n "$RIPPLED_CREDENTIALS" ]; then 
     REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
@@ -31,13 +31,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt
     printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt
     rm -rf ${SOURCE_DIR}/.git
-    EOF
+EOF
 
 # Configure Conan
-    RUN <<EOF
-        set -ex
-        conan remote add --index 0 ripple https://conan.ripplex.io
-    EOF
+RUN <<EOF
+    set -ex
+    conan remote add --index 0 ripple https://conan.ripplex.io
+EOF
     WORKDIR ${SOURCE_DIR}
 
 RUN conan config install conan/profiles/ --target-folder $(conan config home)/profiles/
