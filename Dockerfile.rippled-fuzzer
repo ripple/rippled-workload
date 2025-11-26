@@ -17,20 +17,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FUZZER_SOURCE_DIR=/root/rippled-fuzzer \
     FUZZER_BUILD_DIR=/root/fuzzer-build
 
-# Configure Conan
-RUN <<EOF
-    set -ex
-    conan remote add --index 0 xrplf https://conan.ripplex.io
-    echo "core.download:parallel=$(nproc)" > "$(conan config home)/global.conf"
-EOF
-
 # Clone and build rippled
-RUN <<EOF
+    RUN <<EOF
     set -ex
     if [ -n "$RIPPLED_CREDENTIALS" ]; then 
-        REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
+    REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
     else 
-        REPO_URL="$RIPPLED_REPO"; 
+    REPO_URL="$RIPPLED_REPO";
     fi
     git clone --depth 1 --branch ${RIPPLED_COMMIT} ${REPO_URL} ${SOURCE_DIR}
     git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT}
@@ -38,9 +31,14 @@ RUN <<EOF
     printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt
     printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt
     rm -rf ${SOURCE_DIR}/.git
-EOF
+    EOF
 
-WORKDIR ${SOURCE_DIR}
+# Configure Conan
+    RUN <<EOF
+        set -ex
+        conan remote add --index 0 ripple https://conan.ripplex.io
+    EOF
+    WORKDIR ${SOURCE_DIR}
 
 RUN conan config install conan/profiles/ --target-folder $(conan config home)/profiles/
 
@@ -58,9 +56,6 @@ RUN <<EOF
         -Dvoidstar=ON \
         -Dxrpld=ON \
         -DCMAKE_BUILD_TYPE=Debug \
-        -DSECP256K1_BUILD_BENCHMARK=OFF \
-        -DSECP256K1_BUILD_TESTS=OFF \
-        -DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
         -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
 EOF
 
@@ -88,14 +83,14 @@ RUN <<EOF
     conan install ${FUZZER_SOURCE_DIR} \
         --output-folder ${FUZZER_BUILD_DIR} \
         --build missing \
-        --settings build_type=Release
+        --settings build_type=Debug
 EOF
 
 # Configure and build fuzzer
 RUN <<EOF
     set -ex
     cmake -S ${FUZZER_SOURCE_DIR} -B ${FUZZER_BUILD_DIR} \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_TOOLCHAIN_FILE=${FUZZER_BUILD_DIR}/build/generators/conan_toolchain.cmake
 EOF
 
