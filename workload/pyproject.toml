@@ -6,18 +6,8 @@ authors = [
     { name = "Michael Legleux", email = "mlegleux@ripple.com" }
 ]
 dependencies = [
-    "xrpl-py",
     "antithesis>=0.1.17",
-    "requests>=2.32.4",
-    "anyio>=4.9.0",
-    "ruamel-yaml>=0.18.14",
-    "fastapi[standard]>=0.116.1",
-    "uvicorn[standard]>=0.35.0",
-    "pydantic-settings>=2.11.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.13"
 license = { text = "MIT" }
-
-[tool.uv]
-package = "src"

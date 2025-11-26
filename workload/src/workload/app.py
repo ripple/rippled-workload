@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from workload.logging_config import setup_logging
 import logging
 
 try:
@@ -12,7 +11,6 @@ except ImportError:
     def setup_complete(details=None):
         pass
 
-setup_logging()
 log = logging.getLogger("workload.app")
 
 @asynccontextmanager
