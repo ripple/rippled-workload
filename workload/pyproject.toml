@@ -13,42 +13,11 @@ dependencies = [
     "ruamel-yaml>=0.18.14",
     "fastapi[standard]>=0.116.1",
     "uvicorn[standard]>=0.35.0",
-    "names>=0.3.0",
     "pydantic-settings>=2.11.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.13"
 license = { text = "MIT" }
 
-[project.scripts]
-workload = "workload.__main__:main"
-
-[tool.ruff]
-line-length = 120
-target-version = "py313"
-exclude = [
-    ".git",
-]
-lint.select = [
-    "ANN201", # methods must have return types
-    "B",
-    "E",
-    "F",
-    # "D",
-    "Q",
-]
-
-# lint.extend-select = ["D"]
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-docstring-code-format = true
-
-[dependency-groups]
-dev = [
-    "pre-commit>=4.3.0",
-]
-lint = [
-    "ruff>=0.14.1",
-]
+[tool.uv]
+package = "src"
