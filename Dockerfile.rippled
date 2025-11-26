@@ -14,14 +14,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN <<EOF
     set -ex
-    conan remote add --index 0 ripple https://conan.ripplex.io
-    echo "core.download:parallel=$(nproc)" > "$(conan config home)/global.conf"
-    ## Ninja may make CI machines OOM
-    #echo "tools.build:jobs=$(($(nproc) * 4/5))" > "$(conan config home)/global.conf"
-EOF
-
-RUN <<EOF
-    set -ex
     if [ -n "$RIPPLED_CREDENTIALS" ]; then 
         REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
     else 
@@ -36,6 +28,11 @@ RUN <<EOF
 EOF
 
 WORKDIR ${SOURCE_DIR}
+
+RUN <<EOF
+    set -ex
+    conan remote add --index 0 ripple https://conan.ripplex.io
+EOF
 
 RUN conan config install conan/profiles/ --target-folder $(conan config home)/profiles/
 
@@ -53,9 +50,6 @@ RUN <<EOF
         -Dvoidstar=ON \
         -Dxrpld=ON \
         -DCMAKE_BUILD_TYPE=Debug \
-        -DSECP256K1_BUILD_BENCHMARK=OFF \
-        -DSECP256K1_BUILD_TESTS=OFF \
-        -DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
         -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
 EOF
 
