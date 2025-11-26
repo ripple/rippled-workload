@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-import logging
 
 try:
     from antithesis.lifecycle import setup_complete
@@ -11,14 +10,13 @@ except ImportError:
     def setup_complete(details=None):
         pass
 
-log = logging.getLogger("workload.app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     msg = "Network is ready. Initializing workload..."
     print(msg)
-    log.info(msg)
     setup_complete({"message": msg})
+    print("lifecycle msg sent")
     yield
 
 app = FastAPI(
