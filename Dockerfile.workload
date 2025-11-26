@@ -17,4 +17,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 EXPOSE 8000
 
-CMD ["uvicorn", "workload_app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "workload.app:app", "--host", "0.0.0.0", "--port", "8000"]
