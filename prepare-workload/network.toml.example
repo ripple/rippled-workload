@@ -1,0 +1,17 @@
+edges = [
+    ["rippled", "val1"],
+    ["val0", "val1"],
+    ["val0", "val2"],
+    ["val0", "val3"],
+    ["val0", "val4"],
+    ["val1", "val2"],
+    ["val1", "val3"],
+    ["val1", "val4"],
+    ["val2", "val5"],
+]
+
+private_peers = [
+    "val0",
+    "val1",
+    "val5",
+]

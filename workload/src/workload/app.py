@@ -120,7 +120,7 @@ class Workload:
         rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT", conf["rippled"]["json_rpc_port"])
         self.rippled = f"http://{rippled_host}:{rippled_rpc_port}"
         logger.info("Connecting to rippled at: %s", self.rippled)
-        use_ledger = True
+        use_ledger = False
         # if Path("/.dockerenv").is_file() and use_ledger:
         accounts_json = Path("/accounts.json")
         # else:
