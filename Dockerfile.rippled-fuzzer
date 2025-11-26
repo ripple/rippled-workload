@@ -7,17 +7,23 @@ RUN uname -m | grep -E '^x86_64$'
 ARG RIPPLED_REPO="https://github.com/XRPLF/rippled.git"
 ARG RIPPLED_COMMIT="develop"
 ARG RIPPLED_CREDENTIALS=""
+ARG FUZZER_REPO="https://github.com/ripple/rippled-fuzzer.git"
+ARG FUZZER_COMMIT="main"
+ARG FUZZER_CREDENTIALS=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
     SOURCE_DIR=/root/rippled \
-    BUILD_DIR=/root/build
+    BUILD_DIR=/root/build \
+    FUZZER_SOURCE_DIR=/root/rippled-fuzzer \
+    FUZZER_BUILD_DIR=/root/fuzzer-build
 
+# Clone and build rippled
 RUN <<EOF
     set -ex
     if [ -n "$RIPPLED_CREDENTIALS" ]; then 
-        REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
+    REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
     else 
-        REPO_URL="$RIPPLED_REPO"; 
+    REPO_URL="$RIPPLED_REPO";
     fi
     git clone --depth 1 --branch ${RIPPLED_COMMIT} ${REPO_URL} ${SOURCE_DIR}
     git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT}
@@ -27,12 +33,12 @@ RUN <<EOF
     rm -rf ${SOURCE_DIR}/.git
 EOF
 
-WORKDIR ${SOURCE_DIR}
-
+# Configure Conan
 RUN <<EOF
     set -ex
     conan remote add --index 0 ripple https://conan.ripplex.io
 EOF
+    WORKDIR ${SOURCE_DIR}
 
 RUN conan config install conan/profiles/ --target-folder $(conan config home)/profiles/
 
@@ -55,16 +61,67 @@ EOF
 
 RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DIR} --prefix /opt/ripple
 
-RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so  -O /usr/lib/libvoidstar.so
+# Clone and build fuzzer
+RUN <<EOF
+    set -ex
+    if [ -n "$FUZZER_CREDENTIALS" ]; then 
+        FUZZER_URL="$(echo "$FUZZER_REPO" | sed "s#https://#https://${FUZZER_CREDENTIALS}@#")"; 
+    else 
+        FUZZER_URL="$FUZZER_REPO"; 
+    fi
+    git clone --depth 1 --branch ${FUZZER_COMMIT} ${FUZZER_URL} ${FUZZER_SOURCE_DIR}
+    git -C ${FUZZER_SOURCE_DIR} checkout ${FUZZER_COMMIT}
+    rm -rf ${FUZZER_SOURCE_DIR}/.git
+EOF
 
+WORKDIR ${FUZZER_SOURCE_DIR}
+
+# Install fuzzer dependencies with Conan
+RUN <<EOF
+    set -ex
+    mkdir -p ${FUZZER_BUILD_DIR}
+    conan install ${FUZZER_SOURCE_DIR} \
+        --output-folder ${FUZZER_BUILD_DIR} \
+        --build missing \
+        --settings build_type=Debug
+EOF
+
+# Configure and build fuzzer
+RUN <<EOF
+    set -ex
+    cmake -S ${FUZZER_SOURCE_DIR} -B ${FUZZER_BUILD_DIR} \
+        -DCMAKE_BUILD_TYPE=Debug \
+        -DCMAKE_TOOLCHAIN_FILE=${FUZZER_BUILD_DIR}/build/generators/conan_toolchain.cmake
+EOF
+
+RUN cmake --build ${FUZZER_BUILD_DIR} --parallel $(nproc)
+
+# Install fuzzer to /opt/fuzzer
+RUN <<EOF
+    set -ex
+    mkdir -p /opt/fuzzer/bin
+    cp ${FUZZER_BUILD_DIR}/rippled-fuzzer /opt/fuzzer/bin/
+EOF
+
+# Download Antithesis instrumentation library
+RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so -O /usr/lib/libvoidstar.so
+
+# Runtime stage
 FROM ubuntu:${CODENAME}
 
 COPY --from=build /opt/ripple /opt/ripple
+COPY --from=build /opt/fuzzer /opt/fuzzer
 COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
 COPY --from=build /root/rippled.txt /opt/ripple/bin/rippled.git-commit.txt
 
+# Create symlinks for both binaries
 RUN ln -s /opt/ripple/bin/rippled /usr/local/bin/rippled
+RUN ln -s /opt/fuzzer/bin/rippled-fuzzer /usr/local/bin/rippled-fuzzer
 RUN mkdir -p /etc/opt && ln -s /opt/ripple/etc/ /etc/opt/ripple
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb && rm -rf /var/lib/apt/lists/*
+
+# Create fuzzer config directory
+RUN mkdir -p /etc/fuzzer
+
