@@ -17,7 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FUZZER_SOURCE_DIR=/root/rippled-fuzzer \
     FUZZER_BUILD_DIR=/root/fuzzer-build
 
-# Clone and build rippled
+# Clone rippled
 RUN <<EOF
     set -ex
     if [ -n "$RIPPLED_CREDENTIALS" ]; then 
@@ -31,6 +31,19 @@ RUN <<EOF
     printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt
     printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt
     rm -rf ${SOURCE_DIR}/.git
+EOF
+
+# Clone fuzzer
+RUN <<EOF
+    set -ex
+    if [ -n "$FUZZER_CREDENTIALS" ]; then
+    FUZZER_URL="$(echo "$FUZZER_REPO" | sed "s#https://#https://${FUZZER_CREDENTIALS}@#")";
+    else
+    FUZZER_URL="$FUZZER_REPO";
+    fi
+    git clone --depth 1 --branch ${FUZZER_COMMIT} ${FUZZER_URL} ${FUZZER_SOURCE_DIR}
+    git -C ${FUZZER_SOURCE_DIR} checkout ${FUZZER_COMMIT}
+    rm -rf ${FUZZER_SOURCE_DIR}/.git
 EOF
 
 # Configure Conan
@@ -60,19 +73,6 @@ RUN <<EOF
 EOF
 
 RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DIR} --prefix /opt/ripple
-
-# Clone and build fuzzer
-RUN <<EOF
-    set -ex
-    if [ -n "$FUZZER_CREDENTIALS" ]; then 
-        FUZZER_URL="$(echo "$FUZZER_REPO" | sed "s#https://#https://${FUZZER_CREDENTIALS}@#")"; 
-    else 
-        FUZZER_URL="$FUZZER_REPO"; 
-    fi
-    git clone --depth 1 --branch ${FUZZER_COMMIT} ${FUZZER_URL} ${FUZZER_SOURCE_DIR}
-    git -C ${FUZZER_SOURCE_DIR} checkout ${FUZZER_COMMIT}
-    rm -rf ${FUZZER_SOURCE_DIR}/.git
-EOF
 
 WORKDIR ${FUZZER_SOURCE_DIR}
 
