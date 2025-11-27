@@ -1,16 +1,44 @@
+# Dockerfile for the Antithesis Workload (using uv for dependency management)
+
+# 1. BASE IMAGE
+# Uses a slim Python 3.13 base image with uv pre-installed on Debian Bookworm.
+# This ensures we have a stable, minimal environment ready for Python dependencies.
 FROM ghcr.io/astral-sh/uv:0.8.3-python3.13-bookworm
 
+# Environment variables
+# PYTHONUNBUFFERED=1 ensures that Python output is sent immediately to the container logs.
 ENV PYTHONUNBUFFERED=1
-WORKDIR /opt/antithesis/catalog/workload
-COPY workload /opt/antithesis/catalog/workload
 
-# TODO: Update when buildkit available
-# RUN --mount=from=ghcr.io/astral-sh/uv,source=/uv,target=/bin/uv \
-#     uv sync
-RUN uv sync
-RUN apt-get update && apt-get install -y curl
+# 2. APPLICATION SETUP
+# Define the working directory where application files will reside.
+WORKDIR /opt/antithesis/catalog/workload
+
+# Copy application files into the WORKDIR.
+# Assuming 'workload' is a local directory containing the application source code.
+COPY workload .
+# Copy specific test composer/transaction scripts needed for the workload execution.
 COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
 
+# 3. DEPENDENCY INSTALLATION & SYSTEM PACKAGES
+# Install all dependencies and required system packages (curl) in a single RUN command
+# for maximum layer efficiency and smallest final image size.
+RUN set -eux; \
+    # Install Python dependencies defined in project files (e.g., requirements.txt, pyproject.toml).
+    # uv sync creates the virtual environment (.venv) and installs packages.
+    uv sync; \
+    \
+    # Install necessary system packages using recommended flags (--no-install-recommends)
+    # to keep the image minimal.
+    apt-get update && \
+    apt-get install -y --no-install-recommends curl; \
+    \
+    # Clean up APT caches to minimize the final image size immediately after installation.
+    rm -rf /var/lib/apt/lists/*;
+
+# 4. PATH Configuration
+# Add the virtual environment's bin directory and the transaction scripts directory to the PATH.
 ENV PATH="/opt/antithesis/catalog/workload/.venv/bin:/opt/antithesis/test/v1/all_transactions:$PATH"
 
+# 5. ENTRYPOINT
+# Execute the 'workload' entry point, which should be available via the updated PATH.
 CMD ["workload"]
