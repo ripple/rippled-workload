@@ -1,0 +1,21 @@
+#[network]
+#num_validators = 5
+#num_peers = 1
+#use_unl = true
+#validator_name = "val"
+#peer_name = "rippled"
+#network_file = ""
+
+#[node_config]
+#[node_config.ports]
+#rpc_admin_local = 5005
+#peer = 2459
+#ws_admin_local = 6006
+
+#[compose_config]
+#image = "rippleci/rippled:develop"
+
+#[voting]
+#reference_fee = 10
+#account_reserve = 1000000
+#owner_reserve = 2000000

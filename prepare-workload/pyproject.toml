@@ -1,0 +1,55 @@
+[project]
+name = "prepare-workload"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "mako>=1.3.10",
+    "xrpl-py>=4.3.0",
+]
+
+[project.optional-dependencies]
+pretty = [
+    "rich>=14.2.0",
+]
+
+# [project.scripts]
+# prep = "prepare_workload:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.2",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+#skip-magic-trailing-comma = false
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "D",
+    "E4",
+    "E7",
+    "E9",
+    "F",
+]
+
+ignore = [
+    "D100",
+    "D102", # ignore doctring in public method
+    "D105", # ignore docstring in magic method
+    "D103",
+    "D212",
+    # "D213",
+    "D417", # require documentation for every function parameter.
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Accepts: "google", "numpy", or "pep257".
