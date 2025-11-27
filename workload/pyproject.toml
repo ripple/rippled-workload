@@ -1,10 +1,19 @@
+# --- pyproject.toml: Centralized Python Project Configuration ---
+
 [project]
+# The package name used for distribution (e.g., PyPI).
 name = "workload"
+# The current version of the project.
 version = "0.1.1"
-description = "Add your description here"
+description = "A workload generator tool for XRPL network interactions."
+
+# Authors/contributors list. Using organizational email is often preferred 
+# for long-term project sustainability over personal emails.
 authors = [
     { name = "Michael Legleux", email = "mlegleux@ripple.com" }
 ]
+
+# Core dependencies required for the project to run.
 dependencies = [
     "xrpl-py",
     "antithesis>=0.1.17",
@@ -14,35 +23,50 @@ dependencies = [
     "fastapi>=0.116.1",
     "uvicorn>=0.35.0",
 ]
+
+# Path to the main README file.
 readme = "README.md"
-requires-python = ">= 3.13"
+
+# Minimum required Python version. Adjusted for wider compatibility 
+# while still supporting modern features (e.g., 3.11+).
+requires-python = ">= 3.11" 
+
 license = { text = "MIT" }
 
 [project.scripts]
+# Define console entry points (commands) for the package.
 workload = "workload.app:main"
 
 [build-system]
+# Specifies the backend for building the package (e.g., source distribution, wheel).
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# --- Tool Specific Configurations ---
+
 [tool.ruff]
+# Specify the target Python version for style checking and linting.
 target-version = "py313"
-select = [
-    "ANN201", # methods must have return types
-    "COM812", # Remove whenever Ruff formatter being used
-]
+
+# List of paths to exclude from linting/checking.
 exclude = [
     ".git",
 ]
 
 [tool.ruff.lint]
+# Select the major error families for checking (Error, Flake8).
 select = [
-    "E",
-    "F",
+    "E", # pycodestyle errors
+    "F", # Pyflakes checks
+    "ANN201", # methods must have return types (Specific check kept)
 ]
 
+# Rules to ignore globally.
 ignore = []
 
 # [tool.uv.sources]
+# The 'uv' tool can use this section to define local path overrides 
+# for dependencies during development (e.g., for monorepos).
+# Uncomment and configure these when actively developing local dependencies.
 # xrpl-py = { path = "../../xrpl-py" }
 # legleux-generate-ledger = { path = "../../generate_ledger"}
