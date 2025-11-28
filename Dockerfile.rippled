@@ -1,70 +1,111 @@
+# -----------------------------------------------------------------------------
+# Multi-stage Dockerfile for building rippled with Antithesis instrumentation (voidstar).
+# -----------------------------------------------------------------------------
+
+# --- STAGE 1: BUILD ---
+# Use the specified base image with CLang 16 for the build environment.
 ARG CODENAME=noble
 FROM ghcr.io/xrplf/ci/ubuntu-${CODENAME}:clang-16 AS build
 
-# Antithesis supports only x86_64 architecture
+# Security/Architecture check (Antithesis requirement)
 RUN uname -m | grep -E '^x86_64$'
 
+# Build arguments for source control and credentials
 ARG RIPPLED_REPO="https://github.com/XRPLF/rippled.git"
 ARG RIPPLED_COMMIT="develop"
 ARG RIPPLED_CREDENTIALS=""
 
+# Environment variables for directory paths
 ENV DEBIAN_FRONTEND=noninteractive \
     SOURCE_DIR=/root/rippled \
     BUILD_DIR=/root/build
 
+# 1. Clone the repository and save commit info
 RUN <<EOF
     set -ex
-    if [ -n "$RIPPLED_CREDENTIALS" ]; then 
-        REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
-    else 
-        REPO_URL="$RIPPLED_REPO"; 
+    # Prepare authenticated URL if credentials are provided
+    REPO_URL="${RIPPLED_REPO}"
+    if [ -n "${RIPPLED_CREDENTIALS}" ]; then 
+        REPO_URL="$(echo "${RIPPLED_REPO}" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
     fi
-    git clone --depth 1 --branch ${RIPPLED_COMMIT} ${REPO_URL} ${SOURCE_DIR}
-    git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT}
-    printf "REPO=%s\n" ${RIPPLED_REPO} > ${SOURCE_DIR}.txt
-    printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt
-    printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt
-    rm -rf ${SOURCE_DIR}/.git
+
+    # Clone the repository (depth 1 is good for size)
+    git clone --depth 1 --branch "${RIPPLED_COMMIT}" "${REPO_URL}" "${SOURCE_DIR}"
+
+    # Ensure checkout to the specific commit/tag/branch
+    git -C "${SOURCE_DIR}" checkout "${RIPPLED_COMMIT}"
+
+    # Save build metadata for tracking purposes
+    printf "REPO=%s\n" "${RIPPLED_REPO}" > "${SOURCE_DIR}.txt"
+    printf "REF=%s\n" "$(git -C "${SOURCE_DIR}" rev-parse --abbrev-ref HEAD)" >> "${SOURCE_DIR}.txt"
+    printf "COMMIT=%s\n" "$(git -C "${SOURCE_DIR}" rev-parse --short HEAD)" >> "${SOURCE_DIR}.txt"
+
+    # Remove git history to reduce the build stage layer size
+    rm -rf "${SOURCE_DIR}/.git"
 EOF
 
 WORKDIR ${SOURCE_DIR}
 
+# 2. Configure Conan remote repository
 RUN <<EOF
     set -ex
+    # Add ripple's custom Conan remote
     conan remote add --index 0 ripple https://conan.ripplex.io
+    # Install conan profiles
+    conan config install conan/profiles/ --target-folder "$(conan config home)/profiles/"
 EOF
 
-RUN conan config install conan/profiles/ --target-folder $(conan config home)/profiles/
-
+# 3. Install project dependencies using Conan
 RUN <<EOF
     set -ex
-    conan install ${SOURCE_DIR} \
-        --output-folder ${BUILD_DIR} \
+    conan install "${SOURCE_DIR}" \
+        --output-folder "${BUILD_DIR}" \
         --settings:a build_type=Debug \
         --build missing
+    
+    # Clean up Conan cache to reduce image size after dependencies are fetched
+    conan remove --force "*"
 EOF
 
+# 4. Configure CMake build
 RUN <<EOF
     set -ex
-    cmake -S ${SOURCE_DIR} -B ${BUILD_DIR} \
+    cmake -S "${SOURCE_DIR}" -B "${BUILD_DIR}" \
         -Dvoidstar=ON \
         -Dxrpld=ON \
         -DCMAKE_BUILD_TYPE=Debug \
-        -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
+        -DCMAKE_TOOLCHAIN_FILE="${BUILD_DIR}/build/generators/conan_toolchain.cmake"
 EOF
 
-RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DIR} --prefix /opt/ripple
+# 5. Build and install the binary
+RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && \
+    cmake --install ${BUILD_DIR} --prefix /opt/ripple
 
-RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so  -O /usr/lib/libvoidstar.so
+# 6. Download the instrumentation library for fuzzing/testing
+# Note: This is required for the Antithesis environment
+RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so -O /usr/lib/libvoidstar.so
 
+# --- STAGE 2: FINAL IMAGE ---
+# Use a minimal base image for the final runtime environment
 FROM ubuntu:${CODENAME}
 
+# Set environment for non-interactive installs
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies
+# procps and gdb are for debugging/introspection in the fuzzer environment
+RUN set -ex; \
+    apt-get update && \
+    apt-get install --yes curl jq procps gdb && \
+    # Critical cleanup step to reduce image size
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Copy assets from the build stage
 COPY --from=build /opt/ripple /opt/ripple
 COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
 COPY --from=build /root/rippled.txt /opt/ripple/bin/rippled.git-commit.txt
 
+# Create symbolic links for usability
 RUN ln -s /opt/ripple/bin/rippled /usr/local/bin/rippled
 RUN mkdir -p /etc/opt && ln -s /opt/ripple/etc/ /etc/opt/ripple
-
-ENV DEBIAN_FRONTEND=noninteractive
-RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb && rm -rf /var/lib/apt/lists/*
