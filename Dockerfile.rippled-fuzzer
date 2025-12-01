@@ -1,5 +1,5 @@
 ARG CODENAME=noble
-FROM ghcr.io/xrplf/ci/ubuntu-${CODENAME}:clang-16 AS build
+FROM ghcr.io/xrplf/ci/ubuntu-${CODENAME}:clang-17 AS build
 
 # Antithesis supports only x86_64 architecture
 RUN uname -m | grep -E '^x86_64$'
