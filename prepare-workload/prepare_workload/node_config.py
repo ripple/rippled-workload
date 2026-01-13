@@ -66,11 +66,36 @@ def get_node_configs(settings):
             logging.exception("%s doesn't fully define the network.", settings.network_file)
 
     node_configs = {"validators": [], "peers": []}
+
+    # Determine if fuzzer is enabled and which validator is isolated
+    fuzzer_enabled = getattr(settings.fuzzer, 'enabled', False)
+    isolated_validator_name = getattr(settings.fuzzer, 'isolated_validator_name', 'rippled')
+    fuzzer_container = getattr(settings.fuzzer, 'container_name', 'fuzzer')
+    fuzzer_real_peer_port = getattr(settings.fuzzer, 'real_peer_port', 51234)
+
     for n in peers:
         is_validator = n.startswith(settings.network.validator_name)
+        is_isolated_validator = fuzzer_enabled and n == isolated_validator_name
+
+        # When fuzzer is enabled, skip the isolated validator - it runs inside the fuzzer container
+        if is_isolated_validator:
+            continue
+
+        # Determine the peer list for this node
+        if fuzzer_enabled and is_validator:
+            # Validators connect to fuzzer on real_peer_port, plus other validators directly
+            other_validators = [p for p in peers[n] if p.startswith(settings.network.validator_name)]
+            node_peers = [f"{fuzzer_container}:{fuzzer_real_peer_port}"] + other_validators
+        else:
+            # Non-fuzzer mode or non-validator peers keep their normal peer list
+            if fuzzer_enabled:
+                node_peers = [p for p in peers[n] if p != isolated_validator_name]
+            else:
+                node_peers = peers[n]
+
         cfg = {
                 "name": n,
-                "peers": peers[n],
+                "peers": node_peers,
                 "peer_private": str(n in private_peers).lower(),
                 "is_validator": is_validator,
             }
@@ -78,5 +103,5 @@ def get_node_configs(settings):
             node_configs["validators"].append(cfg)
         else:
             node_configs["peers"].append(cfg)
-    pass
+
     return node_configs

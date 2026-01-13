@@ -120,8 +120,12 @@ RUN ln -s /opt/fuzzer/bin/rippled-fuzzer /usr/local/bin/rippled-fuzzer
 RUN mkdir -p /etc/opt && ln -s /opt/ripple/etc/ /etc/opt/ripple
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb && rm -rf /var/lib/apt/lists/*
+RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb iproute2 && rm -rf /var/lib/apt/lists/*
 
-# Create fuzzer config directory
-RUN mkdir -p /etc/fuzzer
+# Create fuzzer config directory and rippled directories
+RUN mkdir -p /etc/fuzzer /var/lib/rippled/db /var/log/rippled
+
+# Copy entrypoint script
+COPY fuzzer-entrypoint.sh /opt/fuzzer/fuzzer-entrypoint.sh
+RUN chmod +x /opt/fuzzer/fuzzer-entrypoint.sh
 

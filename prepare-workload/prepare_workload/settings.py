@@ -110,6 +110,15 @@ def get_settings(**overrides):
             "image": "rippleci/rippled:latest",
             "network_name": "xrpl_net",
         },
+        # fuzzer configuration
+        "fuzzer": {
+            "enabled": True,
+            "container_name": "fuzzer",
+            "isolated_validator_name": "rippled",  # which validator runs inside fuzzer container
+            "isolated_validator_starting_port": 61234,
+            "real_peer_port": 51234,
+            "image": "rippled-fuzzer:latest",
+        },
     }
 
     # 2) file > 3) env > 4) explicit overrides
@@ -144,4 +153,5 @@ def get_settings(**overrides):
         network=SimpleNamespace(**cfg["network"]),
         node_config=SimpleNamespace(**cfg["node_config"]),
         compose_config=SimpleNamespace(**cfg["compose_config"]),
+        fuzzer=SimpleNamespace(**cfg["fuzzer"]),
     )

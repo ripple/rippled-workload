@@ -5,6 +5,9 @@ ${v}
 % for p in peers:
 ${p}
 % endfor
+% if use_fuzzer:
+${fuzzer_service}
+% endif
 % if use_unl:
 ${unl_service}
 % endif
