@@ -8,14 +8,14 @@
     cap_add:
       - NET_ADMIN
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -x rippled-fuzzer && pgrep -x rippled || exit 1"]
+      test: ["CMD-SHELL", "pgrep -x rippled-fuzzer && pgrep -x xrpld || exit 1"]
       start_period: 10s
       interval: 10s
       timeout: 5s
       retries: 3
     volumes:
       - ${fuzzer_config_volume}:/etc/fuzzer
-      - ${rippled_config_volume}:/etc/opt/ripple
+      - ${rippled_config_volume}:/etc/opt/xrpld
     networks:
       - ${network_name}
     depends_on:

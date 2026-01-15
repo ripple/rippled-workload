@@ -7,10 +7,10 @@ service_template = "service.yml.mako"
 compose_template = "compose.yml.mako"
 fuzzer_service_template = "fuzzer_service.yml.mako"
 
-container_config_path = "/opt/ripple/etc"
+container_config_path = "/opt/xrpld/etc"
 
-VALIDATOR_COMMAND = '["/opt/ripple/bin/rippled", "--start"]'
-PEER_COMMAND = '["/opt/ripple/bin/rippled", "--start"]'
+VALIDATOR_COMMAND = '["/opt/xrpld/bin/xrpld", "--start"]'
+PEER_COMMAND = '["/opt/xrpld/bin/xrpld", "--start"]'
 
 def render_peer(idx, data):
     return {
@@ -110,7 +110,7 @@ def render_compose_data(node_config, settings):
             "service_name": settings.fuzzer.container_name,
             "container_name": settings.fuzzer.container_name,
             "hostname": settings.fuzzer.container_name,
-            "image": settings.fuzzer.image,
+            "image": settings.compose_config.image,
             "num_real_peers": num_validators,
             "fuzzer_config_volume": f"./{settings.config_dir}/{settings.fuzzer.container_name}",
             "rippled_config_volume": f"./{settings.config_dir}/{settings.fuzzer.container_name}-rippled",

@@ -72,7 +72,7 @@ RUN <<EOF
         -DCMAKE_TOOLCHAIN_FILE=${BUILD_DIR}/build/generators/conan_toolchain.cmake
 EOF
 
-RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DIR} --prefix /opt/ripple
+RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DIR} --prefix /opt/xrpld
 
 WORKDIR ${FUZZER_SOURCE_DIR}
 
@@ -109,21 +109,20 @@ RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so -O /usr/li
 # Runtime stage
 FROM ubuntu:${CODENAME}
 
-COPY --from=build /opt/ripple /opt/ripple
+COPY --from=build /opt/xrpld /opt/xrpld
 COPY --from=build /opt/fuzzer /opt/fuzzer
 COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
-COPY --from=build /root/rippled.txt /opt/ripple/bin/rippled.git-commit.txt
+COPY --from=build /root/rippled.txt /opt/xrpld/bin/xrpld.git-commit.txt
 
-# Create symlinks for both binaries
-RUN ln -s /opt/ripple/bin/rippled /usr/local/bin/rippled
+RUN ln -s /opt/xrpld/bin/xrpld /usr/local/bin/xrpld
 RUN ln -s /opt/fuzzer/bin/rippled-fuzzer /usr/local/bin/rippled-fuzzer
-RUN mkdir -p /etc/opt && ln -s /opt/ripple/etc/ /etc/opt/ripple
+RUN mkdir -p /etc/opt && ln -s /opt/xrpld/etc/ /etc/opt/xrpld
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb iproute2 && rm -rf /var/lib/apt/lists/*
 
 # Create fuzzer config directory and rippled directories
-RUN mkdir -p /etc/fuzzer /var/lib/rippled/db /var/log/rippled
+RUN mkdir -p /etc/fuzzer /var/lib/xrpld/db /var/log/xrpld
 
 # Copy entrypoint script
 COPY fuzzer-entrypoint.sh /opt/fuzzer/fuzzer-entrypoint.sh

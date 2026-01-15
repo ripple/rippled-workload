@@ -24,8 +24,8 @@ FUZZER_PID=$!
 
 sleep 2
 
-echo "Starting rippled"
-/opt/ripple/bin/rippled --conf /etc/opt/ripple/rippled.cfg &
+echo "Starting xrpld"
+/opt/xrpld/bin/xrpld --conf /etc/opt/xrpld/xrpld.cfg &
 RIPPLED_PID=$!
 
 # Wait for either process to exit

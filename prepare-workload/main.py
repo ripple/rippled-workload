@@ -53,11 +53,11 @@ def write_fuzzer_config(settings, num_validators, validator_public_keys):
     fuzzer_config = template.render(**fuzzer_config_data)
     fuzzer_config_file.write_text(fuzzer_config)
 
-    # Write isolated validator rippled.cfg
+    # Write isolated validator xrpld.cfg
     isolated_validator_config_dir = settings.network_dir_path / settings.config_dir / f"{settings.fuzzer.container_name}-rippled"
     isolated_validator_config_dir.mkdir(parents=True, exist_ok=True)
-    isolated_validator_config_template = settings.template_dir_path / "isolated_validator_rippled.cfg.mako"
-    isolated_validator_config_file = isolated_validator_config_dir / "rippled.cfg"
+    isolated_validator_config_template = settings.template_dir_path / "isolated_validator_xrpld.cfg.mako"
+    isolated_validator_config_file = isolated_validator_config_dir / "xrpld.cfg"
 
     isolated_validator_config_data = {
         "ports": settings.node_config.ports,
