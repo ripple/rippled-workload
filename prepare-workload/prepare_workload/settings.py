@@ -112,7 +112,7 @@ def get_settings(**overrides):
         },
         # fuzzer configuration
         "fuzzer": {
-            "enabled": True,
+            "enabled": False,
             "container_name": "fuzzer",
             "isolated_validator_name": "xrpld",
             "isolated_validator_starting_port": 61234,
