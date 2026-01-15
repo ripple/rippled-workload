@@ -2,7 +2,7 @@
 set -e
 
 # Number of validators (real peers) determines how many loopback aliases we need
-NUM_REAL_PEERS=${NUM_REAL_PEERS:-5}
+NUM_REAL_PEERS=${NUM_REAL_PEERS:?NUM_REAL_PEERS environment variable must be set}
 
 echo "Setting up loopback IP aliases for $NUM_REAL_PEERS real peers..."
 
@@ -18,20 +18,15 @@ done
 echo "Loopback addresses configured:"
 ip addr show lo | grep "inet "
 
-# Start rippled-fuzzer in background
-echo "Starting rippled-fuzzer..."
+echo "Starting rippled-fuzzer"
 /opt/fuzzer/bin/rippled-fuzzer /etc/fuzzer/fuzzer.cfg &
 FUZZER_PID=$!
 
-# Wait a moment for fuzzer to start listening
 sleep 2
 
-# Start rippled (isolated peer)
-echo "Starting rippled (isolated peer)..."
+echo "Starting rippled"
 /opt/ripple/bin/rippled --conf /etc/opt/ripple/rippled.cfg &
 RIPPLED_PID=$!
-
-echo "Fuzzer PID: $FUZZER_PID, Rippled PID: $RIPPLED_PID"
 
 # Wait for either process to exit
 wait -n $FUZZER_PID $RIPPLED_PID
