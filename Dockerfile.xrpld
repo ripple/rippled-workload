@@ -49,7 +49,7 @@ EOF
 # Configure Conan
 RUN <<EOF
     set -ex
-    conan remote add --index 0 ripple https://conan.ripplex.io
+    conan remote add --index 0 xrplf https://conan.ripplex.io
 EOF
     WORKDIR ${SOURCE_DIR}
 
