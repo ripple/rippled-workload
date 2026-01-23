@@ -5,11 +5,11 @@ services:
     hostname: workload
     entrypoint: ["workload"]
     environment:
-      - RIPPLED_NAME=rippled  # defaults to "rippled"
+      - XRPLD_NAME=xrpld  # defaults to "xrpld"
       - VALIDATOR_NAME=val # defaults to "val"
       - NUM_VALIDATORS=5 # default 5
     depends_on:
-      rippled:
+      xrpld:
         condition: service_healthy
     volumes:
       - ./accounts.json:/accounts.json

@@ -7,7 +7,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     depends_on:
-      rippled:
+      xrpld:
         condition: service_healthy
     networks:
       - antithesis_net
