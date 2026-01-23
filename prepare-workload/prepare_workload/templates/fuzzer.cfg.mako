@@ -1,4 +1,4 @@
-# IP address for listening to connections from the isolated rippled node.
+# IP address for listening to connections from the isolated xrpld node.
 # Uses localhost - fuzzer increments last octet for each real peer
 # (127.0.0.1, 127.0.0.2, etc.)
 [isolated_peer_starting_ip]

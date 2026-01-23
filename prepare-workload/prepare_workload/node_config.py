@@ -69,7 +69,7 @@ def get_node_configs(settings):
 
     # Determine if fuzzer is enabled and which validator is isolated
     fuzzer_enabled = getattr(settings.fuzzer, 'enabled', False)
-    isolated_validator_name = getattr(settings.fuzzer, 'isolated_validator_name', 'rippled')
+    isolated_validator_name = getattr(settings.fuzzer, 'isolated_validator_name', 'xrpld')
     fuzzer_container = getattr(settings.fuzzer, 'container_name', 'fuzzer')
     fuzzer_real_peer_port = getattr(settings.fuzzer, 'real_peer_port', 51234)
 

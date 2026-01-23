@@ -4,30 +4,30 @@ FROM ghcr.io/xrplf/ci/ubuntu-${CODENAME}:clang-17 AS build
 # Antithesis supports only x86_64 architecture
 RUN uname -m | grep -E '^x86_64$'
 
-ARG RIPPLED_REPO="https://github.com/XRPLF/rippled.git"
-ARG RIPPLED_COMMIT="develop"
-ARG RIPPLED_CREDENTIALS=""
+ARG XRPLD_REPO="https://github.com/XRPLF/rippled.git"
+ARG XRPLD_COMMIT="develop"
+ARG XRPLD_CREDENTIALS=""
 ARG FUZZER_REPO="https://github.com/ripple/rippled-fuzzer.git"
 ARG FUZZER_COMMIT="main"
 ARG FUZZER_CREDENTIALS=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    SOURCE_DIR=/root/rippled \
+    SOURCE_DIR=/root/xrpld \
     BUILD_DIR=/root/build \
     FUZZER_SOURCE_DIR=/root/rippled-fuzzer \
     FUZZER_BUILD_DIR=/root/fuzzer-build
 
-# Clone rippled
+# Clone xrpld
 RUN <<EOF
     set -ex
-    if [ -n "$RIPPLED_CREDENTIALS" ]; then 
-    REPO_URL="$(echo "$RIPPLED_REPO" | sed "s#https://#https://${RIPPLED_CREDENTIALS}@#")"; 
+    if [ -n "$XRPLD_CREDENTIALS" ]; then 
+    REPO_URL="$(echo "$XRPLD_REPO" | sed "s#https://#https://${XRPLD_CREDENTIALS}@#")"; 
     else 
-    REPO_URL="$RIPPLED_REPO";
+    REPO_URL="$XRPLD_REPO";
     fi
-    git clone --depth 1 --branch ${RIPPLED_COMMIT} ${REPO_URL} ${SOURCE_DIR}
-    git -C ${SOURCE_DIR} checkout ${RIPPLED_COMMIT}
-    printf "REPO=%s\n" ${RIPPLED_REPO} > ${SOURCE_DIR}.txt
+    git clone --depth 1 --branch ${XRPLD_COMMIT} ${REPO_URL} ${SOURCE_DIR}
+    git -C ${SOURCE_DIR} checkout ${XRPLD_COMMIT}
+    printf "REPO=%s\n" ${XRPLD_REPO} > ${SOURCE_DIR}.txt
     printf "REF=%s\n" $(git -C ${SOURCE_DIR} rev-parse --abbrev-ref HEAD) >> ${SOURCE_DIR}.txt
     printf "COMMIT=%s\n" $(git -C ${SOURCE_DIR} rev-parse --short HEAD) >> ${SOURCE_DIR}.txt
     rm -rf ${SOURCE_DIR}/.git
@@ -112,7 +112,7 @@ FROM ubuntu:${CODENAME}
 COPY --from=build /opt/xrpld /opt/xrpld
 COPY --from=build /opt/fuzzer /opt/fuzzer
 COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
-COPY --from=build /root/rippled.txt /opt/xrpld/bin/xrpld.git-commit.txt
+COPY --from=build /root/xrpld.txt /opt/xrpld/bin/xrpld.git-commit.txt
 
 RUN ln -s /opt/xrpld/bin/xrpld /usr/local/bin/xrpld
 RUN ln -s /opt/fuzzer/bin/rippled-fuzzer /usr/local/bin/rippled-fuzzer
@@ -121,7 +121,7 @@ RUN mkdir -p /etc/opt && ln -s /opt/xrpld/etc/ /etc/opt/xrpld
 ENV DEBIAN_FRONTEND=noninteractive
 RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb iproute2 && rm -rf /var/lib/apt/lists/*
 
-# Create fuzzer config directory and rippled directories
+# Create fuzzer config directory and xrpld directories
 RUN mkdir -p /etc/fuzzer /var/lib/xrpld/db /var/log/xrpld
 
 # Copy entrypoint script

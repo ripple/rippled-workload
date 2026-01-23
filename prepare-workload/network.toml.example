@@ -1,5 +1,5 @@
 edges = [
-    ["rippled", "val1"],
+    ["xrpld", "val1"],
     ["val0", "val1"],
     ["val0", "val2"],
     ["val0", "val3"],

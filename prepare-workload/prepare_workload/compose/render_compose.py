@@ -44,7 +44,7 @@ def render_validator(idx, data):
         "volumes": [f"{data['volumes_path']}/{data['name']}:{container_config_path}"],
     }
     # if use_ledger ... append to volumes here.
-    # Assume rippled takes the default port locally...
+    # Assume xrpld takes the default port locally...
     return val_data
 
 
@@ -113,7 +113,7 @@ def render_compose_data(node_config, settings):
             "image": settings.compose_config.image,
             "num_real_peers": num_validators,
             "fuzzer_config_volume": f"./{settings.config_dir}/{settings.fuzzer.container_name}",
-            "rippled_config_volume": f"./{settings.config_dir}/{settings.fuzzer.container_name}-rippled",
+            "xrpld_config_volume": f"./{settings.config_dir}/{settings.fuzzer.container_name}-xrpld",
             "network_name": settings.compose_config.network_name,
             "depends_on": validator_names,
         }

@@ -13,7 +13,7 @@ from fastapi import Request
 
 from workload import logger, utils
 from workload.create import generate_wallets, generate_wallet_from_seed
-from workload.check_rippled_sync_state import is_rippled_synced # TODO:git use rippled_sync.py
+from workload.check_xrpld_sync_state import is_xrpld_synced # TODO:git use xrpld_sync.py
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
 from workload.nft import mint_nft
@@ -116,10 +116,10 @@ class Workload:
         self.currency_codes = conf["currencies"]["codes"]
         self.default_balance = conf["accounts"]["default_balance"]
         self.start_time = time.time()
-        rippled_host = os.environ.get("RIPPLED_NAME", conf["rippled"]["local"])
-        rippled_rpc_port = os.environ.get("RIPPLED_RPC_PORT", conf["rippled"]["json_rpc_port"])
-        self.rippled = f"http://{rippled_host}:{rippled_rpc_port}"
-        logger.info("Connecting to rippled at: %s", self.rippled)
+        xrpld_host = os.environ.get("XRPLD_NAME", conf["xrpld"]["local"])
+        xrpld_rpc_port = os.environ.get("XRPLD_RPC_PORT", conf["xrpld"]["json_rpc_port"])
+        self.xrpld = f"http://{xrpld_host}:{xrpld_rpc_port}"
+        logger.info("Connecting to xrpld at: %s", self.xrpld)
         use_ledger = False
         # if Path("/.dockerenv").is_file() and use_ledger:
         accounts_json = Path("/accounts.json")
@@ -134,10 +134,10 @@ class Workload:
             # self.funding_wallet = generate_wallet_from_seed(self.config["genesis_account"]["master_seed"])
         else:
             self.funding_wallet = generate_wallet_from_seed(self.config["genesis_account"]["master_seed"])
-        self.client = AsyncJsonRpcClient(self.rippled)
+        self.client = AsyncJsonRpcClient(self.xrpld)
         self.account_generator = AccountGenerator(source=self.funding_wallet, client=self.client)
 
-        self.wait_for_network(self.rippled)
+        self.wait_for_network(self.xrpld)
 
         workload_ready_msg = "Workload initialization complete"
         logger.info("%s after %ss", workload_ready_msg, int(time.time() - self.start_time))
@@ -232,20 +232,20 @@ class Workload:
                 logger.debug(c)
         return issued_currencies
 
-    def wait_for_network(self, rippled) -> None:
-        timeout = self.config["rippled"]["timeout"]  # Wait at most 10 minutes
+    def wait_for_network(self, xrpld) -> None:
+        timeout = self.config["xrpld"]["timeout"]  # Wait at most 10 minutes
         wait_start = time.time()
-        logger.debug("Waiting %ss for rippled at %s to be running.", timeout, rippled)
-        while not (is_rippled_synced(rippled)):
-            irs = is_rippled_synced(rippled)
-            logger.info(f"is_rippled_synced returning: {irs}")
+        logger.debug("Waiting %ss for xrpld at %s to be running.", timeout, xrpld)
+        while not (is_xrpld_synced(xrpld)):
+            irs = is_xrpld_synced(xrpld)
+            logger.info(f"is_xrpld_synced returning: {irs}")
 
-            if (rippled_ready_time := int(time.time() - self.start_time)) > timeout:
-                logger.info("rippled ready after %ss", rippled_ready_time)
+            if (xrpld_ready_time := int(time.time() - self.start_time)) > timeout:
+                logger.info("xrpld ready after %ss", xrpld_ready_time)
             logger.info("Waited %ss so far", int(time.time() - wait_start))
             wait_time = 10
             time.sleep(wait_time)
-        logger.info("rippled ready...")
+        logger.info("xrpld ready...")
 
     async def gen_payment(self, src, dst, amount):
         source = self.accounts[src]
@@ -315,7 +315,7 @@ class Workload:
         }
         async with httpx.AsyncClient() as client:
             try:
-                resp = await client.post(self.rippled, json=payload)
+                resp = await client.post(self.xrpld, json=payload)
                 responses.append(resp.json())
             except Exception as e:
                 responses.append({"error": str(e)})

@@ -15,7 +15,7 @@ def make_request(url: str, command: dict):
     except urllib.error.URLError as e:
         logger.debug("No response from %s. Probably not running...", url)
     except ConnectionResetError:
-        logger.debug("rippled is not running")
+        logger.debug("xrpld is not running")
     else:
         return response
 
@@ -29,7 +29,7 @@ def get_server_info(url: str, params: list[str] | None = None) -> dict[str, dict
     return server_info
 
 
-def is_rippled_synced(url: str) -> bool:
+def is_xrpld_synced(url: str) -> bool:
     synced = False
     try:
         if server_info := get_server_info(url, ["complete_ledgers", "server_state"]):
@@ -40,29 +40,29 @@ def is_rippled_synced(url: str) -> bool:
             logger.info("Received no server_info from %s", url)
             logger.error("No server_info returned")
     except UnboundLocalError:
-        logger.debug("no server_info, rippled not running yet?")
+        logger.debug("no server_info, xrpld not running yet?")
     except Exception:
         logger.exception("Couldn't get server_info")
     return synced
 
-# TODO: get_latest_ledger_{rippled,clio}
+# TODO: get_latest_ledger_{xrpld,clio}
 # TODO: report if ledgers even advancing
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("rippled", nargs="?", default=None, type=str)
-    # parser.add_argument("rippled_rpc", help="Other network endpoint to compare with rippled")
-    parser.add_argument("-i", "--ip", default="localhost", help="rippled IP")
-    parser.add_argument("-p", "--port", default="5005", help="rippled RPC port")
+    parser.add_argument("xrpld", nargs="?", default=None, type=str)
+    # parser.add_argument("xrpld_rpc", help="Other network endpoint to compare with xrpld")
+    parser.add_argument("-i", "--ip", default="localhost", help="xrpld IP")
+    parser.add_argument("-p", "--port", default="5005", help="xrpld RPC port")
     parser.add_argument("--debug", "-d", action="store_true", help="debug")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    rippled = args.rippled or f"{args.ip}:{args.port}"
-    print(f"{rippled=}")
-    ready = is_rippled_synced(rippled)
-    print(f"rippled {ready=}")
+    xrpld = args.xrpld or f"{args.ip}:{args.port}"
+    print(f"{xrpld=}")
+    ready = is_xrpld_synced(xrpld)
+    print(f"xrpld {ready=}")
     sys.exit(not int(ready))

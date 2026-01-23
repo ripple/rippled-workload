@@ -49,7 +49,7 @@ async def check_single_validator(vnum: int, base_name: str) -> bool:
             response = await client.post("/", json={"method": "server_info"})
             response.raise_for_status()
         except httpx.ConnectTimeout:
-            logger.error("Timeout: rippled didn't respond at %s", url)
+            logger.error("Timeout: xrpld didn't respond at %s", url)
             return False
         except httpx.ConnectError:
             logger.error("Connection error: No server seen at %s", url)

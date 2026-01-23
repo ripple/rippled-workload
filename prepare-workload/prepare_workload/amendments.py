@@ -46,7 +46,7 @@ class Amendment:
     index : str
         Amendment identifier. Prefer the 256-bit feature ID hex if available.
     name : str
-        Canonical amendment name as used by rippled (e.g., "Checks", "fixNFTokenDirV1").
+        Canonical amendment name as used by xrpld (e.g., "Checks", "fixNFTokenDirV1").
     link : str
         Reference URL in XRPL docs. (e.g., [Dynamic NFTs](https://xrpl.org/resources/known-amendments#dynamicnft)
     enabled : bool
@@ -68,7 +68,7 @@ class Amendment:
 
 
 def _get_amendments_from_file(amendments_file: Path | None = None) -> list[Amendment]:
-    """Return list of amendments from file as rippled feature list.
+    """Return list of amendments from file as xrpld feature list.
 
     Args:
         amendments_file (str | None, optional): _description_. Defaults to None.
@@ -95,7 +95,7 @@ def _get_amendments_from_url(url: str, timeout: int = 3) -> list[Amendment]:
         amend = res["result"]["features"]
         # return amend
     except urllib.error.URLError as e:
-        msg = f"Couldn't query rippled at {url}"
+        msg = f"Couldn't query xrpld at {url}"
         raise SystemExit(f"{msg}: {e.reason or e}")
     except KeyError as e:
         print(f"Couldn't query {url} for Amendments!")
@@ -103,8 +103,8 @@ def _get_amendments_from_url(url: str, timeout: int = 3) -> list[Amendment]:
     return amend
 
 def _get_amendments_from_net(network: Network) -> tuple[str, list[Amendment]]:
-    """Get the amendments enabled on the `network` via `rippled`'s `feature` command."""
-    # BUG: rippled `feature` is _not_ reliable right now!
+    """Get the amendments enabled on the `network` via `xrpld`'s `feature` command."""
+    # BUG: xrpld `feature` is _not_ reliable right now!
     urls = network_rpc_url[network]
     for url in urls:
         try:
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("network", nargs="?", default="devnet", help="Network to use (default: devnet)")
-    group.add_argument("-u", "--url", help="rippled node to query for enabled amendments")
+    group.add_argument("-u", "--url", help="xrpld node to query for enabled amendments")
     parser.add_argument("-d", "--disabled", action='store_true')
     parser.add_argument("-p", "--plain", action='store_true')
     parser.add_argument("-n", "--names-only", action='store_true')

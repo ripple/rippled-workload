@@ -26,12 +26,12 @@ sleep 2
 
 echo "Starting xrpld"
 /opt/xrpld/bin/xrpld --conf /etc/opt/xrpld/xrpld.cfg &
-RIPPLED_PID=$!
+XRPLD_PID=$!
 
 # Wait for either process to exit
-wait -n $FUZZER_PID $RIPPLED_PID
+wait -n $FUZZER_PID $XRPLD_PID
 
 # If we get here, one process died - kill the other and exit
 echo "One process exited, shutting down..."
-kill $FUZZER_PID $RIPPLED_PID 2>/dev/null || true
+kill $FUZZER_PID $XRPLD_PID 2>/dev/null || true
 exit 1
