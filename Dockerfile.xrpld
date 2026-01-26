@@ -117,6 +117,8 @@ COPY --from=build /root/xrpld.txt /opt/xrpld/bin/xrpld.git-commit.txt
 RUN ln -s /opt/xrpld/bin/xrpld /usr/local/bin/xrpld
 RUN ln -s /opt/fuzzer/bin/rippled-fuzzer /usr/local/bin/rippled-fuzzer
 RUN mkdir -p /etc/opt && ln -s /opt/xrpld/etc/ /etc/opt/xrpld
+# Create symlink for default rippled config path (/etc/opt/ripple/rippled.cfg)
+RUN mkdir -p /etc/opt/ripple && ln -s /etc/opt/xrpld/xrpld.cfg /etc/opt/ripple/rippled.cfg
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb iproute2 && rm -rf /var/lib/apt/lists/*

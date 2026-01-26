@@ -10,7 +10,7 @@
       - ${p}
     % endfor
     healthcheck:
-      test: ["CMD", "xrpld", "--conf", "/etc/opt/xrpld/xrpld.cfg", "--silent", "ping"]
+      test: ["CMD", "xrpld", "--silent", "ping"]
       start_period: 10s
       interval: 10s
     volumes:
