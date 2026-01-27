@@ -19,7 +19,7 @@ echo "Loopback addresses configured:"
 ip addr show lo | grep "inet "
 
 echo "Starting rippled-fuzzer"
-/opt/fuzzer/bin/rippled-fuzzer /etc/fuzzer/fuzzer.cfg &
+/opt/fuzzer/bin/rippled-fuzzer /etc/opt/fuzzer/fuzzer.cfg &
 FUZZER_PID=$!
 
 sleep 2
