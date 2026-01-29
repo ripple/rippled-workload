@@ -80,10 +80,9 @@ WORKDIR ${FUZZER_SOURCE_DIR}
 RUN <<EOF
     set -ex
     mkdir -p ${FUZZER_BUILD_DIR}
+    conan lock create .
     conan install ${FUZZER_SOURCE_DIR} \
         --output-folder ${FUZZER_BUILD_DIR} \
-        --build=nudb \
-        --build=xrpl \
         --build missing \
         --settings build_type=Debug
 EOF
