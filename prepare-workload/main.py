@@ -91,14 +91,14 @@ def write_config(node_data, settings):
 
     # Format peer addresses for ips_fixed
     default_port = settings.node_config.ports['peer']
-    ips_fixed_lines = [format_peer_address(p, default_port) for p in node_data["peers"]]
+    ips_fixed = [format_peer_address(p, default_port) for p in node_data["peers"]]
 
     node_config_data = {
         "ports": node.ports,
         "need_features": node.need_features,
         "node_config_template": s.node_config_template,
         "validator_public_keys": "\n".join(s.validator_public_keys),
-        "ips_fixed": "\n".join(ips_fixed_lines),
+        "ips_fixed": "\n".join(ips_fixed),
         **node_data,
     }
     if is_validator:

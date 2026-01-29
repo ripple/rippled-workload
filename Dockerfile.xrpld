@@ -20,10 +20,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Clone xrpld
 RUN <<EOF
     set -ex
-    if [ -n "$XRPLD_CREDENTIALS" ]; then 
-    REPO_URL="$(echo "$XRPLD_REPO" | sed "s#https://#https://${XRPLD_CREDENTIALS}@#")"; 
+    if [ -n "${XRPLD_CREDENTIALS}" ]; then 
+    REPO_URL="$(echo "${XRPLD_REPO}" | sed "s#https://#https://${XRPLD_CREDENTIALS}@#")"; 
     else 
-    REPO_URL="$XRPLD_REPO";
+    REPO_URL="${XRPLD_REPO}";
     fi
     git clone --depth 1 --branch ${XRPLD_COMMIT} ${REPO_URL} ${SOURCE_DIR}
     git -C ${SOURCE_DIR} checkout ${XRPLD_COMMIT}
@@ -36,10 +36,10 @@ EOF
 # Clone fuzzer
 RUN <<EOF
     set -ex
-    if [ -n "$FUZZER_CREDENTIALS" ]; then
-    FUZZER_URL="$(echo "$FUZZER_REPO" | sed "s#https://#https://${FUZZER_CREDENTIALS}@#")";
+    if [ -n "${FUZZER_CREDENTIALS}" ]; then
+    FUZZER_URL="$(echo "${FUZZER_REPO}" | sed "s#https://#https://${FUZZER_CREDENTIALS}@#")";
     else
-    FUZZER_URL="$FUZZER_REPO";
+    FUZZER_URL="${FUZZER_REPO}";
     fi
     git clone --depth 1 --branch ${FUZZER_COMMIT} ${FUZZER_URL} ${FUZZER_SOURCE_DIR}
     git -C ${FUZZER_SOURCE_DIR} checkout ${FUZZER_COMMIT}
