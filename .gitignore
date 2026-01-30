@@ -7,7 +7,7 @@
 *.swo
 *~
 ~$*.doc
-rippled.log
+xrpld.log
 __pycache__/
 *.py[cod]
 .venv/
@@ -15,4 +15,4 @@ pip-log.txt
 logs
 config/docker-compose.yml
 config/volumes/*val*
-config/volumes/*rippled*
+config/volumes/*xrpld*

@@ -77,7 +77,7 @@ def wait_for_ledger_close(client: JsonRpcClient) -> None:
 def check_validator_proposing(val_to_check: int | None = None) -> bool:
     val_name = os.environ.get("VALIDATOR_NAME", "val")
     num_validators = int(os.environ.get("NUM_VALIDATORS", 5))
-    requests_timeout = 5 # No way rippled shouldn't respond by then
+    requests_timeout = 5 # No way xrpld shouldn't respond by then
     if val_to_check and val_to_check > num_validators:
         logger.error("Validator [%s] outside number of validators range [%s]", val_to_check, num_validators)
         return False
@@ -96,7 +96,7 @@ def check_validator_proposing(val_to_check: int | None = None) -> bool:
         try:
             response = requests.post(url, json={"method": "server_info"}, timeout=requests_timeout)
         except requests.exceptions.ConnectTimeout:
-            logger.error("rippled didn't respond")
+            logger.error("xrpld didn't respond")
             validators_proposing[vnum] = False
         except requests.exceptions.ConnectionError:
             logger.error("No server seen at %s", url)

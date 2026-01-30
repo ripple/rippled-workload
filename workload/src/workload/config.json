@@ -37,7 +37,7 @@
                 "limit": "1000000000000000"
             }
         },
-        "rippled": {
+        "xrpld": {
             "local": "172.17.0.3",
             "json_rpc_port": 5005,
             "ws_port": 6006,

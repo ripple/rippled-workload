@@ -1,3 +1,6 @@
+# Isolated validator xrpld configuration (runs inside fuzzer container)
+# Connects to fuzzer on localhost addresses (127.0.0.x)
+
 [server]
 port_rpc_admin_local
 port_peer
@@ -22,16 +25,16 @@ protocol = ws
 
 [node_db]
 type = NuDB
-path = /var/lib/rippled/db/nudb
+path = /var/lib/xrpld/db/nudb
 
 [ledger_history]
 full
 
 [database_path]
-/var/lib/rippled/db
+/var/lib/xrpld/db
 
 [debug_logfile]
-/var/log/rippled/debug.log
+/var/log/xrpld/debug.log
 
 [node_size]
 huge
@@ -49,34 +52,20 @@ huge
 0
 
 [peer_private]
-${peer_private}
+1
 
 [signing_support]
-${signing_support}
+true
 
+# Connect to fuzzer on localhost addresses
+# Each connection uses a different IP (127.0.0.1, 127.0.0.2, etc.)
 [ips_fixed]
-${ips_fixed}
+% for i in range(num_real_peers):
+127.0.0.${i + 1} ${isolated_peer_starting_port + i}
+% endfor
 
 [validators]
 ${validator_public_keys}
-
-% if use_unl:
-[validator_list_sites]
-${validator_list_sites}
-
-[validator_list_keys]
-${validator_list_keys}
-% endif
-
-% if is_validator:
-[validation_seed]
-${validation_seed}
-
-[voting]
-reference_fee = ${voting["reference_fee"]}
-account_reserve = ${voting["account_reserve"]}
-owner_reserve = ${voting["owner_reserve"]}
-% endif
 
 % if need_features:
 [features]

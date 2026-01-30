@@ -79,8 +79,8 @@ def get_settings(**overrides):
         "config_dir": "volumes",
         "unl_file": "unl.json",
         "compose_yml_file": "compose.yml",
-        "node_config_template": "rippled.cfg.mako",
-        "node_config_file": "rippled.cfg",
+        "node_config_template": "xrpld.cfg.mako",
+        "node_config_file": "xrpld.cfg",
         "compose_template": "compose.yml.mako",
         # General network info
         "network": {
@@ -90,7 +90,7 @@ def get_settings(**overrides):
             "use_unl": True,
             "validator_list_sites": "http://unl",
             "validator_name": "val",
-            "peer_name": "rippled",
+            "peer_name": "xrpld",
         },
         # Specific node instance configs
         "node_config": {
@@ -107,8 +107,16 @@ def get_settings(**overrides):
         },
         # compose.yml
         "compose_config": {
-            "image": "rippleci/rippled:latest",
+            "image": "xrpld:latest",
             "network_name": "xrpl_net",
+        },
+        # fuzzer configuration
+        "fuzzer": {
+            "enabled": False,
+            "container_name": "fuzzer",
+            "isolated_validator_name": "xrpld",
+            "isolated_validator_starting_port": 61234,
+            "real_peer_port": 51234,
         },
     }
 
@@ -144,4 +152,5 @@ def get_settings(**overrides):
         network=SimpleNamespace(**cfg["network"]),
         node_config=SimpleNamespace(**cfg["node_config"]),
         compose_config=SimpleNamespace(**cfg["compose_config"]),
+        fuzzer=SimpleNamespace(**cfg["fuzzer"]),
     )

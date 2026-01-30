@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 from mako.template import Template
+import xrpl
 
 import prepare_workload.generate_unl as gl
 from prepare_workload import node_config as nc
@@ -20,17 +21,84 @@ from prepare_workload.generate_unl import generate_unl_data
 from prepare_workload.settings import get_settings
 
 
+def generate_fuzzer_seed():
+    """Generate a seed for fuzzer node identity."""
+    return xrpl.core.keypairs.generate_seed(algorithm=xrpl.CryptoAlgorithm.SECP256K1)
+
+
+def write_fuzzer_config(settings, num_validators, validator_public_keys):
+    """Generate and write the fuzzer and isolated validator configuration files."""
+    fuzzer_config_dir = settings.network_dir_path / settings.config_dir / settings.fuzzer.container_name
+    fuzzer_config_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate seeds for fuzzer
+    node_seed = generate_fuzzer_seed()
+    peer_seeds = [generate_fuzzer_seed() for _ in range(num_validators)]
+
+    # Write fuzzer.cfg
+    fuzzer_config_template = settings.template_dir_path / "fuzzer.cfg.mako"
+    fuzzer_config_file = fuzzer_config_dir / "fuzzer.cfg"
+
+    # Note: template var names like 'isolated_peer_starting_port' match config section names
+    # that the fuzzer binary expects
+    fuzzer_config_data = {
+        "isolated_peer_starting_port": settings.fuzzer.isolated_validator_starting_port,
+        "real_peer_port": settings.fuzzer.real_peer_port,
+        "num_real_peers": num_validators,
+        "node_seed": node_seed,
+        "peer_seeds": peer_seeds,
+    }
+
+    template = Template(filename=str(fuzzer_config_template))
+    fuzzer_config = template.render(**fuzzer_config_data)
+    fuzzer_config_file.write_text(fuzzer_config)
+
+    # Write isolated validator xrpld.cfg
+    isolated_validator_config_dir = settings.network_dir_path / settings.config_dir / f"{settings.fuzzer.container_name}-xrpld"
+    isolated_validator_config_dir.mkdir(parents=True, exist_ok=True)
+    isolated_validator_config_template = settings.template_dir_path / "isolated_validator_xrpld.cfg.mako"
+    isolated_validator_config_file = isolated_validator_config_dir / "xrpld.cfg"
+
+    isolated_validator_config_data = {
+        "ports": settings.node_config.ports,
+        "num_real_peers": num_validators,
+        "isolated_peer_starting_port": settings.fuzzer.isolated_validator_starting_port,
+        "validator_public_keys": "\n".join(validator_public_keys),
+        "need_features": settings.node_config.need_features,
+    }
+
+    template = Template(filename=str(isolated_validator_config_template))
+    isolated_validator_config = template.render(**isolated_validator_config_data)
+    isolated_validator_config_file.write_text(isolated_validator_config)
+
+
+def format_peer_address(peer, default_port):
+    """Format peer address for ips_fixed config.
+
+    If peer contains ':', treat as host:port and convert to 'host port' format.
+    Otherwise, append the default port.
+    """
+    if ":" in peer:
+        host, port = peer.split(":", 1)
+        return f"{host} {port}"
+    return f"{peer} {default_port}"
+
+
 def write_config(node_data, settings):
     s = settings
     node = s.node_config
     is_validator = node_data["is_validator"]
+
+    # Format peer addresses for ips_fixed
+    default_port = settings.node_config.ports['peer']
+    ips_fixed = [format_peer_address(p, default_port) for p in node_data["peers"]]
 
     node_config_data = {
         "ports": node.ports,
         "need_features": node.need_features,
         "node_config_template": s.node_config_template,
         "validator_public_keys": "\n".join(s.validator_public_keys),
-        "ips_fixed": "\n".join([f"{p} {settings.node_config.ports['peer']}" for p in node_data["peers"]]),
+        "ips_fixed": "\n".join(ips_fixed),
         **node_data,
     }
     if is_validator:
@@ -162,6 +230,11 @@ def main():
         unl_json_file.write_text(json.dumps(unl_data))
         # copy the server to the network dir
         shutil.copy(s.unl_server, s.network_dir_path)
+
+    # Write the fuzzer config
+    if s.fuzzer.enabled:
+        num_validators = len([c for c in all_configs if c["is_validator"]])
+        write_fuzzer_config(s, num_validators, validator_public_keys)
 
 
 if __name__ == "__main__":
