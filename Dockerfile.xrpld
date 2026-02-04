@@ -91,6 +91,7 @@ EOF
 RUN <<EOF
     set -ex
     cmake -S ${FUZZER_SOURCE_DIR} -B ${FUZZER_BUILD_DIR} \
+        -Dvoidstar=ON \
         -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_TOOLCHAIN_FILE=${FUZZER_BUILD_DIR}/build/generators/conan_toolchain.cmake
 EOF
