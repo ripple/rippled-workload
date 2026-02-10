@@ -532,7 +532,8 @@ class Workload:
             addresses=self.addresses,
             )
         potential_destinations = copy.copy(self.addresses)
-        potential_destinations.remove(ctx.account)
+        if ctx.account in potential_destinations:
+            potential_destinations.remove(ctx.account)
         destination = choice(potential_destinations)
         ica = IssuedCurrencyAmount(
             issuer=destination,
