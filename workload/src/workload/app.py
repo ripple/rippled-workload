@@ -531,6 +531,8 @@ class Workload:
             fee=await self.get_ref_fee(),
             addresses=self.addresses,
             )
+        if not self.addresses:
+            return
         potential_destinations = copy.copy(self.addresses)
         if ctx.account in potential_destinations:
             potential_destinations.remove(ctx.account)
