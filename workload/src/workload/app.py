@@ -632,7 +632,7 @@ def create_app(workload: Workload) -> FastAPI:
         try:
             await w.test_txn_factory()
         except Exception as e:
-            logger.exception(f"txn_factory failed {e}")
+            logger.error(f"txn_factory failed: {type(e).__name__}: {e}")
 
     @app.get("/generate_accounts")
     async def generate_accounts(w: Workload = Depends(get_workload)):
@@ -641,7 +641,7 @@ def create_app(workload: Workload) -> FastAPI:
         try:
             await w.generate_accounts(100)
         except Exception as e:
-            logger.exception(f"generate_accounts failed {e}")
+            logger.error(f"generate_accounts failed: {type(e).__name__}: {e}")
 
     @app.get("/accounts")
     def get_accounts(w: Workload = Depends(get_workload)):
