@@ -332,6 +332,8 @@ class Workload:
         return {"cool": "beans"}
 
     async def mint_random_nft(self):
+        if not self.accounts:
+            return
         account_id = choice(list(self.accounts))
         account = self.accounts[account_id]
         sequence = await get_next_valid_seq_number(account.address, self.client)
@@ -397,6 +399,8 @@ class Workload:
         return nftburn_txn_response.result
 
     async def payment_random(self):
+        if not self.accounts:
+            return
         amount = str(1_000_000)
         src_address, dst = sample(list(self.accounts), 2)
         sequence = await get_next_valid_seq_number(src_address, self.client)
@@ -407,6 +411,8 @@ class Workload:
         return response, src.address, dst, amount
 
     async def create_ticket(self):
+        if not self.accounts:
+            return
         ticket_count = 5
         logger.debug(choice(list(self.accounts)))
         account_id  = choice(list(self.accounts))
@@ -430,6 +436,8 @@ class Workload:
         return None
 
     async def use_random_ticket(self):
+        if not self.accounts:
+            return
         account_ids = self.addresses
         len_account_ids = len(account_ids)
         logger.debug(f"Length of account_ids: {len_account_ids}")
@@ -468,6 +476,8 @@ class Workload:
         return result
 
     async def random_batch(self):
+        if not self.accounts:
+            return
         from xrpl.models import Batch, BatchFlag, Payment
         amount = 1_000_000
         src_address, dst = sample(list(self.accounts), 2)
@@ -499,6 +509,8 @@ class Workload:
         logger.info(json.dumps(result, indent=2))
 
     async def mpt_create(self):
+        if not self.accounts:
+            return
         from xrpl.models import MPTokenIssuanceCreate
         # src_address, dst = sample(list(self.accounts), 2)
         src_address = choice(list(self.accounts))
