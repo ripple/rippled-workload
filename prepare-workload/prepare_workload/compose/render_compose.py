@@ -102,7 +102,6 @@ def render_compose_data(node_config, settings):
 
     # Add fuzzer service if enabled
     if settings.fuzzer.enabled:
-        # Get validator names for depends_on
         validator_names = [v["name"] for v in sorted(node_config["validators"], key=itemgetter('name'))]
         num_validators = len(validator_names)
         fuzzer_data = {
@@ -115,7 +114,6 @@ def render_compose_data(node_config, settings):
             "fuzzer_config_volume": f"./{settings.config_dir}/{settings.fuzzer.container_name}",
             "xrpld_config_volume": f"./{settings.config_dir}/{settings.fuzzer.container_name}-xrpld",
             "network_name": settings.compose_config.network_name,
-            "depends_on": validator_names,
         }
         compose_data["fuzzer_service"] = render_fuzzer(fuzzer_data)
 
