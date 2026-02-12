@@ -18,8 +18,3 @@
       - ${xrpld_config_volume}:/etc/opt/xrpld
     networks:
       - ${network_name}
-    depends_on:
-% for dep in depends_on:
-      ${dep}:
-        condition: service_healthy
-% endfor
