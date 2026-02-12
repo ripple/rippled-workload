@@ -74,7 +74,7 @@ class AccountGenerator:
         wallet_list = list(enumerate(wallets))
         for idx, wallet in wallet_list :
             if self.source.address == wallet.address:
-                logger.exception("Generated source and destination same") # TODO: Fix selecting src != dst
+                logger.error("Generated source and destination same") # TODO: Fix selecting src != dst
                 continue
             txns.append(Payment(
                 account=self.source.address,
@@ -596,7 +596,7 @@ class Workload:
                 # return zip(responses, wallets)
             except* Exception as eg:
                 for e in eg.exceptions:
-                    print("handled other error:", e)
+                    logger.error("handled other error: %s: %s", type(e).__name__, e)
 
 def create_app(workload: Workload) -> FastAPI:
     app = FastAPI()
@@ -658,39 +658,66 @@ def create_app(workload: Workload) -> FastAPI:
 
     @app.get("/nft/mint/random")
     async def mint_random_nft(w: Workload = Depends(get_workload)):
-        return await w.mint_random_nft()
+        try:
+            return await w.mint_random_nft()
+        except Exception as e:
+            logger.error(f"mint_random_nft failed: {type(e).__name__}: {e}")
 
     @app.get("/nft/create_offer/random")
     async def create_random_nft_offer(w: Workload = Depends(get_workload)):
-        return await w.create_random_nft_offer()
+        try:
+            return await w.create_random_nft_offer()
+        except Exception as e:
+            logger.error(f"create_random_nft_offer failed: {type(e).__name__}: {e}")
 
     @app.get("/nft/burn/random")
     async def burn_nft(w: Workload = Depends(get_workload)):
-        return await w.nft_burn_random()
+        try:
+            return await w.nft_burn_random()
+        except Exception as e:
+            logger.error(f"nft_burn_random failed: {type(e).__name__}: {e}")
 
     @app.get("/pay")
     async def payment_random(w: Workload = Depends(get_workload)):
-        return await w.pay()
+        try:
+            return await w.pay()
+        except Exception as e:
+            logger.error(f"pay failed: {type(e).__name__}: {e}")
 
     @app.get("/payment/random")
     async def make_payment(w: Workload = Depends(get_workload)):
-        return await w.payment_random()
+        try:
+            return await w.payment_random()
+        except Exception as e:
+            logger.error(f"payment_random failed: {type(e).__name__}: {e}")
 
     @app.get("/tickets/create/random")
     async def create_ticket(w: Workload = Depends(get_workload)):
-        return await w.create_ticket()
+        try:
+            return await w.create_ticket()
+        except Exception as e:
+            logger.error(f"create_ticket failed: {type(e).__name__}: {e}")
 
     @app.get("/tickets/use/random")
     async def use_random_ticket(w: Workload = Depends(get_workload)):
-        return await w.use_random_ticket()
+        try:
+            return await w.use_random_ticket()
+        except Exception as e:
+            logger.error(f"use_random_ticket failed: {type(e).__name__}: {e}")
 
     @app.get("/batch/random")
     async def batch(w: Workload = Depends(get_workload)):
-        return await w.random_batch()
+        try:
+            return await w.random_batch()
+        except Exception as e:
+            logger.error(f"random_batch failed: {type(e).__name__}: {e}")
 
     @app.get("/mpt/create") # TODO: mpt/issuance/create
     async def mpt_create(w: Workload = Depends(get_workload)):
-        return await w.mpt_create()
+        try:
+            return await w.mpt_create()
+        except Exception as e:
+            logger.error(f"mpt_create failed: {type(e).__name__}: {e}")
 
     @app.get("/request")
     async def request(w: Workload = Depends(get_workload), body: str = ""):
