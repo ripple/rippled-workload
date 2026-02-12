@@ -100,7 +100,7 @@ class AccountGenerator:
             return zip(responses, wallets)
         except* Exception as eg:
             for e in eg.exceptions:
-                logger.exception("handled other error:", e)
+                logger.error("handled other error: %s: %s", type(e).__name__, e)
 
 class Workload:
     def __init__(self, conf: dict[str, Any]):
