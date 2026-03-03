@@ -3,6 +3,8 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
+from prepare_workload.amendments import parse_features_macro
+
 _PREFIX = "GL_"
 
 
@@ -104,6 +106,7 @@ def get_settings(**overrides):
                 "account_reserve": 1000000,
                 "owner_reserve": 2000000,
             },
+            "features_macro_path": "",
         },
         # compose.yml
         "compose_config": {
@@ -135,6 +138,13 @@ def get_settings(**overrides):
     compose_tmpl = template_dir_path / cfg["compose_template"]
     unl_server = pkg_root / "unl_server/app.py"
 
+    # Auto-generate supported amendments from features.macro if path is provided
+    node_cfg = cfg["node_config"]
+    macro_path = node_cfg.get("features_macro_path", "")
+    supported_amendments: list[str] = []
+    if macro_path:
+        supported_amendments = parse_features_macro(Path(macro_path))
+
     return SimpleNamespace(
         project_root=project_root,
         template_dir_path=template_dir_path,
@@ -148,6 +158,7 @@ def get_settings(**overrides):
         node_config_file=cfg["node_config_file"],
         compose_template=compose_tmpl,
         unl_server=unl_server,
+        supported_amendments=supported_amendments,
 
         network=SimpleNamespace(**cfg["network"]),
         node_config=SimpleNamespace(**cfg["node_config"]),
