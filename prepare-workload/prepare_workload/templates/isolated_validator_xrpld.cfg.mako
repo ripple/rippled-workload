@@ -51,6 +51,12 @@ huge
 [compression]
 0
 
+[tx_reduce_relay_enable]
+1
+
+[ledger_replay]
+1
+
 [peer_private]
 1
 
