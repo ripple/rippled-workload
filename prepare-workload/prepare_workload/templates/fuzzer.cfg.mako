@@ -31,3 +31,17 @@ ${node_seed}
 % for seed in peer_seeds:
 ${seed}
 % endfor
+
+# Protocol feature negotiation flags.
+# These control which features the fuzzer advertises in its handshake
+# (X-Protocol-Ctl header), which determines what message types peers
+# will send through the fuzzer.
+
+[tx_reduce_relay_enable]
+1
+
+[ledger_replay]
+1
+
+[vp_reduce_relay_enable]
+1
