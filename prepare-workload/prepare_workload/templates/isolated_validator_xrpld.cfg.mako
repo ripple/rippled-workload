@@ -81,11 +81,17 @@ reference_fee = ${voting["reference_fee"]}
 account_reserve = ${voting["account_reserve"]}
 owner_reserve = ${voting["owner_reserve"]}
 
-% if need_features:
+% if supported_amendments:
+## Auto-generated from features.macro (Supported::yes amendments)
+[features]
+% for amendment in supported_amendments:
+${amendment}
+% endfor
+% elif need_features:
+## Fallback: hardcoded amendment list (use --features-macro to auto-generate)
 [features]
 AMM
 AMMClawback
-Batch
 CheckCashMakesTrustLine
 Checks
 Clawback

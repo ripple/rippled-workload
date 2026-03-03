@@ -2,6 +2,7 @@
 # requires-python = ">=3.13"
 # ///
 import json
+import re
 import urllib.request
 from dataclasses import dataclass
 from enum import IntEnum
@@ -65,6 +66,37 @@ class Amendment:
 
     def __str__(self):
         return f"{self.name} {("Enabled" if self.enabled else "Disabled")}"
+
+
+def parse_features_macro(macro_path: Path) -> list[str]:
+    """Extract all supported amendment names from a rippled features.macro file.
+
+    Parses XRPL_FEATURE/XRPL_FIX entries with Supported::yes and all
+    XRPL_RETIRE_FEATURE/XRPL_RETIRE_FIX entries (which are implicitly supported).
+
+    Returns a sorted list of amendment name strings suitable for the
+    [features] config section.
+    """
+    text = macro_path.read_text()
+    amendments = []
+
+    for m in re.finditer(
+        r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text
+    ):
+        amendments.append(m.group(1))
+
+    for m in re.finditer(
+        r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text
+    ):
+        amendments.append("fix" + m.group(1))
+
+    for m in re.finditer(r"XRPL_RETIRE_FEATURE\s*\(\s*(\w+)\s*\)", text):
+        amendments.append(m.group(1))
+
+    for m in re.finditer(r"XRPL_RETIRE_FIX\s*\(\s*(\w+)\s*\)", text):
+        amendments.append("fix" + m.group(1))
+
+    return sorted(amendments)
 
 
 def _get_amendments_from_file(amendments_file: Path | None = None) -> list[Amendment]:
