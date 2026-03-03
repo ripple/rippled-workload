@@ -73,6 +73,14 @@ true
 [validators]
 ${validator_public_keys}
 
+[validation_seed]
+${validation_seed}
+
+[voting]
+reference_fee = ${voting["reference_fee"]}
+account_reserve = ${voting["account_reserve"]}
+owner_reserve = ${voting["owner_reserve"]}
+
 % if need_features:
 [features]
 AMM

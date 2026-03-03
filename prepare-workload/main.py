@@ -26,7 +26,7 @@ def generate_fuzzer_seed():
     return xrpl.core.keypairs.generate_seed(algorithm=xrpl.CryptoAlgorithm.SECP256K1)
 
 
-def write_fuzzer_config(settings, num_validators, validator_public_keys):
+def write_fuzzer_config(settings, num_validators, validator_public_keys, isolated_validator_keys):
     """Generate and write the fuzzer and isolated validator configuration files."""
     fuzzer_config_dir = settings.network_dir_path / settings.config_dir / settings.fuzzer.container_name
     fuzzer_config_dir.mkdir(parents=True, exist_ok=True)
@@ -65,6 +65,8 @@ def write_fuzzer_config(settings, num_validators, validator_public_keys):
         "isolated_peer_starting_port": settings.fuzzer.isolated_validator_starting_port,
         "validator_public_keys": "\n".join(validator_public_keys),
         "need_features": settings.node_config.need_features,
+        "validation_seed": isolated_validator_keys["master_seed"],
+        "voting": settings.node_config.voting,
     }
 
     template = Template(filename=str(isolated_validator_config_template))
@@ -234,7 +236,23 @@ def main():
     # Write the fuzzer config
     if s.fuzzer.enabled:
         num_validators = len([c for c in all_configs if c["is_validator"]])
-        write_fuzzer_config(s, num_validators, validator_public_keys)
+
+        # Generate validator identity for the isolated peer so it
+        # participates in consensus like a real validator.
+        isolated_validator_keys = gl.gen_validator()
+        isolated_validator_public_key = isolated_validator_keys["node_public_key"]
+
+        # The isolated validator must be in every node's [validators] list
+        # for the network to accept its validations.
+        validator_public_keys.append(isolated_validator_public_key)
+        s.validator_public_keys = validator_public_keys
+
+        # Rewrite all node configs so they include the isolated validator's
+        # public key in their [validators] list.
+        for config in all_configs:
+            write_config(config, s)
+
+        write_fuzzer_config(s, num_validators, validator_public_keys, isolated_validator_keys)
 
 
 if __name__ == "__main__":
