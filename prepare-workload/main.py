@@ -65,6 +65,7 @@ def write_fuzzer_config(settings, num_validators, validator_public_keys, isolate
         "isolated_peer_starting_port": settings.fuzzer.isolated_validator_starting_port,
         "validator_public_keys": "\n".join(validator_public_keys),
         "need_features": settings.node_config.need_features,
+        "supported_amendments": settings.supported_amendments,
         "validation_seed": isolated_validator_keys["master_seed"],
         "voting": settings.node_config.voting,
     }
@@ -98,6 +99,7 @@ def write_config(node_data, settings):
     node_config_data = {
         "ports": node.ports,
         "need_features": node.need_features,
+        "supported_amendments": s.supported_amendments,
         "node_config_template": s.node_config_template,
         "validator_public_keys": "\n".join(s.validator_public_keys),
         "ips_fixed": "\n".join(ips_fixed),
@@ -137,10 +139,16 @@ def parse_args():
                         type=int,
                         help="Number of validators to create.",
                         )
-    parser.add_argument("--need-features", # TODO: Fix this hack
+    parser.add_argument("--need-features",
                         default=True,
                         action="store_true",
-                        help="Put the [features] block in all configs. This is just a hack if ledger.json not provied",
+                        help="Put the [features] block in all configs. Ignored when --features-macro is set.",
+                        )
+    parser.add_argument("--features-macro",
+                        type=Path,
+                        default=None,
+                        help="Path to rippled features.macro file. Auto-generates the [features] "
+                             "list from Supported::yes amendments, replacing the hardcoded list.",
                         )
     return parser.parse_args()
 
@@ -155,6 +163,8 @@ def overrides(a) -> dict:
         net["num_validators"] = a.num_validators
     if net:
         o["network"] = net
+    if a.features_macro is not None:
+        nc["features_macro_path"] = str(a.features_macro.resolve())
     if a.need_features:
         nc["need_features"] = a.need_features
     if nc:
