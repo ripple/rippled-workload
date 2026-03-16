@@ -1,6 +1,6 @@
-from random import SystemRandom
+from antithesis.random import AntithesisRandom
 
-urand = SystemRandom()
+urand = AntithesisRandom()
 randrange = urand.randrange
 random = urand.random
 sample = urand.sample
