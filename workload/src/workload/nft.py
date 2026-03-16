@@ -1,5 +1,3 @@
-from random import SystemRandom
-
 from xrpl.models.requests import AccountNFTs
 from xrpl.models.transactions import NFTokenMint, NFTokenMintFlag
 from xrpl.models.transactions.transaction import Memo
@@ -9,10 +7,8 @@ from xrpl.asyncio.transaction import autofill_and_sign, submit_and_wait
 # from xrpl.transaction import autofill_and_sign
 import json
 from workload import logging
-
-urand = SystemRandom()
-randrange = urand.randrange
-sample = urand.sample
+from workload.randoms import randrange, sample, randint
+from workload import params
 import struct
 log = logging.getLogger(__name__)
 
@@ -125,17 +121,16 @@ def encode_nft_id(
     return nftoken_id
 
 async def mint_nft(account, sequence, client):
-    taxon = 0
-    memo_msg = "Some really cool info no doubt"
+    memo_msg = params.nft_memo()
     memo = Memo(memo_data=memo_msg.encode("utf-8").hex())
     nft_memo = [memo]
     flags = NFTokenMintFlag.TF_TRANSFERABLE
-    transfer_fee = 666
+    transfer_fee = params.nft_transfer_fee()
     nft_mint_txn = NFTokenMint(
         account=account.address,
         transfer_fee=transfer_fee,
         sequence=sequence,
-        nftoken_taxon=taxon,
+        nftoken_taxon=params.nft_taxon(),
         flags=flags,
         memos=nft_memo,
         )

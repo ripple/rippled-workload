@@ -14,7 +14,7 @@ from xrpl.models.transactions import (
     AccountSet,
     TrustSet,
 )
-from workload import randoms
+from workload import randoms, params
 from workload.create import generate_wallet_from_seed
 from workload.randoms import sample, choice
 
@@ -27,20 +27,16 @@ def deep_update(base: dict, override: dict) -> dict:
             base[k] = v
     return base
 
-def rand_amount(rng: randoms.SystemRandom) -> str:
-    # XRP drops, string per XRPL JSON conventions
-    return str(randoms.randint(10, 1_000_000))
-
-def rand_address(account_list) -> str:
-    return randoms.choice(account_list)
-
 @dataclass
 class TxnContext:
     account: str
-    fee: str = "10"
+    fee: str = None
     limit_amount_value = "10000000000000"
     addresses: Optional[list] = None
-    def get_address(self) -> randoms.SystemRandom:
+    def __post_init__(self):
+        if self.fee is None:
+            self.fee = params.fee()
+    def get_address(self):
         return choice(self.addresses)
 
 def build_payment(ctx: TxnContext) -> dict:
@@ -71,13 +67,12 @@ def build_accountset(ctx: TxnContext) -> dict:
     }
 
 def build_nftoken_mint(ctx: TxnContext) -> dict:
-    address = ctx.get_address()
-    memo_msg = "Some really cool info no doubt"
+    memo_msg = params.nft_memo()
     memo = Memo(memo_data=memo_msg.encode("utf-8").hex())
-    taxon = 0
     nftoken_mint_dict = {
         "Account": ctx.account,
-        "NFTokenTaxon": taxon,
+        "NFTokenTaxon": params.nft_taxon(),
+        "TransferFee": params.nft_transfer_fee(),
         "flags": NFTokenMintFlag.TF_TRANSFERABLE,
         "memos": [memo],
     }

@@ -19,6 +19,7 @@ from workload.models import UserAccount
 from workload.nft import mint_nft
 from workload.randoms import sample, choice
 from workload.txn_factory import generate_txn
+from workload import params
 from antithesis import lifecycle
 from asyncio import TaskGroup
 from fastapi import FastAPI, Depends
@@ -285,10 +286,10 @@ class Workload:
         for i in range(n):
             tx_json = Payment(
                 account=wallet.address,
-                amount="1000000",
+                amount=params.payment_amount(),
                 destination=destination_address,
                 sequence=seq + i,
-                fee="500",
+                fee=params.fee(),
                 last_ledger_sequence=latest_ledger + 10,
                 signing_pub_key=wallet.public_key
             ).to_xrpl()
@@ -365,7 +366,7 @@ class Workload:
         return self.nfts
 
     async def nftoken_create_offer(self, account, nft_id, wallet):
-        create_amount = "1000000"
+        create_amount = params.nft_offer_amount()
         logger.debug("Creating offer for %s's nft [%s]", account, nft_id)
         nftoken_offer_create_txn = NFTokenCreateOffer(
             account=account,
@@ -401,7 +402,7 @@ class Workload:
     async def payment_random(self):
         if not self.accounts:
             return
-        amount = str(1_000_000)
+        amount = params.payment_amount()
         src_address, dst = sample(list(self.accounts), 2)
         sequence = await get_next_valid_seq_number(src_address, self.client)
         src = self.accounts[src_address]
@@ -413,7 +414,7 @@ class Workload:
     async def create_ticket(self):
         if not self.accounts:
             return
-        ticket_count = 5
+        ticket_count = params.ticket_count()
         logger.debug(choice(list(self.accounts)))
         account_id  = choice(list(self.accounts))
         logger.debug(f"{account_id=}")
@@ -463,11 +464,10 @@ class Workload:
         account_ids = self.addresses
         account_ids.remove(account_id)
         dst = choice(account_ids)
-        amount = str(1_000_000)
         payment_txn = Payment(
             account=src.address,
             destination=dst,
-            amount=amount,
+            amount=params.payment_amount(),
             sequence=0,
             ticket_sequence=ticket_sequence,
         )
@@ -479,17 +479,15 @@ class Workload:
         if not self.accounts:
             return
         from xrpl.models import Batch, BatchFlag, Payment
-        amount = 1_000_000
         src_address, dst = sample(list(self.accounts), 2)
         sequence = await get_next_valid_seq_number(src_address, self.client)
         src = self.accounts[src_address]
-        num_txns = 8
+        num_txns = params.batch_size()
         batch_flag = choice(list(BatchFlag))
         logger.info(f"Submitting Batch txn {batch_flag.name} ")
         raw_transactions = [Payment(
             account=src.address,
-            # amount=("1000000" if idx < 3 else "10000000000000"), # have a until_failure fail
-            amount=str(amount),
+            amount=params.batch_inner_amount(),
             flags=xrpl.models.TransactionFlag.TF_INNER_BATCH_TXN,
             destination=dst,
             sequence=sequence + idx + 1,
