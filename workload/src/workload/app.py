@@ -8,15 +8,25 @@ from typing import Any
 import uvicorn
 import xrpl
 import copy
-from xrpl.models.transactions import NFTokenMint, NFTokenMintFlag
+from xrpl.models.transactions import NFTokenMint
 from fastapi import Request
 
-from workload import logger, utils
+from workload import logger
 from workload.create import generate_wallets, generate_wallet_from_seed
 from workload.check_xrpld_sync_state import is_xrpld_synced # TODO:git use xrpld_sync.py
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
-from workload.nft import mint_nft
+from workload.nft import mint_nft, nftoken_modify
+from workload.credentials import credential_create, credential_accept, credential_delete
+from workload.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
+from workload.domains import permissioned_domain_set, permissioned_domain_delete
+from workload.delegation import delegate_set
+from workload.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
+from workload.lending import (
+    loan_broker_set, loan_broker_delete,
+    loan_broker_cover_deposit, loan_broker_cover_withdraw,
+    loan_set, loan_delete, loan_manage, loan_pay,
+)
 from workload.randoms import sample, choice
 from workload.txn_factory import generate_txn
 from workload import params
@@ -34,11 +44,6 @@ from xrpl.core.keypairs import sign
 from xrpl.models import IssuedCurrency, IssuedCurrencyAmount
 from xrpl.models.transactions import (
     AccountSetAsfFlag,
-    AccountSet,
-    AccountSetFlag,
-    TrustSet,
-    TrustSetFlag,
-    PaymentFlag,
     NFTokenCreateOffer,
     NFTokenCreateOfferFlag,
     NFTokenBurn,
@@ -112,6 +117,12 @@ class Workload:
         self.amms = []
         self.nfts = []
         self.currencies = []
+        self.credentials = []
+        self.vaults = []
+        self.domains = []
+        self.mpt_issuances = []
+        self.loan_brokers = []
+        self.loans = []
         self.funding_wallet: Wallet = None
         self.failures = []
         self.currency_codes = conf["currencies"]["codes"]
@@ -675,6 +686,13 @@ def create_app(workload: Workload) -> FastAPI:
         except Exception as e:
             logger.error(f"nft_burn_random failed: {type(e).__name__}: {e}")
 
+    @app.get("/nft/modify/random")
+    async def nft_modify(w: Workload = Depends(get_workload)):
+        try:
+            return await nftoken_modify(w.accounts, w.nfts, w.client)
+        except Exception as e:
+            logger.error(f"nft_modify failed: {type(e).__name__}: {e}")
+
     @app.get("/pay")
     async def payment_random(w: Workload = Depends(get_workload)):
         try:
@@ -727,6 +745,181 @@ def create_app(workload: Workload) -> FastAPI:
     # @app.get("/offers/cancel/random")
     # async def cancel_random_offer(w: Workload = Depends(get_workload)):
     #     return await w.cancel_random_offer()
+
+    # ── Credentials ────────────────────────────────────────────────
+    @app.get("/credential/create/random")
+    async def credential_create(w: Workload = Depends(get_workload)):
+        try:
+            return await credential_create(w.accounts, w.credentials, w.client)
+        except Exception as e:
+            logger.error(f"credential_create failed: {type(e).__name__}: {e}")
+
+    @app.get("/credential/accept/random")
+    async def credential_accept(w: Workload = Depends(get_workload)):
+        try:
+            return await credential_accept(w.accounts, w.credentials, w.client)
+        except Exception as e:
+            logger.error(f"credential_accept failed: {type(e).__name__}: {e}")
+
+    @app.get("/credential/delete/random")
+    async def credential_delete(w: Workload = Depends(get_workload)):
+        try:
+            return await credential_delete(w.accounts, w.credentials, w.client)
+        except Exception as e:
+            logger.error(f"credential_delete failed: {type(e).__name__}: {e}")
+
+    # ── Vaults ───────────────────────────────────────────────────
+    @app.get("/vault/create/random")
+    async def vault_create(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_create(w.accounts, w.vaults, w.client)
+        except Exception as e:
+            logger.error(f"vault_create failed: {type(e).__name__}: {e}")
+
+    @app.get("/vault/deposit/random")
+    async def vault_deposit(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_deposit(w.accounts, w.vaults, w.client)
+        except Exception as e:
+            logger.error(f"vault_deposit failed: {type(e).__name__}: {e}")
+
+    @app.get("/vault/withdraw/random")
+    async def vault_withdraw(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_withdraw(w.accounts, w.vaults, w.client)
+        except Exception as e:
+            logger.error(f"vault_withdraw failed: {type(e).__name__}: {e}")
+
+    @app.get("/vault/set/random")
+    async def vault_set(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_set(w.accounts, w.vaults, w.client)
+        except Exception as e:
+            logger.error(f"vault_set failed: {type(e).__name__}: {e}")
+
+    @app.get("/vault/delete/random")
+    async def vault_delete(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_delete(w.accounts, w.vaults, w.client)
+        except Exception as e:
+            logger.error(f"vault_delete failed: {type(e).__name__}: {e}")
+
+    @app.get("/vault/clawback/random")
+    async def vault_clawback(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_clawback(w.accounts, w.vaults, w.client)
+        except Exception as e:
+            logger.error(f"vault_clawback failed: {type(e).__name__}: {e}")
+
+    # ── Permissioned Domains ─────────────────────────────────────
+    @app.get("/domain/set/random")
+    async def domain_set(w: Workload = Depends(get_workload)):
+        try:
+            return await permissioned_domain_set(w.accounts, w.domains, w.client)
+        except Exception as e:
+            logger.error(f"domain_set failed: {type(e).__name__}: {e}")
+
+    @app.get("/domain/delete/random")
+    async def domain_delete(w: Workload = Depends(get_workload)):
+        try:
+            return await permissioned_domain_delete(w.accounts, w.domains, w.client)
+        except Exception as e:
+            logger.error(f"domain_delete failed: {type(e).__name__}: {e}")
+
+    # ── Delegation ───────────────────────────────────────────────
+    @app.get("/delegate/set/random")
+    async def delegate_set(w: Workload = Depends(get_workload)):
+        try:
+            return await delegate_set(w.accounts, w.client)
+        except Exception as e:
+            logger.error(f"delegate_set failed: {type(e).__name__}: {e}")
+
+    # ── MPToken (tracked) ────────────────────────────────────────
+    @app.get("/mpt/create/random")
+    async def mpt_create_tracked(w: Workload = Depends(get_workload)):
+        try:
+            return await mpt_create(w.accounts, w.mpt_issuances, w.client)
+        except Exception as e:
+            logger.error(f"mpt_create_tracked failed: {type(e).__name__}: {e}")
+
+    @app.get("/mpt/authorize/random")
+    async def mpt_authorize(w: Workload = Depends(get_workload)):
+        try:
+            return await mpt_authorize(w.accounts, w.mpt_issuances, w.client)
+        except Exception as e:
+            logger.error(f"mpt_authorize failed: {type(e).__name__}: {e}")
+
+    @app.get("/mpt/set/random")
+    async def mpt_set(w: Workload = Depends(get_workload)):
+        try:
+            return await mpt_issuance_set(w.accounts, w.mpt_issuances, w.client)
+        except Exception as e:
+            logger.error(f"mpt_set failed: {type(e).__name__}: {e}")
+
+    @app.get("/mpt/destroy/random")
+    async def mpt_destroy(w: Workload = Depends(get_workload)):
+        try:
+            return await mpt_destroy(w.accounts, w.mpt_issuances, w.client)
+        except Exception as e:
+            logger.error(f"mpt_destroy failed: {type(e).__name__}: {e}")
+
+    # ── Lending Protocol ─────────────────────────────────────────
+    @app.get("/loan/broker/set/random")
+    async def loan_broker_set(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_set(w.accounts, w.vaults, w.loan_brokers, w.client)
+        except Exception as e:
+            logger.error(f"loan_broker_set failed: {type(e).__name__}: {e}")
+
+    @app.get("/loan/broker/delete/random")
+    async def loan_broker_delete(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_delete(w.accounts, w.loan_brokers, w.client)
+        except Exception as e:
+            logger.error(f"loan_broker_delete failed: {type(e).__name__}: {e}")
+
+    @app.get("/loan/broker/cover/deposit/random")
+    async def loan_broker_cover_deposit(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_cover_deposit(w.accounts, w.loan_brokers, w.client)
+        except Exception as e:
+            logger.error(f"loan_broker_cover_deposit failed: {type(e).__name__}: {e}")
+
+    @app.get("/loan/broker/cover/withdraw/random")
+    async def loan_broker_cover_withdraw(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_cover_withdraw(w.accounts, w.loan_brokers, w.client)
+        except Exception as e:
+            logger.error(f"loan_broker_cover_withdraw failed: {type(e).__name__}: {e}")
+
+    @app.get("/loan/set/random")
+    async def loan_set(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_set(w.accounts, w.loan_brokers, w.loans, w.client)
+        except Exception as e:
+            logger.error(f"loan_set failed: {type(e).__name__}: {e}")
+
+    @app.get("/loan/delete/random")
+    async def loan_delete(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_delete(w.accounts, w.loans, w.client)
+        except Exception as e:
+            logger.error(f"loan_delete failed: {type(e).__name__}: {e}")
+
+    @app.get("/loan/manage/random")
+    async def loan_manage(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_manage(w.accounts, w.loan_brokers, w.loans, w.client)
+        except Exception as e:
+            logger.error(f"loan_manage failed: {type(e).__name__}: {e}")
+
+    @app.get("/loan/pay/random")
+    async def loan_pay(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_pay(w.accounts, w.loans, w.client)
+        except Exception as e:
+            logger.error(f"loan_pay failed: {type(e).__name__}: {e}")
+
     return app
 
 def main():

@@ -1,5 +1,5 @@
 from xrpl.models.requests import AccountNFTs
-from xrpl.models.transactions import NFTokenMint, NFTokenMintFlag
+from xrpl.models.transactions import NFTokenMint, NFTokenMintFlag, NFTokenModify
 from xrpl.models.transactions.transaction import Memo
 from xrpl.transaction import autofill_and_sign, submit_and_wait
 import base58
@@ -9,6 +9,7 @@ import json
 from workload import logging
 from workload.randoms import randrange, sample, randint
 from workload import params
+from workload.assertions import tx_submitted, tx_result
 import struct
 log = logging.getLogger(__name__)
 
@@ -144,3 +145,34 @@ async def mint_nft(account, sequence, client):
         msg = f"{account.address} minted NFT ID {nftoken_id}"
         log.info(msg)
     return nft_mint_txn_response.result
+
+
+async def nftoken_modify(accounts, nfts, client):
+    if not accounts:
+        return
+    if params.should_send_faulty():
+        return await _nftoken_modify_faulty(accounts, client)
+    return await _nftoken_modify_valid(accounts, nfts, client)
+
+
+async def _nftoken_modify_valid(accounts, nfts, client):
+    if not nfts:
+        log.debug("No NFTs to modify")
+        return
+    from workload.randoms import choice
+    nft = choice(nfts)
+    if nft.owner not in accounts:
+        return
+    owner = accounts[nft.owner]
+    txn = NFTokenModify(
+        account=owner.address,
+        nftoken_id=nft.nftoken_id,
+        uri=params.nft_uri(),
+    )
+    tx_submitted("NFTokenModify")
+    response = await submit_and_wait(transaction=txn, client=client, wallet=owner.wallet)
+    tx_result("NFTokenModify", response.result)
+
+
+async def _nftoken_modify_faulty(accounts, client):
+    pass  # TODO: fault injection

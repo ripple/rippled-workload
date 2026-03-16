@@ -60,3 +60,42 @@ class Amm:
     account: str
     assets: list[IssuedCurrency]
     lp_token: list[IssuedCurrency]
+
+
+@dataclass
+class Credential:
+    issuer: str
+    subject: str
+    credential_type: str
+
+
+@dataclass
+class Vault:
+    owner: str
+    vault_id: str
+
+
+@dataclass
+class PermissionedDomain:
+    owner: str
+    domain_id: str
+
+
+@dataclass
+class MPTokenIssuance:
+    issuer: str
+    mpt_issuance_id: str
+
+
+@dataclass
+class LoanBroker:
+    owner: str
+    loan_broker_id: str
+    vault_id: str
+
+
+@dataclass
+class Loan:
+    borrower: str
+    loan_id: str
+    loan_broker_id: str
