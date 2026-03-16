@@ -27,12 +27,6 @@ def deep_update(base: dict, override: dict) -> dict:
             base[k] = v
     return base
 
-def rand_amount() -> str:
-    return params.payment_amount()
-
-def rand_address(account_list) -> str:
-    return randoms.choice(account_list)
-
 @dataclass
 class TxnContext:
     account: str
