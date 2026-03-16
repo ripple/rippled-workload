@@ -1,5 +1,3 @@
-from random import SystemRandom
-
 from xrpl.models.requests import AccountNFTs
 from xrpl.models.transactions import NFTokenMint, NFTokenMintFlag
 from xrpl.models.transactions.transaction import Memo
@@ -9,10 +7,7 @@ from xrpl.asyncio.transaction import autofill_and_sign, submit_and_wait
 # from xrpl.transaction import autofill_and_sign
 import json
 from workload import logging
-
-urand = SystemRandom()
-randrange = urand.randrange
-sample = urand.sample
+from workload.randoms import randrange, sample, randint
 import struct
 log = logging.getLogger(__name__)
 
