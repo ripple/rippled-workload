@@ -5,11 +5,10 @@ Follows the fuzzer's naming convention:
   "workload::success : TxType" — transaction got tesSUCCESS
 """
 
-from antithesis import assertions
-
 
 def tx_submitted(name: str) -> None:
     """Report that a transaction was created and submitted to the network."""
+    from antithesis import assertions
     assertions.reachable(
         f"workload::seen : {name}",
         {},
@@ -19,9 +18,9 @@ def tx_submitted(name: str) -> None:
 def tx_result(name: str, result: dict) -> None:
     """Report a transaction result to Antithesis.
 
-    Emits both a reachability assertion (we got a result back) and
-    a sometimes assertion (it succeeded at least once).
+    Emits a sometimes assertion that the transaction succeeded at least once.
     """
+    from antithesis import assertions
     engine_result = result.get("engine_result", "unknown")
     assertions.sometimes(
         engine_result == "tesSUCCESS",
