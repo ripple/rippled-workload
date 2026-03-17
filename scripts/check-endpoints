@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(dirname "$0")/../workload"
+
+echo "Starting uvicorn and checking endpoints..."
+
+# Start uvicorn in background, skip xrpld wait by using a dummy config
+uv run python -c "
+import json
+from fastapi.testclient import TestClient
+from workload.config import conf_file
+
+# Patch wait_for_network to skip xrpld check
+from workload import app as app_module
+original_wait = app_module.Workload.wait_for_network
+app_module.Workload.wait_for_network = lambda self, xrpld: None
+
+try:
+    workload = app_module.Workload(conf_file['workload'])
+    app = app_module.create_app(workload)
+
+    # List all registered routes
+    routes = sorted([r.path for r in app.routes if hasattr(r, 'methods')])
+    print(f'Registered {len(routes)} endpoints:')
+    for r in routes:
+        print(f'  {r}')
+
+    # Verify expected new endpoints exist
+    expected = [
+        '/credential/create/random',
+        '/credential/accept/random',
+        '/credential/delete/random',
+        '/vault/create/random',
+        '/vault/deposit/random',
+        '/vault/withdraw/random',
+        '/vault/set/random',
+        '/vault/delete/random',
+        '/vault/clawback/random',
+        '/domain/set/random',
+        '/domain/delete/random',
+        '/delegate/set/random',
+        '/nft/modify/random',
+        '/mpt/create/random',
+        '/mpt/authorize/random',
+        '/mpt/set/random',
+        '/mpt/destroy/random',
+        '/loan/broker/set/random',
+        '/loan/broker/delete/random',
+        '/loan/broker/cover/deposit/random',
+        '/loan/broker/cover/withdraw/random',
+        '/loan/set/random',
+        '/loan/delete/random',
+        '/loan/manage/random',
+        '/loan/pay/random',
+    ]
+
+    missing = [e for e in expected if e not in routes]
+    if missing:
+        print(f'\nMISSING {len(missing)} endpoints:')
+        for m in missing:
+            print(f'  {m}')
+        exit(1)
+    else:
+        print(f'\nAll {len(expected)} new endpoints registered OK')
+except Exception as e:
+    print(f'FAILED: {type(e).__name__}: {e}')
+    import traceback
+    traceback.print_exc()
+    exit(1)
+finally:
+    app_module.Workload.wait_for_network = original_wait
+"
