@@ -26,6 +26,7 @@ from workload.models import UserAccount
 from workload.nft import nftoken_mint, nftoken_burn, nftoken_modify, nftoken_create_offer, nftoken_cancel_offer, nftoken_accept_offer
 from workload.payments import payment_random as payment_random_fn
 from workload.trustlines import trustline_create
+from workload.account_set import account_set_random
 from workload.tickets import ticket_create, ticket_use
 from workload.batch import batch_random
 from workload.credentials import credential_create, credential_accept, credential_delete
@@ -336,6 +337,14 @@ def create_app(workload: Workload) -> FastAPI:
             return await nftoken_accept_offer(w.accounts, w.nfts, w.nft_offers, w.client)
         except Exception as e:
             logger.error(f"nft_accept_offer failed: {type(e).__name__}: {e}")
+
+    # ── Account Set ───────────────────────────────────────────────
+    @app.get("/account/set/random")
+    async def account_set_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await account_set_random(w.accounts, w.client)
+        except Exception as e:
+            logger.error(f"account_set failed: {type(e).__name__}: {e}")
 
     # ── Trust Lines ───────────────────────────────────────────────
     @app.get("/trustline/create/random")

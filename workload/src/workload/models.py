@@ -81,6 +81,7 @@ class Credential:
 class Vault:
     owner: str
     vault_id: str
+    asset: object = None  # XRP(), IssuedCurrency, or MPTCurrency
 
 
 @dataclass

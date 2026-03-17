@@ -6,7 +6,8 @@ from workload.assertions import tx_submitted, tx_result
 from workload.models import Vault
 from workload.randoms import choice, random
 from xrpl.asyncio.transaction import submit_and_wait
-from xrpl.models import IssuedCurrency
+from xrpl.models import IssuedCurrency, IssuedCurrencyAmount as IOUAmount
+from xrpl.models.amounts import MPTAmount
 from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import (
     VaultCreate,
@@ -30,6 +31,23 @@ def _extract_created_id(result, ledger_entry_type):
 
 
 # ── Create ───────────────────────────────────────────────────────────
+
+def _amount_for_asset(asset):
+    """Create an Amount matching the vault's asset type."""
+    if isinstance(asset, IssuedCurrency):
+        return IOUAmount(
+            currency=asset.currency,
+            issuer=asset.issuer,
+            value=params.iou_amount(),
+        )
+    elif isinstance(asset, MPTCurrency):
+        return MPTAmount(
+            mpt_issuance_id=asset.mpt_issuance_id,
+            value=params.mpt_amount(),
+        )
+    # XRP — return drops as string
+    return params.vault_deposit_amount()
+
 
 def _random_asset(trust_lines, mpt_issuances):
     """Pick a random asset: XRP, IOU, or MPT based on available state."""
@@ -55,9 +73,10 @@ async def vault_create(accounts, vaults, trust_lines, mpt_issuances, client):
 async def _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, client):
     src_address = choice(list(accounts))
     src = accounts[src_address]
+    asset = _random_asset(trust_lines, mpt_issuances)
     txn = VaultCreate(
         account=src.address,
-        asset=_random_asset(trust_lines, mpt_issuances),
+        asset=asset,
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
@@ -68,8 +87,8 @@ async def _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, clie
     if result.get("engine_result") == "tesSUCCESS":
         vault_id = _extract_created_id(result, "Vault")
         if vault_id:
-            vaults.append(Vault(owner=src.address, vault_id=vault_id))
-            log.info("Created vault %s", vault_id)
+            vaults.append(Vault(owner=src.address, vault_id=vault_id, asset=asset))
+            log.info("Created vault %s with asset %s", vault_id, asset)
 
 
 async def _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, client):
@@ -96,7 +115,7 @@ async def _vault_deposit_valid(accounts, vaults, client):
     txn = VaultDeposit(
         account=depositor.address,
         vault_id=vault.vault_id,
-        amount=params.vault_deposit_amount(),
+        amount=_amount_for_asset(vault.asset),
     )
     tx_submitted("VaultDeposit")
     response = await submit_and_wait(txn, client, depositor.wallet)
@@ -128,7 +147,7 @@ async def _vault_withdraw_valid(accounts, vaults, client):
     txn = VaultWithdraw(
         account=owner.address,
         vault_id=vault.vault_id,
-        amount=params.vault_withdraw_amount(),
+        amount=_amount_for_asset(vault.asset),
     )
     tx_submitted("VaultWithdraw")
     response = await submit_and_wait(txn, client, owner.wallet)
