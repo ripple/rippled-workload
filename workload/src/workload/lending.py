@@ -17,9 +17,9 @@ from xrpl.models.transactions import (
     LoanSet,
     LoanDelete,
     LoanManage,
-    LoanManageFlag,
     LoanPay,
 )
+from xrpl.models.transactions.loan_manage import LoanManageFlag
 
 log = logging.getLogger(__name__)
 
