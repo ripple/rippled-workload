@@ -11,6 +11,7 @@ xrpld.log
 __pycache__/
 *.py[cod]
 .venv/
+uv.lock
 pip-log.txt
 logs
 config/docker-compose.yml
