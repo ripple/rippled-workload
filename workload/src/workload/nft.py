@@ -156,6 +156,68 @@ async def mint_nft(account, sequence, client):
     return nft_mint_txn_response.result
 
 
+# ── Mint (dispatch) ──────────────────────────────────────────────────
+
+async def nftoken_mint(accounts, nfts, client):
+    if not accounts:
+        return
+    if params.should_send_faulty():
+        return await _nftoken_mint_faulty(accounts, nfts, client)
+    return await _nftoken_mint_valid(accounts, nfts, client)
+
+
+async def _nftoken_mint_valid(accounts, nfts, client):
+    from workload.models import NFT
+    from xrpl.asyncio.account import get_next_valid_seq_number
+    account_id = choice(list(accounts))
+    account = accounts[account_id]
+    sequence = await get_next_valid_seq_number(account.address, client)
+    tx_submitted("NFTokenMint")
+    result = await mint_nft(account, sequence, client)
+    tx_result("NFTokenMint", result)
+    if result.get("engine_result") == "tesSUCCESS":
+        nftoken_id = result["meta"]["nftoken_id"]
+        nfts.append(NFT(owner=account.address, nftoken_id=nftoken_id))
+        account.nfts.add(nftoken_id)
+
+
+async def _nftoken_mint_faulty(accounts, nfts, client):
+    pass  # TODO: fault injection
+
+
+# ── Burn ─────────────────────────────────────────────────────────────
+
+async def nftoken_burn(accounts, nfts, client):
+    if not accounts:
+        return
+    if params.should_send_faulty():
+        return await _nftoken_burn_faulty(accounts, nfts, client)
+    return await _nftoken_burn_valid(accounts, nfts, client)
+
+
+async def _nftoken_burn_valid(accounts, nfts, client):
+    from xrpl.models.transactions import NFTokenBurn
+    if not nfts:
+        log.debug("No NFTs to burn")
+        return
+    nft = choice(nfts)
+    if nft.owner not in accounts:
+        return
+    owner = accounts[nft.owner]
+    txn = NFTokenBurn(account=owner.address, nftoken_id=nft.nftoken_id)
+    tx_submitted("NFTokenBurn")
+    response = await submit_and_wait(transaction=txn, client=client, wallet=owner.wallet)
+    tx_result("NFTokenBurn", response.result)
+    if response.result.get("engine_result") == "tesSUCCESS":
+        nfts.remove(nft)
+
+
+async def _nftoken_burn_faulty(accounts, nfts, client):
+    pass  # TODO: fault injection
+
+
+# ── Modify ───────────────────────────────────────────────────────────
+
 async def nftoken_modify(accounts, nfts, client):
     if not accounts:
         return
