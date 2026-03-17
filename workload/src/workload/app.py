@@ -25,6 +25,7 @@ from workload.config import conf_file, config_file
 from workload.models import UserAccount
 from workload.nft import nftoken_mint, nftoken_burn, nftoken_modify, nftoken_create_offer, nftoken_cancel_offer, nftoken_accept_offer
 from workload.payments import payment_random as payment_random_fn
+from workload.trustlines import trustline_create
 from workload.tickets import ticket_create, ticket_use
 from workload.batch import batch_random
 from workload.credentials import credential_create, credential_accept, credential_delete
@@ -100,6 +101,7 @@ class Workload:
         self.nfts = []
         self.nft_offers = []
         self.currencies = []
+        self.trust_lines = []
         self.credentials = []
         self.vaults = []
         self.domains = []
@@ -335,11 +337,19 @@ def create_app(workload: Workload) -> FastAPI:
         except Exception as e:
             logger.error(f"nft_accept_offer failed: {type(e).__name__}: {e}")
 
+    # ── Trust Lines ───────────────────────────────────────────────
+    @app.get("/trustline/create/random")
+    async def trustline_create_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await trustline_create(w.accounts, w.trust_lines, w.client)
+        except Exception as e:
+            logger.error(f"trustline_create failed: {type(e).__name__}: {e}")
+
     # ── Payments ─────────────────────────────────────────────────
     @app.get("/payment/random")
     async def payment_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await payment_random_fn(w.accounts, w.client)
+            return await payment_random_fn(w.accounts, w.trust_lines, w.client)
         except Exception as e:
             logger.error(f"payment_random failed: {type(e).__name__}: {e}")
 

@@ -37,6 +37,26 @@ def payment_amount() -> str:
     return str(randint(1_000, 10_000_000))
 
 
+# ── Trust Lines & IOUs ────────────────────────────────────────────────
+CURRENCY_CODES = ["USD", "EUR", "GBP", "JPY", "BTC", "ETH", "XAU", "CNY"]
+
+
+def currency_code() -> str:
+    """Random 3-letter currency code."""
+    return choice(CURRENCY_CODES)
+
+
+def trustline_limit() -> str:
+    """Trust line limit value. Ranges from 0 to 100k to overlap with
+    typical IOU payment amounts (1-10k), ensuring we hit limit violations."""
+    return str(randint(0, 100_000))
+
+
+def iou_amount() -> str:
+    """IOU payment amount (value, not drops)."""
+    return str(randint(1, 10_000))
+
+
 # ── NFTokens ─────────────────────────────────────────────────────────
 def nft_taxon() -> int:
     return randint(0, 10)

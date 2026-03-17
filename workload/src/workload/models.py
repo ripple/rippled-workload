@@ -96,6 +96,13 @@ class MPTokenIssuance:
 
 
 @dataclass
+class TrustLine:
+    account_a: str
+    account_b: str
+    currency: str
+
+
+@dataclass
 class LoanBroker:
     owner: str
     loan_broker_id: str
