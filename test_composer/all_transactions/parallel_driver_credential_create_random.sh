@@ -1,3 +1,3 @@
-#\!/usr/bin/env bash
+#!/usr/bin/env bash
 
 curl http://workload:8000/credential/create/random
