@@ -3,9 +3,6 @@
 Follows the fuzzer's naming convention:
   "workload::seen : TxType"    — transaction was created and submitted
   "workload::success : TxType" — transaction got tesSUCCESS
-
-Import at module level so the Antithesis instrumentor can catalog
-assertion sites during its startup scan of /opt/antithesis/catalog/.
 """
 
 from antithesis import assertions
