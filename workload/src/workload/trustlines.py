@@ -11,7 +11,7 @@ from workload.assertions import tx_submitted, tx_result
 from workload.models import TrustLine
 from workload.randoms import sample, choice
 from xrpl.asyncio.transaction import submit_and_wait
-from xrpl.models import IssuedCurrencyAmount
+from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.transactions import TrustSet
 
 log = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ async def _trustline_create_valid(accounts, trust_lines, client):
     # The submitter sets a trust line limit for currency issued by the other account
     txn = TrustSet(
         account=account.address,
-        limit_amount=IssuedCurrencyAmount(
+        limit_amount=IOUAmount(
             currency=currency,
             issuer=other_id,
             value=params.trustline_limit(),

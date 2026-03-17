@@ -148,6 +148,11 @@ def nft_uri() -> str:
 
 
 # ── MPToken ──────────────────────────────────────────────────────────
+def mpt_amount() -> str:
+    """MPT payment/transfer amount."""
+    return str(randint(1, 10_000))
+
+
 def mpt_maximum_amount() -> str:
     """Max 9,223,372,036,854,775,807 per spec."""
     return str(randint(1_000_000, 9_223_372_036_854_775_807))

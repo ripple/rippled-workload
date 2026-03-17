@@ -349,7 +349,7 @@ def create_app(workload: Workload) -> FastAPI:
     @app.get("/payment/random")
     async def payment_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await payment_random_fn(w.accounts, w.trust_lines, w.client)
+            return await payment_random_fn(w.accounts, w.trust_lines, w.mpt_issuances, w.client)
         except Exception as e:
             logger.error(f"payment_random failed: {type(e).__name__}: {e}")
 
@@ -410,7 +410,7 @@ def create_app(workload: Workload) -> FastAPI:
     @app.get("/vault/create/random")
     async def vault_create(w: Workload = Depends(get_workload)):
         try:
-            return await vault_create(w.accounts, w.vaults, w.client)
+            return await vault_create(w.accounts, w.vaults, w.trust_lines, w.mpt_issuances, w.client)
         except Exception as e:
             logger.error(f"vault_create failed: {type(e).__name__}: {e}")
 

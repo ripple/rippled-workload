@@ -4,8 +4,10 @@ import xrpl.models
 from workload import logging, params
 from workload.assertions import tx_submitted, tx_result
 from workload.models import Vault
-from workload.randoms import choice
+from workload.randoms import choice, random
 from xrpl.asyncio.transaction import submit_and_wait
+from xrpl.models import IssuedCurrency
+from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import (
     VaultCreate,
     VaultSet,
@@ -29,20 +31,33 @@ def _extract_created_id(result, ledger_entry_type):
 
 # ── Create ───────────────────────────────────────────────────────────
 
-async def vault_create(accounts, vaults, client):
+def _random_asset(trust_lines, mpt_issuances):
+    """Pick a random asset: XRP, IOU, or MPT based on available state."""
+    roll = random()
+    if trust_lines and roll < 0.33:
+        tl = choice(trust_lines)
+        issuer = choice([tl.account_a, tl.account_b])
+        return IssuedCurrency(currency=tl.currency, issuer=issuer)
+    elif mpt_issuances and roll < 0.66:
+        mpt = choice(mpt_issuances)
+        return MPTCurrency(mpt_issuance_id=mpt.mpt_issuance_id)
+    return xrpl.models.XRP()
+
+
+async def vault_create(accounts, vaults, trust_lines, mpt_issuances, client):
     if not accounts:
         return
     if params.should_send_faulty():
-        return await _vault_create_faulty(accounts, vaults, client)
-    return await _vault_create_valid(accounts, vaults, client)
+        return await _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, client)
+    return await _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, client)
 
 
-async def _vault_create_valid(accounts, vaults, client):
+async def _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, client):
     src_address = choice(list(accounts))
     src = accounts[src_address]
     txn = VaultCreate(
         account=src.address,
-        asset=xrpl.models.XRP(),
+        asset=_random_asset(trust_lines, mpt_issuances),
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
@@ -57,7 +72,7 @@ async def _vault_create_valid(accounts, vaults, client):
             log.info("Created vault %s", vault_id)
 
 
-async def _vault_create_faulty(accounts, vaults, client):
+async def _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, client):
     pass  # TODO: fault injection
 
 
