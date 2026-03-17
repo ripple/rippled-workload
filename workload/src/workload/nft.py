@@ -1,5 +1,13 @@
 from xrpl.models.requests import AccountNFTs
-from xrpl.models.transactions import NFTokenMint, NFTokenMintFlag, NFTokenModify
+from xrpl.models.transactions import (
+    NFTokenMint,
+    NFTokenMintFlag,
+    NFTokenModify,
+    NFTokenCreateOffer,
+    NFTokenCreateOfferFlag,
+    NFTokenCancelOffer,
+    NFTokenAcceptOffer,
+)
 from xrpl.models.transactions.transaction import Memo
 from xrpl.transaction import autofill_and_sign, submit_and_wait
 import base58
@@ -7,7 +15,8 @@ from xrpl.asyncio.transaction import autofill_and_sign, submit_and_wait
 # from xrpl.transaction import autofill_and_sign
 import json
 from workload import logging
-from workload.randoms import randrange, sample, randint
+from workload.models import NFTOffer
+from workload.randoms import randrange, sample, randint, choice
 from workload import params
 from workload.assertions import tx_submitted, tx_result
 import struct
@@ -175,4 +184,156 @@ async def _nftoken_modify_valid(accounts, nfts, client):
 
 
 async def _nftoken_modify_faulty(accounts, client):
+    pass  # TODO: fault injection
+
+
+# ── Create Offer ─────────────────────────────────────────────────────
+
+async def nftoken_create_offer(accounts, nfts, nft_offers, client):
+    if not accounts or not nfts:
+        return
+    if params.should_send_faulty():
+        return await _nftoken_create_offer_faulty(accounts, nfts, nft_offers, client)
+    return await _nftoken_create_offer_valid(accounts, nfts, nft_offers, client)
+
+
+async def _nftoken_create_offer_valid(accounts, nfts, nft_offers, client):
+    nft = choice(nfts)
+    if nft.owner not in accounts:
+        return
+    owner = accounts[nft.owner]
+    # Randomly create sell or buy offer
+    is_sell = choice([True, False])
+    if is_sell:
+        txn = NFTokenCreateOffer(
+            account=owner.address,
+            nftoken_id=nft.nftoken_id,
+            amount=params.nft_offer_amount(),
+            flags=NFTokenCreateOfferFlag.TF_SELL_NFTOKEN,
+        )
+        wallet = owner.wallet
+    else:
+        # Buy offer: a different account offers to buy
+        other_accounts = [a for a in accounts if a != nft.owner]
+        if not other_accounts:
+            return
+        buyer_id = choice(other_accounts)
+        buyer = accounts[buyer_id]
+        txn = NFTokenCreateOffer(
+            account=buyer.address,
+            nftoken_id=nft.nftoken_id,
+            amount=params.nft_offer_amount(),
+            owner=nft.owner,
+        )
+        wallet = buyer.wallet
+    tx_submitted("NFTokenCreateOffer")
+    response = await submit_and_wait(transaction=txn, client=client, wallet=wallet)
+    result = response.result
+    tx_result("NFTokenCreateOffer", result)
+    if result.get("engine_result") == "tesSUCCESS":
+        # Extract offer ID from metadata
+        for node in result.get("meta", {}).get("AffectedNodes", []):
+            created = node.get("CreatedNode", {})
+            if created.get("LedgerEntryType") == "NFTokenOffer":
+                offer_id = created.get("LedgerIndex", "")
+                nft_offers.append(NFTOffer(
+                    creator=txn.account,
+                    offer_id=offer_id,
+                    nftoken_id=nft.nftoken_id,
+                    is_sell=is_sell,
+                ))
+                log.info("Created NFT %s offer %s", "sell" if is_sell else "buy", offer_id)
+                break
+
+
+async def _nftoken_create_offer_faulty(accounts, nfts, nft_offers, client):
+    pass  # TODO: fault injection
+
+
+# ── Cancel Offer ─────────────────────────────────────────────────────
+
+async def nftoken_cancel_offer(accounts, nft_offers, client):
+    if not accounts:
+        return
+    if params.should_send_faulty():
+        return await _nftoken_cancel_offer_faulty(accounts, nft_offers, client)
+    return await _nftoken_cancel_offer_valid(accounts, nft_offers, client)
+
+
+async def _nftoken_cancel_offer_valid(accounts, nft_offers, client):
+    if not nft_offers:
+        log.debug("No NFT offers to cancel")
+        return
+    offer = choice(nft_offers)
+    if offer.creator not in accounts:
+        return
+    creator = accounts[offer.creator]
+    txn = NFTokenCancelOffer(
+        account=creator.address,
+        nftoken_offers=[offer.offer_id],
+    )
+    tx_submitted("NFTokenCancelOffer")
+    response = await submit_and_wait(transaction=txn, client=client, wallet=creator.wallet)
+    tx_result("NFTokenCancelOffer", response.result)
+    if response.result.get("engine_result") == "tesSUCCESS":
+        nft_offers.remove(offer)
+
+
+async def _nftoken_cancel_offer_faulty(accounts, nft_offers, client):
+    pass  # TODO: fault injection
+
+
+# ── Accept Offer ─────────────────────────────────────────────────────
+
+async def nftoken_accept_offer(accounts, nfts, nft_offers, client):
+    if not accounts:
+        return
+    if params.should_send_faulty():
+        return await _nftoken_accept_offer_faulty(accounts, nfts, nft_offers, client)
+    return await _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client)
+
+
+async def _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client):
+    if not nft_offers:
+        log.debug("No NFT offers to accept")
+        return
+    offer = choice(nft_offers)
+    if offer.is_sell:
+        # A different account accepts the sell offer
+        other_accounts = [a for a in accounts if a != offer.creator]
+        if not other_accounts:
+            return
+        buyer_id = choice(other_accounts)
+        buyer = accounts[buyer_id]
+        txn = NFTokenAcceptOffer(
+            account=buyer.address,
+            nftoken_sell_offer=offer.offer_id,
+        )
+        wallet = buyer.wallet
+    else:
+        # The NFT owner accepts the buy offer
+        # Find the NFT to get the owner
+        nft = next((n for n in nfts if n.nftoken_id == offer.nftoken_id), None)
+        if not nft or nft.owner not in accounts:
+            return
+        owner = accounts[nft.owner]
+        txn = NFTokenAcceptOffer(
+            account=owner.address,
+            nftoken_buy_offer=offer.offer_id,
+        )
+        wallet = owner.wallet
+    tx_submitted("NFTokenAcceptOffer")
+    response = await submit_and_wait(transaction=txn, client=client, wallet=wallet)
+    tx_result("NFTokenAcceptOffer", response.result)
+    if response.result.get("engine_result") == "tesSUCCESS":
+        nft_offers.remove(offer)
+        # Update NFT ownership
+        if offer.is_sell:
+            for nft in nfts:
+                if nft.nftoken_id == offer.nftoken_id:
+                    nft.owner = txn.account
+                    break
+
+
+async def _nftoken_accept_offer_faulty(accounts, nfts, nft_offers, client):
     pass  # TODO: fault injection

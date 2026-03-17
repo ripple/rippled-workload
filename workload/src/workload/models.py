@@ -13,6 +13,14 @@ class NFT:
 
 
 @dataclass
+class NFTOffer:
+    creator: str
+    offer_id: str
+    nftoken_id: str
+    is_sell: bool
+
+
+@dataclass
 class Account:
     wallet: Wallet
     address: str = field(init=False)

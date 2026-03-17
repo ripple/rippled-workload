@@ -16,7 +16,7 @@ from workload.create import generate_wallets, generate_wallet_from_seed
 from workload.check_xrpld_sync_state import is_xrpld_synced # TODO:git use xrpld_sync.py
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
-from workload.nft import mint_nft, nftoken_modify
+from workload.nft import mint_nft, nftoken_modify, nftoken_create_offer, nftoken_cancel_offer, nftoken_accept_offer
 from workload.credentials import credential_create, credential_accept, credential_delete
 from workload.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
 from workload.domains import permissioned_domain_set, permissioned_domain_delete
@@ -116,6 +116,7 @@ class Workload:
         self.gateways = []
         self.amms = []
         self.nfts = []
+        self.nft_offers = []
         self.currencies = []
         self.credentials = []
         self.vaults = []
@@ -692,6 +693,27 @@ def create_app(workload: Workload) -> FastAPI:
             return await nftoken_modify(w.accounts, w.nfts, w.client)
         except Exception as e:
             logger.error(f"nft_modify failed: {type(e).__name__}: {e}")
+
+    @app.get("/nft/create_offer/random/v2")
+    async def nft_create_offer_v2(w: Workload = Depends(get_workload)):
+        try:
+            return await nftoken_create_offer(w.accounts, w.nfts, w.nft_offers, w.client)
+        except Exception as e:
+            logger.error(f"nft_create_offer failed: {type(e).__name__}: {e}")
+
+    @app.get("/nft/cancel_offer/random")
+    async def nft_cancel_offer(w: Workload = Depends(get_workload)):
+        try:
+            return await nftoken_cancel_offer(w.accounts, w.nft_offers, w.client)
+        except Exception as e:
+            logger.error(f"nft_cancel_offer failed: {type(e).__name__}: {e}")
+
+    @app.get("/nft/accept_offer/random")
+    async def nft_accept_offer(w: Workload = Depends(get_workload)):
+        try:
+            return await nftoken_accept_offer(w.accounts, w.nfts, w.nft_offers, w.client)
+        except Exception as e:
+            logger.error(f"nft_accept_offer failed: {type(e).__name__}: {e}")
 
     @app.get("/pay")
     async def payment_random(w: Workload = Depends(get_workload)):
