@@ -58,7 +58,7 @@ async def _batch_random_valid(accounts, client):
         raw_transactions=inner_txns,
         sequence=sequence,
     )
-    tx_submitted("Batch")
+    tx_submitted("Batch", batch_txn)
     response = await submit_and_wait(batch_txn, client, src.wallet)
     tx_result("Batch", response.result)
 

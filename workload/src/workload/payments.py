@@ -43,7 +43,7 @@ async def _payment_random_valid(accounts, trust_lines, mpt_issuances, client):
         amount=amount,
         destination=dst,
     )
-    tx_submitted("Payment")
+    tx_submitted("Payment", payment_txn)
     response = await submit_and_wait(payment_txn, client, src.wallet)
     tx_result("Payment", response.result)
 

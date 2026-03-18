@@ -37,7 +37,7 @@ async def _credential_create_valid(accounts, credentials, client):
         expiration=int(time.time()) + params.credential_expiration_offset(),
         uri=params.credential_uri(),
     )
-    tx_submitted("CredentialCreate")
+    tx_submitted("CredentialCreate", txn)
     response = await submit_and_wait(txn, client, issuer.wallet)
     result = response.result
     tx_result("CredentialCreate", result)
@@ -75,7 +75,7 @@ async def _credential_accept_valid(accounts, credentials, client):
         issuer=cred.issuer,
         credential_type=cred.credential_type,
     )
-    tx_submitted("CredentialAccept")
+    tx_submitted("CredentialAccept", txn)
     response = await submit_and_wait(txn, client, subject.wallet)
     tx_result("CredentialAccept", response.result)
 
@@ -110,7 +110,7 @@ async def _credential_delete_valid(accounts, credentials, client):
         subject=cred.subject,
         credential_type=cred.credential_type,
     )
-    tx_submitted("CredentialDelete")
+    tx_submitted("CredentialDelete", txn)
     response = await submit_and_wait(txn, client, account.wallet)
     tx_result("CredentialDelete", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":

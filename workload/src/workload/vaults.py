@@ -80,7 +80,7 @@ async def _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, clie
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
-    tx_submitted("VaultCreate")
+    tx_submitted("VaultCreate", txn)
     response = await submit_and_wait(txn, client, src.wallet)
     result = response.result
     tx_result("VaultCreate", result)
@@ -117,7 +117,7 @@ async def _vault_deposit_valid(accounts, vaults, client):
         vault_id=vault.vault_id,
         amount=_amount_for_asset(vault.asset),
     )
-    tx_submitted("VaultDeposit")
+    tx_submitted("VaultDeposit", txn)
     response = await submit_and_wait(txn, client, depositor.wallet)
     tx_result("VaultDeposit", response.result)
 
@@ -149,7 +149,7 @@ async def _vault_withdraw_valid(accounts, vaults, client):
         vault_id=vault.vault_id,
         amount=_amount_for_asset(vault.asset),
     )
-    tx_submitted("VaultWithdraw")
+    tx_submitted("VaultWithdraw", txn)
     response = await submit_and_wait(txn, client, owner.wallet)
     tx_result("VaultWithdraw", response.result)
 
@@ -182,7 +182,7 @@ async def _vault_set_valid(accounts, vaults, client):
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
-    tx_submitted("VaultSet")
+    tx_submitted("VaultSet", txn)
     response = await submit_and_wait(txn, client, owner.wallet)
     tx_result("VaultSet", response.result)
 
@@ -213,7 +213,7 @@ async def _vault_delete_valid(accounts, vaults, client):
         account=owner.address,
         vault_id=vault.vault_id,
     )
-    tx_submitted("VaultDelete")
+    tx_submitted("VaultDelete", txn)
     response = await submit_and_wait(txn, client, owner.wallet)
     tx_result("VaultDelete", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":
@@ -251,7 +251,7 @@ async def _vault_clawback_valid(accounts, vaults, client):
         vault_id=vault.vault_id,
         holder=holder,
     )
-    tx_submitted("VaultClawback")
+    tx_submitted("VaultClawback", txn)
     response = await submit_and_wait(txn, client, owner.wallet)
     tx_result("VaultClawback", response.result)
 

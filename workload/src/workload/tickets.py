@@ -31,7 +31,7 @@ async def _ticket_create_valid(accounts, client):
         account=account.address,
         ticket_count=ticket_count,
     )
-    tx_submitted("TicketCreate")
+    tx_submitted("TicketCreate", txn)
     response = await submit_and_wait(txn, client, account.wallet)
     result = response.result
     tx_result("TicketCreate", result)
@@ -78,7 +78,7 @@ async def _ticket_use_valid(accounts, client):
         sequence=0,
         ticket_sequence=ticket_sequence,
     )
-    tx_submitted("TicketUse")
+    tx_submitted("TicketUse", payment_txn)
     response = await submit_and_wait(payment_txn, client, src.wallet)
     tx_result("TicketUse", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":

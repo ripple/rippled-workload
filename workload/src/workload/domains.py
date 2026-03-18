@@ -39,7 +39,7 @@ async def _permissioned_domain_set_valid(accounts, domains, client):
         account=src.address,
         accepted_credentials=accepted,
     )
-    tx_submitted("PermissionedDomainSet")
+    tx_submitted("PermissionedDomainSet", txn)
     response = await submit_and_wait(txn, client, src.wallet)
     result = response.result
     tx_result("PermissionedDomainSet", result)
@@ -79,7 +79,7 @@ async def _permissioned_domain_delete_valid(accounts, domains, client):
         account=owner.address,
         domain_id=domain.domain_id,
     )
-    tx_submitted("PermissionedDomainDelete")
+    tx_submitted("PermissionedDomainDelete", txn)
     response = await submit_and_wait(txn, client, owner.wallet)
     tx_result("PermissionedDomainDelete", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":

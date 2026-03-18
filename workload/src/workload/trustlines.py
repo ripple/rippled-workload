@@ -38,7 +38,7 @@ async def _trustline_create_valid(accounts, trust_lines, client):
             value=params.trustline_limit(),
         ),
     )
-    tx_submitted("TrustSet")
+    tx_submitted("TrustSet", txn)
     response = await submit_and_wait(txn, client, account.wallet)
     result = response.result
     tx_result("TrustSet", result)

@@ -39,7 +39,7 @@ async def _mpt_create_valid(accounts, mpt_issuances, client):
         maximum_amount=params.mpt_maximum_amount(),
         mptoken_metadata=params.mpt_metadata(),
     )
-    tx_submitted("MPTokenIssuanceCreate")
+    tx_submitted("MPTokenIssuanceCreate", txn)
     response = await submit_and_wait(txn, client, src.wallet)
     result = response.result
     tx_result("MPTokenIssuanceCreate", result)
@@ -77,7 +77,7 @@ async def _mpt_authorize_valid(accounts, mpt_issuances, client):
         mptoken_issuance_id=mpt.mpt_issuance_id,
         holder=holder_id,
     )
-    tx_submitted("MPTokenAuthorize")
+    tx_submitted("MPTokenAuthorize", txn)
     response = await submit_and_wait(txn, client, issuer.wallet)
     tx_result("MPTokenAuthorize", response.result)
 
@@ -108,7 +108,7 @@ async def _mpt_issuance_set_valid(accounts, mpt_issuances, client):
         account=issuer.address,
         mptoken_issuance_id=mpt.mpt_issuance_id,
     )
-    tx_submitted("MPTokenIssuanceSet")
+    tx_submitted("MPTokenIssuanceSet", txn)
     response = await submit_and_wait(txn, client, issuer.wallet)
     tx_result("MPTokenIssuanceSet", response.result)
 
@@ -139,7 +139,7 @@ async def _mpt_destroy_valid(accounts, mpt_issuances, client):
         account=issuer.address,
         mptoken_issuance_id=mpt.mpt_issuance_id,
     )
-    tx_submitted("MPTokenIssuanceDestroy")
+    tx_submitted("MPTokenIssuanceDestroy", txn)
     response = await submit_and_wait(txn, client, issuer.wallet)
     tx_result("MPTokenIssuanceDestroy", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":

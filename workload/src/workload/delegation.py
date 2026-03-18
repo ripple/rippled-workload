@@ -30,7 +30,7 @@ async def _delegate_set_valid(accounts, client):
         authorize=delegate_id,
         permissions=permissions,
     )
-    tx_submitted("DelegateSet")
+    tx_submitted("DelegateSet", txn)
     response = await submit_and_wait(txn, client, src.wallet)
     tx_result("DelegateSet", response.result)
 

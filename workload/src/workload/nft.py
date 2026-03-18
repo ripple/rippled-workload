@@ -205,7 +205,7 @@ async def _nftoken_burn_valid(accounts, nfts, client):
         return
     owner = accounts[nft.owner]
     txn = NFTokenBurn(account=owner.address, nftoken_id=nft.nftoken_id)
-    tx_submitted("NFTokenBurn")
+    tx_submitted("NFTokenBurn", txn)
     response = await submit_and_wait(transaction=txn, client=client, wallet=owner.wallet)
     tx_result("NFTokenBurn", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":
@@ -240,7 +240,7 @@ async def _nftoken_modify_valid(accounts, nfts, client):
         nftoken_id=nft.nftoken_id,
         uri=params.nft_uri(),
     )
-    tx_submitted("NFTokenModify")
+    tx_submitted("NFTokenModify", txn)
     response = await submit_and_wait(transaction=txn, client=client, wallet=owner.wallet)
     tx_result("NFTokenModify", response.result)
 
@@ -288,7 +288,7 @@ async def _nftoken_create_offer_valid(accounts, nfts, nft_offers, client):
             owner=nft.owner,
         )
         wallet = buyer.wallet
-    tx_submitted("NFTokenCreateOffer")
+    tx_submitted("NFTokenCreateOffer", txn)
     response = await submit_and_wait(transaction=txn, client=client, wallet=wallet)
     result = response.result
     tx_result("NFTokenCreateOffer", result)
@@ -334,7 +334,7 @@ async def _nftoken_cancel_offer_valid(accounts, nft_offers, client):
         account=creator.address,
         nftoken_offers=[offer.offer_id],
     )
-    tx_submitted("NFTokenCancelOffer")
+    tx_submitted("NFTokenCancelOffer", txn)
     response = await submit_and_wait(transaction=txn, client=client, wallet=creator.wallet)
     tx_result("NFTokenCancelOffer", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":
@@ -384,7 +384,7 @@ async def _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client):
             nftoken_buy_offer=offer.offer_id,
         )
         wallet = owner.wallet
-    tx_submitted("NFTokenAcceptOffer")
+    tx_submitted("NFTokenAcceptOffer", txn)
     response = await submit_and_wait(transaction=txn, client=client, wallet=wallet)
     tx_result("NFTokenAcceptOffer", response.result)
     if response.result.get("engine_result") == "tesSUCCESS":

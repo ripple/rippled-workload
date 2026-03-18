@@ -44,7 +44,7 @@ async def _account_set_valid(accounts, client):
         txn = AccountSet(account=account.address, set_flag=flag)
     else:
         txn = AccountSet(account=account.address, clear_flag=flag)
-    tx_submitted("AccountSet")
+    tx_submitted("AccountSet", txn)
     response = await submit_and_wait(txn, client, account.wallet)
     tx_result("AccountSet", response.result)
 
