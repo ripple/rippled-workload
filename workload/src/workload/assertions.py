@@ -5,7 +5,8 @@ Follows the fuzzer's naming convention:
   "workload::success : TxType" — transaction got tesSUCCESS
 """
 
-from antithesis import assertions, lifecycle
+from antithesis.assertions import reachable, sometimes
+from antithesis.lifecycle import send_event
 
 
 def tx_submitted(name: str, txn=None) -> None:
@@ -16,8 +17,8 @@ def tx_submitted(name: str, txn=None) -> None:
             details = txn.to_xrpl()
         except Exception:
             details = {"raw": str(txn)}
-    lifecycle.send_event(f"workload::seen : {name}", details)
-    assertions.reachable(f"workload::seen : {name}", {})
+    send_event(f"workload::seen : {name}", details)
+    reachable(f"workload::seen : {name}", {})
 
 
 def tx_result(name: str, result: dict) -> None:
@@ -34,8 +35,8 @@ def tx_result(name: str, result: dict) -> None:
         "tx_type": result.get("tx_json", {}).get("TransactionType", ""),
         "hash": result.get("hash", ""),
     }
-    lifecycle.send_event(f"workload::result : {name}", details)
-    assertions.sometimes(
+    send_event(f"workload::result : {name}", details)
+    sometimes(
         engine_result == "tesSUCCESS",
         f"workload::success : {name}",
         {"engine_result": engine_result},
