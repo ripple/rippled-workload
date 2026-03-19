@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-curl http://workload:8000/mix
+curl http://workload:8000/txn/random

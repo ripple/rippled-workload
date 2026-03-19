@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-curl http://workload:8000/nft/mint/random
+curl http://workload:8000/txn/create/NFTokenMint

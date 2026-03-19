@@ -1,13 +1,14 @@
+.DS_Store
 .idea/
 .idea_modules/
-.devcontainer/
 .vscode/
 *.iws
 *.swp
 *.swo
 *~
 ~$*.doc
-xrpld.log
+workload.log
+workload.log.*
 __pycache__/
 *.py[cod]
 .venv/

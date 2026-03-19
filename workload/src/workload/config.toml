@@ -1,0 +1,134 @@
+######################################################
+############## General defaults ######################
+######################################################
+funding_seed = false
+# Default is genesis account. Must be specified with generated ledger.
+[funding_account]
+#address = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
+#seed    = "snoPBrXtMeMyMHUVTgbuqAfg1SUTb"
+
+[gateways]
+names = [
+    "all-crypto",
+    "bit-bank",
+    "coin-thang",
+    "digi-pay",
+    "ez-trade",
+    "flux-bux",
+]
+number = 4
+default_balance = 1_000_000_000_000000
+require_auth = false
+default_ripple = true
+
+[users]
+number = 100
+default_balance = 50_000_000000
+
+[amm]
+xrp_chance = 0.50
+trading_fee = 500
+default_amm_token_deposit = 1_000
+gateway_pools = 12
+user_pools = 100
+deposit_amount_xrp = "1000000000"
+deposit_amount_iou = "500"
+
+[currencies]
+token_distribution = 1_000_000
+codes = [
+    "USD", "CNY", "BTC", "ETH", "GBP",
+    "PNY", "DJF", "DKK", "GYD", "AUD",
+    "KPW", "INR", "SOL", "TRX", "ADA",
+    "XLM", "SUI", "LTC", "XMR", "DOT",
+]
+
+[currencies.rate]
+USD = 1_000_000
+BTC = 1_000_000_000
+
+######################################################
+########### Transaction context defaults #############
+######################################################
+[transactions]
+# Must be 1. An account's next sequence is only allocated after the previous
+# transaction is terminal. Raising this causes tefPAST_SEQ: if any in-flight
+# txn fails without advancing the ledger sequence (tem*/tel*/FAILED_NET),
+# cascade-expire resets next_seq, conflicting with txns already in rippled's queue.
+# To raise throughput, grow the account pool (see README Throughput Tuning).
+max_pending_per_account = 1
+
+# Disable specific transaction types (all types in _BUILDERS are enabled by default)
+disabled = [
+    "Batch",          # Batch sequence handling is complex, disabled for now
+]
+
+# Transaction type percentages for random selection (0.0 to 1.0)
+# Types not listed share the remaining percentage evenly
+[transactions.percentages]
+Payment = 0.25
+OfferCreate = 0.20
+AMMCreate = 0.05
+AMMDeposit = 0.10
+AMMWithdraw = 0.10
+DelegateSet = 0.02
+# VaultCreate
+# VaultDeposit
+# CredentialCreate
+# PermissionedDomainSet
+
+[transactions.mptoken.issuance_create]
+transfer_fee = 1000
+
+[transactions.payment]
+amount = 10_000_000
+
+[transactions.trustset]
+limit = 1_000_000_000_000_000  # 1e15 — max representable IOU mantissa, safely within xrpl-py codec range
+
+[transactions.credential_create]
+credential_type_max_bytes = 64    # hex-encoded, 1–64 bytes (128 hex chars max)
+uri_max_bytes = 128               # hex-encoded, 10–128 bytes (256 hex chars max, xrpl-py limit)
+expiration_min_offset = 3600      # 1 hour from now (seconds)
+expiration_max_offset = 2592000   # 30 days from now (seconds)
+
+[transactions.delegate_set]
+max_permissions = 3               # pick 1–N from GranularPermission enum
+
+[transactions.permissioned_domain_set]
+max_credentials = 10              # 1–N accepted credentials per domain
+
+[transactions.vault_create]
+assets_maximum_min = 100_000_000        # 100 XRP in drops
+assets_maximum_max = 10_000_000_000     # 10,000 XRP in drops
+data_max_bytes = 256                    # hex-encoded metadata, 1–N bytes
+
+[transactions.vault_deposit]
+iou_amount_min = 1
+iou_amount_max = 10_000
+mpt_amount_min = 1
+mpt_amount_max = 10_000
+xrp_drops_min = 1_000_000              # 1 XRP
+xrp_drops_max = 100_000_000            # 100 XRP
+
+[timeout]
+overall = 6
+startup = 600
+initial_ledgers = 1
+
+[genesis]
+# Path to accounts.json from generate_ledger (address+seed pairs)
+# Set to false or empty to disable genesis loading
+accounts_json = "testnet/accounts.json"
+currencies = ["USD", "CNY", "BTC", "ETH"]  # Currencies per gateway
+
+[rippled]
+docker = "rippled"
+local = "localhost"
+rpc_port = 5005
+ws_port = 6006
+timeout = 600
+
+# Logging is configured in logging_config.py (not here).
+# Console: INFO (override with LOG_LEVEL env var)
+# File: DEBUG → workload.log (50MB rotating × 5 backups)

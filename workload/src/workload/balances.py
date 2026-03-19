@@ -1,69 +1,39 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
-
-from xrpl.models.amounts import IssuedCurrencyAmount
-from xrpl.models.requests import AccountLines
-
-# from utils import format_currency
-from workload import logger
-
-if TYPE_CHECKING:
-    from xrpl.clients import JsonRpcClient
-    from xrpl.wallet import Wallet
+"""Balance tracking for workload accounts."""
 
 
-def get_all_account_lines(account: Wallet, client: JsonRpcClient) -> list[dict[str, Any]]:
-    account_lines_response = client.request(AccountLines(account=account.address))
-    return account_lines_response.result["lines"]
+class BalanceTracker:
+    """Tracks in-memory balances for workload accounts.
 
+    Keys per account:
+    - "XRP"                  → drops (float)
+    - (currency, issuer)     → IOU amount (float)
+    - ("MPT", mpt_id)        → MPToken amount (float)
+    """
 
-# def get_tokens_issued(account: Wallet, client: JsonRpcClient | None) -> list[dict[str, str]] | None:
-#     client = client if client is not None else JsonRpcClient(default_client)
+    def __init__(self) -> None:
+        self._balances: dict[str, dict[str | tuple[str, str], float]] = {}
 
+    @property
+    def data(self) -> dict[str, dict[str | tuple[str, str], float]]:
+        """Direct access to the underlying dict (for passing to TxnContext)."""
+        return self._balances
 
-# def get_token_balance(account: Wallet, client: JsonRpcClient | None) -> list[dict[str, str]] | None:
-#     client = client if client is not None else JsonRpcClient(default_client)
+    def get(self, account: str, currency: str, issuer: str | None = None) -> float:
+        if account not in self._balances:
+            return 0.0
+        if currency == "XRP":
+            return self._balances[account].get("XRP", 0.0)
+        key: str | tuple[str, str] = (currency, issuer) if issuer else currency
+        return self._balances[account].get(key, 0.0)
 
-
-def get_account_tokens(account: Wallet, client: JsonRpcClient) -> list[dict[str, Any]]:
-    accounts_tokens = {
-        "issued": {},
-        "held": {},
-    }
-    logger.debug("Looking up %s's tokens...", account.address)
-    all_account_lines = get_all_account_lines(account, client)
-    for al in all_account_lines:
-        currency = al["currency"]
-        balance = al["balance"]
-        if float(al["balance"]) < 0:
-            balance = str(float(balance) * -1)
-            issuer = account.address
-            holder = al["account"]
-            logger.info("%s has issued %s %s tokens to %s", issuer, balance, currency, holder)
-            ica = IssuedCurrencyAmount.from_dict({"issuer": account.address, "value": balance, "currency": al["currency"]})
-            if accounts_tokens["issued"].get(holder):
-                accounts_tokens["issued"][holder].append(ica)
-            else:
-                accounts_tokens["issued"][holder] = [ica]
+    def set(self, account: str, currency: str, value: float, issuer: str | None = None) -> None:
+        if account not in self._balances:
+            self._balances[account] = {}
+        if currency == "XRP":
+            self._balances[account]["XRP"] = value
         else:
-            issuer = al["account"]
-            holder = account.address
-            ica = IssuedCurrencyAmount(issuer=issuer, value=balance, currency=al["currency"])
-            if accounts_tokens["held"].get(issuer):
-                accounts_tokens["held"][issuer].append(ica)
-            else:
-                accounts_tokens["held"][issuer] = [ica]
-            logger.debug("%s holds %s %s %s tokens", holder, balance, currency, issuer)
-    return accounts_tokens
+            key: str | tuple[str, str] = (currency, issuer) if issuer else currency
+            self._balances[account][key] = value
 
-# def print_all_account_token_balances(accounts, client):
-#     for account in accounts:
-#         print(f"Account: {account.address}")
-#         tokens = get_account_tokens(account.wallet, client)
-#         for issuer in tokens["held"].values():
-#             for token in issuer:
-#                 print(format_currency(token))
-
-
-# def get_amm_balance():
+    def update(self, account: str, currency: str, delta: float, issuer: str | None = None) -> None:
+        self.set(account, currency, self.get(account, currency, issuer) + delta, issuer)

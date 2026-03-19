@@ -1,0 +1,17 @@
+include:
+  - prepare-workload/testnet/compose.yml
+services:
+  workload:
+    image: workload:latest
+    build:
+      dockerfile: Dockerfile
+    container_name: workload
+    hostname: workload
+    ports: ["8000:8000"]
+    init: true
+    networks: { xrpl_net: {} }
+
+networks:
+  xrpl_net:
+    name: xrpl_net
+    external: true
