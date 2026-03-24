@@ -1,12 +1,98 @@
 """Antithesis assertion helpers for the workload.
 
 Follows the fuzzer's naming convention:
-  "workload::seen : TxType"    — transaction was created and submitted
-  "workload::success : TxType" — transaction got tesSUCCESS
+  "workload::seen : TxType"    — transaction was created and submitted (reachable)
+  "workload::success : TxType" — transaction got tesSUCCESS (sometimes)
+
+Uses assert_raw() to register catalog entries at startup and emit assertions
+at runtime. The static scanner cannot extract assertion names from f-strings,
+so we pre-register all known transaction types via register_assertions().
 """
 
-from antithesis.assertions import reachable, sometimes
+from antithesis.assertions import assert_raw
 from antithesis.lifecycle import send_event
+
+# All transaction types that the workload can generate.
+# Add new types here when adding new transaction modules.
+TX_TYPES: list[str] = [
+    "AccountSet",
+    "Batch",
+    "CredentialAccept",
+    "CredentialCreate",
+    "CredentialDelete",
+    "DelegateSet",
+    "LoanBrokerCoverDeposit",
+    "LoanBrokerCoverWithdraw",
+    "LoanBrokerDelete",
+    "LoanBrokerSet",
+    "LoanDelete",
+    "LoanManage",
+    "LoanPay",
+    "LoanSet",
+    "MPTokenAuthorize",
+    "MPTokenIssuanceCreate",
+    "MPTokenIssuanceDestroy",
+    "MPTokenIssuanceSet",
+    "NFTokenAcceptOffer",
+    "NFTokenBurn",
+    "NFTokenCancelOffer",
+    "NFTokenCreateOffer",
+    "NFTokenMint",
+    "NFTokenModify",
+    "Payment",
+    "PermissionedDomainDelete",
+    "PermissionedDomainSet",
+    "TicketCreate",
+    "TicketUse",
+    "TrustSet",
+    "VaultClawback",
+    "VaultCreate",
+    "VaultDelete",
+    "VaultDeposit",
+    "VaultSet",
+    "VaultWithdraw",
+]
+
+_LOC_FILE = "workload/assertions.py"
+_LOC_CLASS = ""
+_LOC_COL = 0
+
+
+def _seen_id(name: str) -> str:
+    return f"workload::seen : {name}"
+
+
+def _success_id(name: str) -> str:
+    return f"workload::success : {name}"
+
+
+def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
+    """Register a single catalog entry (hit=False) so Antithesis knows this assertion exists."""
+    assert_raw(
+        condition=True,
+        message=message,
+        details={},
+        loc_filename=_LOC_FILE,
+        loc_function="register_assertions",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=False,
+        must_hit=must_hit,
+        assert_type=assert_type,
+        display_type=display_type,
+        assert_id=message,
+    )
+
+
+def register_assertions() -> None:
+    """Register catalog entries for all known transaction types.
+
+    Call once at app startup before any transactions are submitted.
+    """
+    for name in TX_TYPES:
+        _emit_catalog_entry(_seen_id(name), "reachability", "Reachable", must_hit=True)
+        _emit_catalog_entry(_success_id(name), "sometimes", "Sometimes", must_hit=True)
 
 
 def tx_submitted(name: str, txn=None) -> None:
@@ -18,7 +104,21 @@ def tx_submitted(name: str, txn=None) -> None:
         except Exception:
             details = {"raw": str(txn)}
     send_event(f"workload::seen : {name}", details)
-    reachable(f"workload::seen : {name}", {})
+    assert_raw(
+        condition=True,
+        message=_seen_id(name),
+        details={},
+        loc_filename=_LOC_FILE,
+        loc_function="tx_submitted",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=True,
+        must_hit=True,
+        assert_type="reachability",
+        display_type="Reachable",
+        assert_id=_seen_id(name),
+    )
 
 
 def tx_result(name: str, result: dict) -> None:
@@ -36,8 +136,18 @@ def tx_result(name: str, result: dict) -> None:
         "hash": result.get("hash", ""),
     }
     send_event(f"workload::result : {name}", details)
-    sometimes(
-        engine_result == "tesSUCCESS",
-        f"workload::success : {name}",
-        {"engine_result": engine_result},
+    assert_raw(
+        condition=engine_result == "tesSUCCESS",
+        message=_success_id(name),
+        details={"engine_result": engine_result},
+        loc_filename=_LOC_FILE,
+        loc_function="tx_result",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=True,
+        must_hit=True,
+        assert_type="sometimes",
+        display_type="Sometimes",
+        assert_id=_success_id(name),
     )

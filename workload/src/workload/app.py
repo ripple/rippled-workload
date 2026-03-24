@@ -19,6 +19,7 @@ from xrpl.models.response import ResponseStatus
 from xrpl.wallet import Wallet
 
 from workload import logger
+from workload.assertions import register_assertions
 from workload.create import generate_wallets, generate_wallet_from_seed
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
@@ -136,6 +137,8 @@ class Workload:
         self.account_generator = AccountGenerator(source=self.funding_wallet, client=self.client)
 
         self.wait_for_network(self.xrpld)
+
+        register_assertions()
 
         workload_ready_msg = "Workload initialization complete"
         logger.info("%s after %ss", workload_ready_msg, int(time.time() - self.start_time))
