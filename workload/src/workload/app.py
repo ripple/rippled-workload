@@ -20,6 +20,8 @@ from xrpl.wallet import Wallet
 
 from workload import logger
 from workload.assertions import register_assertions
+from antithesis.assertions import always, reachable
+from antithesis._internal import _HANDLER
 from workload.create import generate_wallets, generate_wallet_from_seed
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
@@ -137,6 +139,10 @@ class Workload:
         self.account_generator = AccountGenerator(source=self.funding_wallet, client=self.client)
 
         self.wait_for_network(self.xrpld)
+
+        logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
+        reachable("workload::started", {})
+        always(True, "workload::sdk_works", {"message": "SDK canary assertion"})
 
         register_assertions()
 
