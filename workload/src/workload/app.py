@@ -1,3 +1,4 @@
+from asyncio import TaskGroup
 import json
 import os
 import time
@@ -20,7 +21,7 @@ from xrpl.wallet import Wallet
 
 from workload import logger
 from workload.assertions import register_assertions
-from antithesis.assertions import always, reachable
+from antithesis.assertions import always, reachable, unreachable
 from antithesis._internal import _HANDLER
 from workload.create import generate_wallets, generate_wallet_from_seed
 from workload.check_xrpld_sync_state import is_xrpld_synced
@@ -295,6 +296,12 @@ def create_app(workload: Workload) -> FastAPI:
             await w.generate_accounts(100)
         except Exception as e:
             logger.error(f"generate_accounts failed: {type(e).__name__}: {e}")
+            unreachable("workload::generate_accounts_failed", {"error": f"{type(e).__name__}: {e}"})
+            return
+        if len(w.accounts) < 2:
+            unreachable("workload::no_accounts_after_generate", {"count": len(w.accounts)})
+        else:
+            reachable("workload::accounts_ready", {"count": len(w.accounts)})
 
     @app.get("/accounts")
     def get_accounts(w: Workload = Depends(get_workload)):
