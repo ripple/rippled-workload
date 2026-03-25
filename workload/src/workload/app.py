@@ -122,20 +122,15 @@ class Workload:
         xrpld_rpc_port = os.environ.get("XRPLD_RPC_PORT", conf["xrpld"]["json_rpc_port"])
         self.xrpld = f"http://{xrpld_host}:{xrpld_rpc_port}"
         logger.info("Connecting to xrpld at: %s", self.xrpld)
-        use_ledger = False
-        # if Path("/.dockerenv").is_file() and use_ledger:
-        accounts_json = Path("/accounts.json")
-        # else:
-            # accounts_json = "/home/emel/dev/Ripple/rippled-antithesis/rippled-workload/testnet/accounts.json"
-            # accounts_json = input("Enter path of accounts.json")
-        if use_ledger:
-            self.load_initial_accounts(accounts_json)
-            fw = self.accounts[list(self.accounts)[0]]
-            logger.info(f"Using {fw} for funding account")
-            self.funding_wallet = fw.wallet
-            # self.funding_wallet = generate_wallet_from_seed(self.config["genesis_account"]["master_seed"])
+
+        accounts_json = Path(os.environ.get("ACCOUNTS_JSON", "/accounts.json"))
+        if not accounts_json.exists():
+            logger.error("accounts.json not found at %s. Cannot start without pre-generated accounts.", accounts_json)
+            unreachable("workload::accounts_json_missing", {"path": str(accounts_json)})
         else:
-            self.funding_wallet = generate_wallet_from_seed(self.config["genesis_account"]["master_seed"])
+            self.load_initial_accounts(accounts_json)
+
+        self.funding_wallet = generate_wallet_from_seed(self.config["genesis_account"]["master_seed"])
         self.client = AsyncJsonRpcClient(self.xrpld)
         self.account_generator = AccountGenerator(source=self.funding_wallet, client=self.client)
 
@@ -192,34 +187,18 @@ class Workload:
         fee_response = await self.fee()
         return int(fee_response["expected_ledger_size"])
 
-    def load_initial_accounts(self, accounts_json):
-        # TODO: Doesn't need to be in workload
-        try:
-            accounts_json = Path(accounts_json)
-            logger.info(f"Loading accounts from {accounts_json}")
-            accounts = json.loads(accounts_json.read_text())
-        except FileNotFoundError:
-            logger.error("accounts.json not found.")
-            if True: # TODO: Fix this for some kind of local testing
-                local_path = "accounts.json"
-            # local_path = input("Enter local file path:")
-            accounts_json = Path(local_path)
-            logger.info(f"Using accounts.json at: {accounts_json.resolve()}")
-            accounts = json.loads(accounts_json.read_text())
-            logger.info(f"{len(accounts)} accounts found!")
-            for idx, i in enumerate(accounts):
-                logger.debug(f"{idx}: {i}")
-        self.account_data = accounts
+    def load_initial_accounts(self, accounts_json: Path):
+        """Load pre-generated accounts from a JSON file.
 
+        Expects format: [{"address": "r...", "seed": "s..."}, ...]
+        """
+        logger.info(f"Loading accounts from {accounts_json}")
+        accounts = json.loads(accounts_json.read_text())
         default_algo = CryptoAlgorithm[conf_file["workload"]["accounts"]["default_crypto_algorithm"]]
-
-        def generate_wallet_from_seed(seed: str, algorithm: CryptoAlgorithm = default_algo) -> Wallet:
-            wallet = Wallet.from_seed(seed=seed, algorithm=algorithm)
-            return wallet
-        for _, seed in self.account_data:
-            wallet = generate_wallet_from_seed(seed)
+        for entry in accounts:
+            wallet = Wallet.from_seed(seed=entry["seed"], algorithm=default_algo)
             self.accounts[wallet.address] = UserAccount(wallet=wallet)
-        logger.info(f"Loaded {len(self.accounts)} initial accounts")
+        logger.info(f"Loaded {len(self.accounts)} accounts")
 
     @classmethod
     def issue_currencies(cls, issuer: str, currency_code: list[str]) -> list[IssuedCurrency]:

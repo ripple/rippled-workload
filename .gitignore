@@ -17,3 +17,5 @@ logs
 config/docker-compose.yml
 config/volumes/*val*
 config/volumes/*xrpld*
+local-test/
+prepare-workload/testnet/
