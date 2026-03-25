@@ -9,7 +9,7 @@ fuzzer_service_template = "fuzzer_service.yml.mako"
 
 container_config_path = "/opt/xrpld/etc"
 
-GENESIS_LEDGER_PATH = "/genesis_ledger.json"
+GENESIS_LEDGER_PATH = f"{container_config_path}/genesis_ledger.json"
 VALIDATOR_COMMAND = f'["/opt/xrpld/bin/xrpld", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
 PEER_COMMAND = f'["/opt/xrpld/bin/xrpld", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
 
