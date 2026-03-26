@@ -305,7 +305,7 @@ def create_app(workload: Workload) -> FastAPI:
 
     # ── Credentials ────────────────────────────────────────────────
     @app.get("/credential/create/random")
-    async def credential_create(w: Workload = Depends(get_workload)):
+    async def credential_create_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await credential_create(w.accounts, w.credentials, w.client)
         except Exception as e:
@@ -313,7 +313,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/credential/create/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/credential/accept/random")
-    async def credential_accept(w: Workload = Depends(get_workload)):
+    async def credential_accept_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await credential_accept(w.accounts, w.credentials, w.client)
         except Exception as e:
@@ -321,7 +321,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/credential/accept/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/credential/delete/random")
-    async def credential_delete(w: Workload = Depends(get_workload)):
+    async def credential_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await credential_delete(w.accounts, w.credentials, w.client)
         except Exception as e:
@@ -330,7 +330,7 @@ def create_app(workload: Workload) -> FastAPI:
 
     # ── Vaults ───────────────────────────────────────────────────
     @app.get("/vault/create/random")
-    async def vault_create(w: Workload = Depends(get_workload)):
+    async def vault_create_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_create(w.accounts, w.vaults, w.trust_lines, w.mpt_issuances, w.client)
         except Exception as e:
@@ -338,7 +338,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/create/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/vault/deposit/random")
-    async def vault_deposit(w: Workload = Depends(get_workload)):
+    async def vault_deposit_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_deposit(w.accounts, w.vaults, w.client)
         except Exception as e:
@@ -346,7 +346,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/deposit/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/vault/withdraw/random")
-    async def vault_withdraw(w: Workload = Depends(get_workload)):
+    async def vault_withdraw_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_withdraw(w.accounts, w.vaults, w.client)
         except Exception as e:
@@ -354,7 +354,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/withdraw/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/vault/set/random")
-    async def vault_set(w: Workload = Depends(get_workload)):
+    async def vault_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_set(w.accounts, w.vaults, w.client)
         except Exception as e:
@@ -362,7 +362,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/set/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/vault/delete/random")
-    async def vault_delete(w: Workload = Depends(get_workload)):
+    async def vault_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_delete(w.accounts, w.vaults, w.client)
         except Exception as e:
@@ -370,7 +370,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/delete/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/vault/clawback/random")
-    async def vault_clawback(w: Workload = Depends(get_workload)):
+    async def vault_clawback_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_clawback(w.accounts, w.vaults, w.client)
         except Exception as e:
@@ -396,7 +396,7 @@ def create_app(workload: Workload) -> FastAPI:
 
     # ── Delegation ───────────────────────────────────────────────
     @app.get("/delegate/set/random")
-    async def delegate_set(w: Workload = Depends(get_workload)):
+    async def delegate_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await delegate_set(w.accounts, w.client)
         except Exception as e:
@@ -404,7 +404,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/delegate/set/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/mpt/authorize/random")
-    async def mpt_authorize(w: Workload = Depends(get_workload)):
+    async def mpt_authorize_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await mpt_authorize(w.accounts, w.mpt_issuances, w.client)
         except Exception as e:
@@ -420,7 +420,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/mpt/set/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/mpt/destroy/random")
-    async def mpt_destroy(w: Workload = Depends(get_workload)):
+    async def mpt_destroy_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await mpt_destroy(w.accounts, w.mpt_issuances, w.client)
         except Exception as e:
@@ -429,7 +429,7 @@ def create_app(workload: Workload) -> FastAPI:
 
     # ── Lending Protocol ─────────────────────────────────────────
     @app.get("/loan/broker/set/random")
-    async def loan_broker_set(w: Workload = Depends(get_workload)):
+    async def loan_broker_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_set(w.accounts, w.vaults, w.loan_brokers, w.client)
         except Exception as e:
@@ -437,7 +437,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/set/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/loan/broker/delete/random")
-    async def loan_broker_delete(w: Workload = Depends(get_workload)):
+    async def loan_broker_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_delete(w.accounts, w.loan_brokers, w.client)
         except Exception as e:
@@ -445,7 +445,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/delete/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/loan/broker/cover/deposit/random")
-    async def loan_broker_cover_deposit(w: Workload = Depends(get_workload)):
+    async def loan_broker_cover_deposit_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_cover_deposit(w.accounts, w.loan_brokers, w.client)
         except Exception as e:
@@ -453,7 +453,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/cover/deposit/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/loan/broker/cover/withdraw/random")
-    async def loan_broker_cover_withdraw(w: Workload = Depends(get_workload)):
+    async def loan_broker_cover_withdraw_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_cover_withdraw(w.accounts, w.loan_brokers, w.client)
         except Exception as e:
@@ -461,7 +461,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/cover/withdraw/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/loan/set/random")
-    async def loan_set(w: Workload = Depends(get_workload)):
+    async def loan_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_set(w.accounts, w.loan_brokers, w.loans, w.client)
         except Exception as e:
@@ -469,7 +469,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/set/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/loan/delete/random")
-    async def loan_delete(w: Workload = Depends(get_workload)):
+    async def loan_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_delete(w.accounts, w.loans, w.client)
         except Exception as e:
@@ -477,7 +477,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/delete/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/loan/manage/random")
-    async def loan_manage(w: Workload = Depends(get_workload)):
+    async def loan_manage_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_manage(w.accounts, w.loan_brokers, w.loans, w.client)
         except Exception as e:
@@ -485,7 +485,7 @@ def create_app(workload: Workload) -> FastAPI:
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/manage/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/loan/pay/random")
-    async def loan_pay(w: Workload = Depends(get_workload)):
+    async def loan_pay_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_pay(w.accounts, w.loans, w.client)
         except Exception as e:

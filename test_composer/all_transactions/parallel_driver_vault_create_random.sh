@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-curl http://workload:8000/vault/create/random
+curl --silent http://workload:8000/vault/create/random
