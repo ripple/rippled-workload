@@ -18,6 +18,7 @@ from workload.lending import (
     loan_set, loan_delete, loan_manage, loan_pay,
 )
 from workload.assertions import tx_submitted, tx_result, register_assertions
+from workload.setup import run_setup
 from workload.params import should_send_faulty, fake_account, fake_id
 from workload.models import UserAccount, Credential, Vault, PermissionedDomain, MPTokenIssuance, LoanBroker, Loan
 print('All imports OK')
