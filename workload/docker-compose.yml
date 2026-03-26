@@ -15,4 +15,4 @@ services:
       - ./accounts.json:/accounts.json
       - ./genesis_ledger.json:/genesis_ledger.json
     networks:
-      antithesis_net:
+      xrpl_net:
