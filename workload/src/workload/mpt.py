@@ -1,10 +1,8 @@
 """MPToken transaction generators for the antithesis workload."""
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
-from workload.models import MPTokenIssuance
 from workload.randoms import choice
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models.transactions import (
     MPTokenIssuanceCreate,
     MPTokenIssuanceDestroy,
@@ -13,14 +11,6 @@ from xrpl.models.transactions import (
 )
 
 log = logging.getLogger(__name__)
-
-
-def _extract_created_id(result, ledger_entry_type):
-    for node in result.get("meta", {}).get("AffectedNodes", []):
-        created = node.get("CreatedNode", {})
-        if created.get("LedgerEntryType") == ledger_entry_type:
-            return created.get("LedgerIndex", "")
-    return None
 
 
 # ── Create ───────────────────────────────────────────────────────────
@@ -39,15 +29,7 @@ async def _mpt_create_valid(accounts, mpt_issuances, client):
         maximum_amount=params.mpt_maximum_amount(),
         mptoken_metadata=params.mpt_metadata(),
     )
-    tx_submitted("MPTokenIssuanceCreate", txn)
-    response = await submit_and_wait(txn, client, src.wallet)
-    result = response.result
-    tx_result("MPTokenIssuanceCreate", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        mpt_id = _extract_created_id(result, "MPTokenIssuance")
-        if mpt_id:
-            mpt_issuances.append(MPTokenIssuance(issuer=src.address, mpt_issuance_id=mpt_id))
-            log.info("Created MPT issuance %s", mpt_id)
+    await submit_tx("MPTokenIssuanceCreate", txn, client, src.wallet)
 
 
 # ── Authorize ────────────────────────────────────────────────────────
@@ -77,9 +59,7 @@ async def _mpt_authorize_valid(accounts, mpt_issuances, client):
         mptoken_issuance_id=mpt.mpt_issuance_id,
         holder=holder_id,
     )
-    tx_submitted("MPTokenAuthorize", txn)
-    response = await submit_and_wait(txn, client, issuer.wallet)
-    tx_result("MPTokenAuthorize", response.result)
+    await submit_tx("MPTokenAuthorize", txn, client, issuer.wallet)
 
 
 async def _mpt_authorize_faulty(accounts, mpt_issuances, client):
@@ -108,9 +88,7 @@ async def _mpt_issuance_set_valid(accounts, mpt_issuances, client):
         account=issuer.address,
         mptoken_issuance_id=mpt.mpt_issuance_id,
     )
-    tx_submitted("MPTokenIssuanceSet", txn)
-    response = await submit_and_wait(txn, client, issuer.wallet)
-    tx_result("MPTokenIssuanceSet", response.result)
+    await submit_tx("MPTokenIssuanceSet", txn, client, issuer.wallet)
 
 
 async def _mpt_issuance_set_faulty(accounts, mpt_issuances, client):
@@ -139,11 +117,7 @@ async def _mpt_destroy_valid(accounts, mpt_issuances, client):
         account=issuer.address,
         mptoken_issuance_id=mpt.mpt_issuance_id,
     )
-    tx_submitted("MPTokenIssuanceDestroy", txn)
-    response = await submit_and_wait(txn, client, issuer.wallet)
-    tx_result("MPTokenIssuanceDestroy", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        mpt_issuances.remove(mpt)
+    await submit_tx("MPTokenIssuanceDestroy", txn, client, issuer.wallet)
 
 
 async def _mpt_destroy_faulty(accounts, mpt_issuances, client):

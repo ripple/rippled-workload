@@ -5,9 +5,8 @@ and other operations.
 """
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
 from workload.randoms import choice, random
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models.transactions import AccountSet, AccountSetAsfFlag
 
 log = logging.getLogger(__name__)
@@ -44,9 +43,7 @@ async def _account_set_valid(accounts, client):
         txn = AccountSet(account=account.address, set_flag=flag)
     else:
         txn = AccountSet(account=account.address, clear_flag=flag)
-    tx_submitted("AccountSet", txn)
-    response = await submit_and_wait(txn, client, account.wallet)
-    tx_result("AccountSet", response.result)
+    await submit_tx("AccountSet", txn, client, account.wallet)
 
 
 async def _account_set_faulty(accounts, client):

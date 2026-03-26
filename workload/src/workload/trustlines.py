@@ -7,10 +7,8 @@ if account A holds USD.B, then B is the issuer from A's perspective.
 """
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
-from workload.models import TrustLine
 from workload.randoms import sample, choice
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.transactions import TrustSet
 
@@ -38,17 +36,7 @@ async def _trustline_create_valid(accounts, trust_lines, client):
             value=params.trustline_limit(),
         ),
     )
-    tx_submitted("TrustSet", txn)
-    response = await submit_and_wait(txn, client, account.wallet)
-    result = response.result
-    tx_result("TrustSet", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        trust_lines.append(TrustLine(
-            account_a=account_id,
-            account_b=other_id,
-            currency=currency,
-        ))
-        log.info("Trust line: %s <-> %s for %s", account_id, other_id, currency)
+    await submit_tx("TrustSet", txn, client, account.wallet)
 
 
 async def _trustline_create_faulty(accounts, trust_lines, client):

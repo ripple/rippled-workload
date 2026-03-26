@@ -1,9 +1,8 @@
 """Delegation transaction generators for the antithesis workload."""
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
 from workload.randoms import sample, randint
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models.transactions import DelegateSet
 from xrpl.models.transactions.delegate_set import Permission, GranularPermission
 
@@ -30,9 +29,7 @@ async def _delegate_set_valid(accounts, client):
         authorize=delegate_id,
         permissions=permissions,
     )
-    tx_submitted("DelegateSet", txn)
-    response = await submit_and_wait(txn, client, src.wallet)
-    tx_result("DelegateSet", response.result)
+    await submit_tx("DelegateSet", txn, client, src.wallet)
 
 
 async def _delegate_set_faulty(accounts, client):

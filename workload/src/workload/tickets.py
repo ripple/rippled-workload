@@ -1,13 +1,9 @@
 """Ticket transaction generators for the antithesis workload."""
 
-import json
-
 import xrpl.models
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
 from workload.randoms import choice
-from xrpl.asyncio.account import get_next_valid_seq_number
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models.transactions import Payment
 
 log = logging.getLogger(__name__)
@@ -31,15 +27,7 @@ async def _ticket_create_valid(accounts, client):
         account=account.address,
         ticket_count=ticket_count,
     )
-    tx_submitted("TicketCreate", txn)
-    response = await submit_and_wait(txn, client, account.wallet)
-    result = response.result
-    tx_result("TicketCreate", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        ticket_seq = result["tx_json"]["Sequence"] + 1
-        tix = list(range(ticket_seq, ticket_seq + ticket_count))
-        account.tickets.update(tix)
-        log.info("Created %d tickets for %s", ticket_count, account.address)
+    await submit_tx("TicketCreate", txn, client, account.wallet)
 
 
 async def _ticket_create_faulty(accounts, client):
@@ -78,11 +66,7 @@ async def _ticket_use_valid(accounts, client):
         sequence=0,
         ticket_sequence=ticket_sequence,
     )
-    tx_submitted("TicketUse", payment_txn)
-    response = await submit_and_wait(payment_txn, client, src.wallet)
-    tx_result("TicketUse", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        src.tickets.discard(ticket_sequence)
+    await submit_tx("TicketUse", payment_txn, client, src.wallet)
 
 
 async def _ticket_use_faulty(accounts, client):

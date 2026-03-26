@@ -9,16 +9,12 @@ from xrpl.models.transactions import (
     NFTokenAcceptOffer,
 )
 from xrpl.models.transactions.transaction import Memo
-from xrpl.transaction import autofill_and_sign, submit_and_wait
 import base58
-from xrpl.asyncio.transaction import autofill_and_sign, submit_and_wait
-# from xrpl.transaction import autofill_and_sign
 import json
 from workload import logging
-from workload.models import NFTOffer
 from workload.randoms import randrange, sample, randint, choice
 from workload import params
-from workload.assertions import tx_submitted, tx_result
+from workload.submit import submit_tx
 import struct
 log = logging.getLogger(__name__)
 
@@ -47,23 +43,13 @@ def nftoken_mint_txn(account, taxon, client):
     nftoken_mint_info["memos"] = [memo]
 
     nftoken_mint_txn = NFTokenMint.from_dict(nftoken_mint_info)
-    try:
-        signed_nftoken_mint_txn = autofill_and_sign(nftoken_mint_txn, client, account)
-        log.debug("Signed NFTokenMint transaction: %s", signed_nftoken_mint_txn)
-        return signed_nftoken_mint_txn
-    except Exception:
-        log.error("Couldn't sign transction!")
+    return nftoken_mint_txn
 
-def nftoken_mint(account, taxnon, client):
-
+def nftoken_mint_legacy(account, taxnon, client):
+    # Legacy sync function — kept for reference, not wired to any endpoint
     nftoken_mint_txn_dict = nftoken_mint_txn(account, taxnon, client)
-    nftoken_mint_response = submit_and_wait(
-        transaction=nftoken_mint_txn_dict,
-        client=client,
-        wallet=account,
-        )
-    log.debug("nftoken_mint_response: %s", nftoken_mint_response)
-    return nftoken_mint_response
+    log.debug("nftoken_mint_txn_dict: %s", nftoken_mint_txn_dict)
+    return nftoken_mint_txn_dict
 
 def account_nfts(account, client):
     account_nfts_dict = {
@@ -126,34 +112,9 @@ def encode_nft_id(
         raise BufferLengthError(msg)
 
     nftoken_id = buf.hex().upper()
-    logger.debug("NFT %s", locals())
-    logger.debug("Decoded %s", nftoken_id)
+    log.debug("NFT %s", locals())
+    log.debug("Decoded %s", nftoken_id)
     return nftoken_id
-
-async def mint_nft(account, sequence, client):
-    memo_msg = params.nft_memo()
-    memo = Memo(memo_data=memo_msg.encode("utf-8").hex())
-    nft_memo = [memo]
-    flags = NFTokenMintFlag.TF_TRANSFERABLE
-    transfer_fee = params.nft_transfer_fee()
-    nft_mint_txn = NFTokenMint(
-        account=account.address,
-        transfer_fee=transfer_fee,
-        sequence=sequence,
-        nftoken_taxon=params.nft_taxon(),
-        flags=flags,
-        memos=nft_memo,
-        )
-    log.debug(json.dumps(nft_mint_txn.to_xrpl(), indent=2))
-    log.debug("Minting NFT %s", nft_mint_txn)
-    nft_mint_txn_signed = await autofill_and_sign(transaction=nft_mint_txn, client=client, wallet=account.wallet)
-    # nft_id = encode_nft_id(flags, transfer_fee, account.address, taxon, sequence)
-    nft_mint_txn_response = await submit_and_wait(transaction=nft_mint_txn_signed, client=client)
-    if nft_mint_txn_response.status == "success":
-        nftoken_id = nft_mint_txn_response.result["meta"]["nftoken_id"]
-        msg = f"{account.address} minted NFT ID {nftoken_id}"
-        log.info(msg)
-    return nft_mint_txn_response.result
 
 
 # ── Mint (dispatch) ──────────────────────────────────────────────────
@@ -167,18 +128,18 @@ async def nftoken_mint(accounts, nfts, client):
 
 
 async def _nftoken_mint_valid(accounts, nfts, client):
-    from workload.models import NFT
-    from xrpl.asyncio.account import get_next_valid_seq_number
     account_id = choice(list(accounts))
     account = accounts[account_id]
-    sequence = await get_next_valid_seq_number(account.address, client)
-    tx_submitted("NFTokenMint")
-    result = await mint_nft(account, sequence, client)
-    tx_result("NFTokenMint", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        nftoken_id = result["meta"]["nftoken_id"]
-        nfts.append(NFT(owner=account.address, nftoken_id=nftoken_id))
-        account.nfts.add(nftoken_id)
+    memo_msg = params.nft_memo()
+    memo = Memo(memo_data=memo_msg.encode("utf-8").hex())
+    txn = NFTokenMint(
+        account=account.address,
+        transfer_fee=params.nft_transfer_fee(),
+        nftoken_taxon=params.nft_taxon(),
+        flags=NFTokenMintFlag.TF_TRANSFERABLE,
+        memos=[memo],
+    )
+    await submit_tx("NFTokenMint", txn, client, account.wallet)
 
 
 async def _nftoken_mint_faulty(accounts, nfts, client):
@@ -205,11 +166,7 @@ async def _nftoken_burn_valid(accounts, nfts, client):
         return
     owner = accounts[nft.owner]
     txn = NFTokenBurn(account=owner.address, nftoken_id=nft.nftoken_id)
-    tx_submitted("NFTokenBurn", txn)
-    response = await submit_and_wait(transaction=txn, client=client, wallet=owner.wallet)
-    tx_result("NFTokenBurn", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        nfts.remove(nft)
+    await submit_tx("NFTokenBurn", txn, client, owner.wallet)
 
 
 async def _nftoken_burn_faulty(accounts, nfts, client):
@@ -240,9 +197,7 @@ async def _nftoken_modify_valid(accounts, nfts, client):
         nftoken_id=nft.nftoken_id,
         uri=params.nft_uri(),
     )
-    tx_submitted("NFTokenModify", txn)
-    response = await submit_and_wait(transaction=txn, client=client, wallet=owner.wallet)
-    tx_result("NFTokenModify", response.result)
+    await submit_tx("NFTokenModify", txn, client, owner.wallet)
 
 
 async def _nftoken_modify_faulty(accounts, client):
@@ -288,24 +243,7 @@ async def _nftoken_create_offer_valid(accounts, nfts, nft_offers, client):
             owner=nft.owner,
         )
         wallet = buyer.wallet
-    tx_submitted("NFTokenCreateOffer", txn)
-    response = await submit_and_wait(transaction=txn, client=client, wallet=wallet)
-    result = response.result
-    tx_result("NFTokenCreateOffer", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        # Extract offer ID from metadata
-        for node in result.get("meta", {}).get("AffectedNodes", []):
-            created = node.get("CreatedNode", {})
-            if created.get("LedgerEntryType") == "NFTokenOffer":
-                offer_id = created.get("LedgerIndex", "")
-                nft_offers.append(NFTOffer(
-                    creator=txn.account,
-                    offer_id=offer_id,
-                    nftoken_id=nft.nftoken_id,
-                    is_sell=is_sell,
-                ))
-                log.info("Created NFT %s offer %s", "sell" if is_sell else "buy", offer_id)
-                break
+    await submit_tx("NFTokenCreateOffer", txn, client, wallet)
 
 
 async def _nftoken_create_offer_faulty(accounts, nfts, nft_offers, client):
@@ -334,11 +272,7 @@ async def _nftoken_cancel_offer_valid(accounts, nft_offers, client):
         account=creator.address,
         nftoken_offers=[offer.offer_id],
     )
-    tx_submitted("NFTokenCancelOffer", txn)
-    response = await submit_and_wait(transaction=txn, client=client, wallet=creator.wallet)
-    tx_result("NFTokenCancelOffer", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        nft_offers.remove(offer)
+    await submit_tx("NFTokenCancelOffer", txn, client, creator.wallet)
 
 
 async def _nftoken_cancel_offer_faulty(accounts, nft_offers, client):
@@ -384,17 +318,7 @@ async def _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client):
             nftoken_buy_offer=offer.offer_id,
         )
         wallet = owner.wallet
-    tx_submitted("NFTokenAcceptOffer", txn)
-    response = await submit_and_wait(transaction=txn, client=client, wallet=wallet)
-    tx_result("NFTokenAcceptOffer", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        nft_offers.remove(offer)
-        # Update NFT ownership
-        if offer.is_sell:
-            for nft in nfts:
-                if nft.nftoken_id == offer.nftoken_id:
-                    nft.owner = txn.account
-                    break
+    await submit_tx("NFTokenAcceptOffer", txn, client, wallet)
 
 
 async def _nftoken_accept_offer_faulty(accounts, nfts, nft_offers, client):

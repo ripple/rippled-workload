@@ -8,7 +8,7 @@ import uvicorn
 from antithesis import lifecycle
 from fastapi import FastAPI, Depends
 from xrpl.asyncio.clients import AsyncJsonRpcClient
-from xrpl.constants import CryptoAlgorithm
+from xrpl.constants import CryptoAlgorithm, XRPLException
 from xrpl.models import IssuedCurrency
 from xrpl.models.requests import ServerInfo, Fee
 from xrpl.wallet import Wallet
@@ -61,7 +61,9 @@ class Workload:
         self.start_time = time.time()
         xrpld_host = os.environ.get("XRPLD_NAME", conf["xrpld"]["local"])
         xrpld_rpc_port = os.environ.get("XRPLD_RPC_PORT", conf["xrpld"]["json_rpc_port"])
+        xrpld_ws_port = os.environ.get("XRPLD_WS_PORT", conf["xrpld"]["ws_port"])
         self.xrpld = f"http://{xrpld_host}:{xrpld_rpc_port}"
+        self.xrpld_ws = f"ws://{xrpld_host}:{xrpld_ws_port}"
         logger.info("Connecting to xrpld at: %s", self.xrpld)
 
         accounts_json = Path(os.environ.get("ACCOUNTS_JSON", "/accounts.json"))
@@ -168,7 +170,14 @@ class Workload:
         return self.nfts
 
 def create_app(workload: Workload) -> FastAPI:
+    import asyncio
+    from workload.ws_listener import start_ws_listener
+
     app = FastAPI()
+
+    @app.on_event("startup")
+    async def startup():
+        asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
 
     def get_workload():
         return workload
@@ -180,6 +189,8 @@ def create_app(workload: Workload) -> FastAPI:
             result = await run_setup(w)
             reachable("workload::setup_complete_with_state", result)
             return result
+        except XRPLException as e:
+            logger.warning(f"setup: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"setup failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/setup", "error": f"{type(e).__name__}: {e}"})
@@ -197,6 +208,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def nft_mint_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await nftoken_mint(w.accounts, w.nfts, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_mint: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"nft_mint failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/nft/mint/random", "error": f"{type(e).__name__}: {e}"})
@@ -205,6 +218,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def nft_burn_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await nftoken_burn(w.accounts, w.nfts, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_burn: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"nft_burn failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/nft/burn/random", "error": f"{type(e).__name__}: {e}"})
@@ -213,6 +228,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def nft_modify_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await nftoken_modify(w.accounts, w.nfts, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_modify: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"nft_modify failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/nft/modify/random", "error": f"{type(e).__name__}: {e}"})
@@ -221,6 +238,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def nft_create_offer_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await nftoken_create_offer(w.accounts, w.nfts, w.nft_offers, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_create_offer: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"nft_create_offer failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/nft/create_offer/random", "error": f"{type(e).__name__}: {e}"})
@@ -229,6 +248,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def nft_cancel_offer_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await nftoken_cancel_offer(w.accounts, w.nft_offers, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_cancel_offer: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"nft_cancel_offer failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/nft/cancel_offer/random", "error": f"{type(e).__name__}: {e}"})
@@ -237,6 +258,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def nft_accept_offer_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await nftoken_accept_offer(w.accounts, w.nfts, w.nft_offers, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_accept_offer: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"nft_accept_offer failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/nft/accept_offer/random", "error": f"{type(e).__name__}: {e}"})
@@ -246,6 +269,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def account_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await account_set_random(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"account_set: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"account_set failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/account/set/random", "error": f"{type(e).__name__}: {e}"})
@@ -255,6 +280,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def trustline_create_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await trustline_create(w.accounts, w.trust_lines, w.client)
+        except XRPLException as e:
+            logger.warning(f"trustline_create: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"trustline_create failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/trustline/create/random", "error": f"{type(e).__name__}: {e}"})
@@ -264,6 +291,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def payment_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await payment_random_fn(w.accounts, w.trust_lines, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"payment_random: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"payment_random failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/payment/random", "error": f"{type(e).__name__}: {e}"})
@@ -273,6 +302,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def ticket_create_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await ticket_create(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"ticket_create: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"ticket_create failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/tickets/create/random", "error": f"{type(e).__name__}: {e}"})
@@ -281,6 +312,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def ticket_use_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await ticket_use(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"ticket_use: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"ticket_use failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/tickets/use/random", "error": f"{type(e).__name__}: {e}"})
@@ -290,6 +323,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def batch_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await batch_random(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"batch_random: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"batch_random failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/batch/random", "error": f"{type(e).__name__}: {e}"})
@@ -299,6 +334,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def mpt_create_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await mpt_create(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_create: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"mpt_create failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/mpt/create/random", "error": f"{type(e).__name__}: {e}"})
@@ -308,6 +345,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def credential_create_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await credential_create(w.accounts, w.credentials, w.client)
+        except XRPLException as e:
+            logger.warning(f"credential_create: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"credential_create failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/credential/create/random", "error": f"{type(e).__name__}: {e}"})
@@ -316,6 +355,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def credential_accept_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await credential_accept(w.accounts, w.credentials, w.client)
+        except XRPLException as e:
+            logger.warning(f"credential_accept: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"credential_accept failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/credential/accept/random", "error": f"{type(e).__name__}: {e}"})
@@ -324,6 +365,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def credential_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await credential_delete(w.accounts, w.credentials, w.client)
+        except XRPLException as e:
+            logger.warning(f"credential_delete: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"credential_delete failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/credential/delete/random", "error": f"{type(e).__name__}: {e}"})
@@ -333,6 +376,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def vault_create_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_create(w.accounts, w.vaults, w.trust_lines, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_create: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"vault_create failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/create/random", "error": f"{type(e).__name__}: {e}"})
@@ -341,6 +386,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def vault_deposit_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_deposit(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_deposit: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"vault_deposit failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/deposit/random", "error": f"{type(e).__name__}: {e}"})
@@ -349,6 +396,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def vault_withdraw_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_withdraw(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_withdraw: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"vault_withdraw failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/withdraw/random", "error": f"{type(e).__name__}: {e}"})
@@ -357,6 +406,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def vault_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_set(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_set: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"vault_set failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/set/random", "error": f"{type(e).__name__}: {e}"})
@@ -365,6 +416,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def vault_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_delete(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_delete: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"vault_delete failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/delete/random", "error": f"{type(e).__name__}: {e}"})
@@ -373,6 +426,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def vault_clawback_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await vault_clawback(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_clawback: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"vault_clawback failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/vault/clawback/random", "error": f"{type(e).__name__}: {e}"})
@@ -382,6 +437,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def domain_set(w: Workload = Depends(get_workload)):
         try:
             return await permissioned_domain_set(w.accounts, w.domains, w.client)
+        except XRPLException as e:
+            logger.warning(f"domain_set: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"domain_set failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/domain/set/random", "error": f"{type(e).__name__}: {e}"})
@@ -390,6 +447,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def domain_delete(w: Workload = Depends(get_workload)):
         try:
             return await permissioned_domain_delete(w.accounts, w.domains, w.client)
+        except XRPLException as e:
+            logger.warning(f"domain_delete: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"domain_delete failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/domain/delete/random", "error": f"{type(e).__name__}: {e}"})
@@ -399,6 +458,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def delegate_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await delegate_set(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"delegate_set: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"delegate_set failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/delegate/set/random", "error": f"{type(e).__name__}: {e}"})
@@ -407,6 +468,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def mpt_authorize_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await mpt_authorize(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_authorize: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"mpt_authorize failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/mpt/authorize/random", "error": f"{type(e).__name__}: {e}"})
@@ -415,6 +478,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def mpt_set(w: Workload = Depends(get_workload)):
         try:
             return await mpt_issuance_set(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_set: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"mpt_set failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/mpt/set/random", "error": f"{type(e).__name__}: {e}"})
@@ -423,6 +488,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def mpt_destroy_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await mpt_destroy(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_destroy: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"mpt_destroy failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/mpt/destroy/random", "error": f"{type(e).__name__}: {e}"})
@@ -432,6 +499,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_broker_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_set(w.accounts, w.vaults, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_set: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_broker_set failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/set/random", "error": f"{type(e).__name__}: {e}"})
@@ -440,6 +509,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_broker_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_delete(w.accounts, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_delete: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_broker_delete failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/delete/random", "error": f"{type(e).__name__}: {e}"})
@@ -448,6 +519,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_broker_cover_deposit_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_cover_deposit(w.accounts, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_cover_deposit: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_broker_cover_deposit failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/cover/deposit/random", "error": f"{type(e).__name__}: {e}"})
@@ -456,6 +529,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_broker_cover_withdraw_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_broker_cover_withdraw(w.accounts, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_cover_withdraw: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_broker_cover_withdraw failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/cover/withdraw/random", "error": f"{type(e).__name__}: {e}"})
@@ -464,6 +539,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_set_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_set(w.accounts, w.loan_brokers, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_set: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_set failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/set/random", "error": f"{type(e).__name__}: {e}"})
@@ -472,6 +549,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_delete_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_delete(w.accounts, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_delete: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_delete failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/delete/random", "error": f"{type(e).__name__}: {e}"})
@@ -480,6 +559,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_manage_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_manage(w.accounts, w.loan_brokers, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_manage: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_manage failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/manage/random", "error": f"{type(e).__name__}: {e}"})
@@ -488,6 +569,8 @@ def create_app(workload: Workload) -> FastAPI:
     async def loan_pay_endpoint(w: Workload = Depends(get_workload)):
         try:
             return await loan_pay(w.accounts, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_pay: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"loan_pay failed: {type(e).__name__}: {e}")
             unreachable("workload::endpoint_exception", {"endpoint": "/loan/pay/random", "error": f"{type(e).__name__}: {e}"})

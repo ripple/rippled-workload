@@ -2,10 +2,9 @@
 
 import xrpl.models
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
 from workload.randoms import sample, choice
+from workload.submit import submit_tx
 from xrpl.asyncio.account import get_next_valid_seq_number
-from xrpl.asyncio.transaction import submit_and_wait
 from xrpl.models import Batch, BatchFlag, Payment
 from xrpl.models.transactions import AccountSet, AccountSetAsfFlag
 
@@ -58,9 +57,7 @@ async def _batch_random_valid(accounts, client):
         raw_transactions=inner_txns,
         sequence=sequence,
     )
-    tx_submitted("Batch", batch_txn)
-    response = await submit_and_wait(batch_txn, client, src.wallet)
-    tx_result("Batch", response.result)
+    await submit_tx("Batch", batch_txn, client, src.wallet)
 
 
 async def _batch_random_faulty(accounts, client):

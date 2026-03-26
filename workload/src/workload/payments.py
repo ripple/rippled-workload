@@ -1,9 +1,8 @@
 """Payment transaction generators for the antithesis workload."""
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
 from workload.randoms import sample, choice, random
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.amounts import MPTAmount
 from xrpl.models.transactions import Payment
@@ -43,9 +42,7 @@ async def _payment_random_valid(accounts, trust_lines, mpt_issuances, client):
         amount=amount,
         destination=dst,
     )
-    tx_submitted("Payment", payment_txn)
-    response = await submit_and_wait(payment_txn, client, src.wallet)
-    tx_result("Payment", response.result)
+    await submit_tx("Payment", payment_txn, client, src.wallet)
 
 
 def _iou_amount(trust_lines):

@@ -99,6 +99,7 @@ def register_assertions() -> None:
         _emit_catalog_entry(_success_id(name), "sometimes", "Sometimes", must_hit=True)
         _emit_catalog_entry(_failure_id(name), "sometimes", "Sometimes", must_hit=True)
     _emit_catalog_entry("workload::always : valid_engine_result", "always", "Always", must_hit=True)
+    _emit_catalog_entry("workload::always : no_internal_rippled_error", "always", "Always", must_hit=True)
 
 
 def tx_submitted(name: str, txn=None) -> None:
@@ -133,7 +134,11 @@ def tx_result(name: str, result: dict) -> None:
     Emits a sometimes assertion that the transaction succeeded at least once,
     plus a lifecycle event with full result details.
     """
-    engine_result = result.get("engine_result", "unknown")
+    engine_result = (
+        result.get("engine_result")
+        or result.get("meta", {}).get("TransactionResult")
+        or "unknown"
+    )
     details = {
         "engine_result": engine_result,
         "engine_result_message": result.get("engine_result_message", ""),
@@ -142,6 +147,24 @@ def tx_result(name: str, result: dict) -> None:
         "hash": result.get("hash", ""),
     }
     send_event(f"workload::result : {name}", details)
+    # Internal rippled errors — these indicate bugs in transaction processing logic.
+    # Must never occur; if they do, it's a finding worth investigating.
+    _RIPPLED_INTERNAL_ERRORS = ("tefEXCEPTION", "tefINTERNAL", "tefINVARIANT_FAILED", "tefFAILURE")
+    assert_raw(
+        condition=engine_result not in _RIPPLED_INTERNAL_ERRORS,
+        message="workload::always : no_internal_rippled_error",
+        details={"engine_result": engine_result, "tx_type": name, "hash": details.get("hash", "")},
+        loc_filename=_LOC_FILE,
+        loc_function="tx_result",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=True,
+        must_hit=True,
+        assert_type="always",
+        display_type="Always",
+        assert_id="workload::always : no_internal_rippled_error",
+    )
     # engine_result should always be a valid string
     assert_raw(
         condition=engine_result not in (None, "", "unknown"),

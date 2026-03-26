@@ -3,10 +3,8 @@
 import time
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
-from workload.models import Credential
 from workload.randoms import sample, choice
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models.transactions import (
     CredentialCreate,
     CredentialAccept,
@@ -37,16 +35,7 @@ async def _credential_create_valid(accounts, credentials, client):
         expiration=int(time.time()) + params.credential_expiration_offset(),
         uri=params.credential_uri(),
     )
-    tx_submitted("CredentialCreate", txn)
-    response = await submit_and_wait(txn, client, issuer.wallet)
-    result = response.result
-    tx_result("CredentialCreate", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        credentials.append(Credential(
-            issuer=issuer.address,
-            subject=subject_id,
-            credential_type=cred_type,
-        ))
+    await submit_tx("CredentialCreate", txn, client, issuer.wallet)
 
 
 async def _credential_create_faulty(accounts, credentials, client):
@@ -75,9 +64,7 @@ async def _credential_accept_valid(accounts, credentials, client):
         issuer=cred.issuer,
         credential_type=cred.credential_type,
     )
-    tx_submitted("CredentialAccept", txn)
-    response = await submit_and_wait(txn, client, subject.wallet)
-    tx_result("CredentialAccept", response.result)
+    await submit_tx("CredentialAccept", txn, client, subject.wallet)
 
 
 async def _credential_accept_faulty(accounts, credentials, client):
@@ -110,11 +97,7 @@ async def _credential_delete_valid(accounts, credentials, client):
         subject=cred.subject,
         credential_type=cred.credential_type,
     )
-    tx_submitted("CredentialDelete", txn)
-    response = await submit_and_wait(txn, client, account.wallet)
-    tx_result("CredentialDelete", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        credentials.remove(cred)
+    await submit_tx("CredentialDelete", txn, client, account.wallet)
 
 
 async def _credential_delete_faulty(accounts, credentials, client):

@@ -1,10 +1,8 @@
 """Permissioned Domain transaction generators for the antithesis workload."""
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
-from workload.models import PermissionedDomain
 from workload.randoms import choice
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models.transactions import (
     PermissionedDomainSet,
     PermissionedDomainDelete,
@@ -39,18 +37,7 @@ async def _permissioned_domain_set_valid(accounts, domains, client):
         account=src.address,
         accepted_credentials=accepted,
     )
-    tx_submitted("PermissionedDomainSet", txn)
-    response = await submit_and_wait(txn, client, src.wallet)
-    result = response.result
-    tx_result("PermissionedDomainSet", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        for node in result.get("meta", {}).get("AffectedNodes", []):
-            created = node.get("CreatedNode", {})
-            if created.get("LedgerEntryType") == "PermissionedDomain":
-                domain_id = created.get("LedgerIndex", "")
-                domains.append(PermissionedDomain(owner=src.address, domain_id=domain_id))
-                log.info("Created domain %s", domain_id)
-                break
+    await submit_tx("PermissionedDomainSet", txn, client, src.wallet)
 
 
 async def _permissioned_domain_set_faulty(accounts, domains, client):
@@ -79,11 +66,7 @@ async def _permissioned_domain_delete_valid(accounts, domains, client):
         account=owner.address,
         domain_id=domain.domain_id,
     )
-    tx_submitted("PermissionedDomainDelete", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("PermissionedDomainDelete", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        domains.remove(domain)
+    await submit_tx("PermissionedDomainDelete", txn, client, owner.wallet)
 
 
 async def _permissioned_domain_delete_faulty(accounts, domains, client):

@@ -2,10 +2,8 @@
 
 import xrpl.models
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
-from workload.models import Vault
 from workload.randoms import choice, random
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models import IssuedCurrency, IssuedCurrencyAmount as IOUAmount
 from xrpl.models.amounts import MPTAmount
 from xrpl.models.currencies import MPTCurrency
@@ -19,15 +17,6 @@ from xrpl.models.transactions import (
 )
 
 log = logging.getLogger(__name__)
-
-
-def _extract_created_id(result, ledger_entry_type):
-    """Extract the LedgerIndex of a newly created object from tx metadata."""
-    for node in result.get("meta", {}).get("AffectedNodes", []):
-        created = node.get("CreatedNode", {})
-        if created.get("LedgerEntryType") == ledger_entry_type:
-            return created.get("LedgerIndex", "")
-    return None
 
 
 # ── Create ───────────────────────────────────────────────────────────
@@ -80,15 +69,7 @@ async def _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, clie
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
-    tx_submitted("VaultCreate", txn)
-    response = await submit_and_wait(txn, client, src.wallet)
-    result = response.result
-    tx_result("VaultCreate", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        vault_id = _extract_created_id(result, "Vault")
-        if vault_id:
-            vaults.append(Vault(owner=src.address, vault_id=vault_id, asset=asset))
-            log.info("Created vault %s with asset %s", vault_id, asset)
+    await submit_tx("VaultCreate", txn, client, src.wallet)
 
 
 async def _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, client):
@@ -117,9 +98,7 @@ async def _vault_deposit_valid(accounts, vaults, client):
         vault_id=vault.vault_id,
         amount=_amount_for_asset(vault.asset),
     )
-    tx_submitted("VaultDeposit", txn)
-    response = await submit_and_wait(txn, client, depositor.wallet)
-    tx_result("VaultDeposit", response.result)
+    await submit_tx("VaultDeposit", txn, client, depositor.wallet)
 
 
 async def _vault_deposit_faulty(accounts, vaults, client):
@@ -149,9 +128,7 @@ async def _vault_withdraw_valid(accounts, vaults, client):
         vault_id=vault.vault_id,
         amount=_amount_for_asset(vault.asset),
     )
-    tx_submitted("VaultWithdraw", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("VaultWithdraw", response.result)
+    await submit_tx("VaultWithdraw", txn, client, owner.wallet)
 
 
 async def _vault_withdraw_faulty(accounts, vaults, client):
@@ -182,9 +159,7 @@ async def _vault_set_valid(accounts, vaults, client):
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
-    tx_submitted("VaultSet", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("VaultSet", response.result)
+    await submit_tx("VaultSet", txn, client, owner.wallet)
 
 
 async def _vault_set_faulty(accounts, vaults, client):
@@ -213,11 +188,7 @@ async def _vault_delete_valid(accounts, vaults, client):
         account=owner.address,
         vault_id=vault.vault_id,
     )
-    tx_submitted("VaultDelete", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("VaultDelete", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        vaults.remove(vault)
+    await submit_tx("VaultDelete", txn, client, owner.wallet)
 
 
 async def _vault_delete_faulty(accounts, vaults, client):
@@ -251,9 +222,7 @@ async def _vault_clawback_valid(accounts, vaults, client):
         vault_id=vault.vault_id,
         holder=holder,
     )
-    tx_submitted("VaultClawback", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("VaultClawback", response.result)
+    await submit_tx("VaultClawback", txn, client, owner.wallet)
 
 
 async def _vault_clawback_faulty(accounts, vaults, client):

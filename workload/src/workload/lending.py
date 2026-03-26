@@ -5,10 +5,8 @@ then loans are taken against the broker.
 """
 
 from workload import logging, params
-from workload.assertions import tx_submitted, tx_result
-from workload.models import LoanBroker, Loan
 from workload.randoms import choice
-from xrpl.asyncio.transaction import submit_and_wait
+from workload.submit import submit_tx
 from xrpl.models.transactions import (
     LoanBrokerSet,
     LoanBrokerDelete,
@@ -22,14 +20,6 @@ from xrpl.models.transactions import (
 from xrpl.models.transactions.loan_manage import LoanManageFlag
 
 log = logging.getLogger(__name__)
-
-
-def _extract_created_id(result, ledger_entry_type):
-    for node in result.get("meta", {}).get("AffectedNodes", []):
-        created = node.get("CreatedNode", {})
-        if created.get("LedgerEntryType") == ledger_entry_type:
-            return created.get("LedgerIndex", "")
-    return None
 
 
 # ── Loan Broker Set ──────────────────────────────────────────────────
@@ -60,19 +50,7 @@ async def _loan_broker_set_valid(accounts, vaults, loan_brokers, client):
         debt_maximum=params.loan_broker_debt_maximum(),
         data=params.loan_broker_data(),
     )
-    tx_submitted("LoanBrokerSet", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    result = response.result
-    tx_result("LoanBrokerSet", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        broker_id = _extract_created_id(result, "LoanBroker")
-        if broker_id:
-            loan_brokers.append(LoanBroker(
-                owner=owner.address,
-                loan_broker_id=broker_id,
-                vault_id=vault.vault_id,
-            ))
-            log.info("Created loan broker %s", broker_id)
+    await submit_tx("LoanBrokerSet", txn, client, owner.wallet)
 
 
 async def _loan_broker_set_faulty(accounts, vaults, loan_brokers, client):
@@ -101,11 +79,7 @@ async def _loan_broker_delete_valid(accounts, loan_brokers, client):
         account=owner.address,
         loan_broker_id=broker.loan_broker_id,
     )
-    tx_submitted("LoanBrokerDelete", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("LoanBrokerDelete", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        loan_brokers.remove(broker)
+    await submit_tx("LoanBrokerDelete", txn, client, owner.wallet)
 
 
 async def _loan_broker_delete_faulty(accounts, loan_brokers, client):
@@ -135,9 +109,7 @@ async def _loan_broker_cover_deposit_valid(accounts, loan_brokers, client):
         loan_broker_id=broker.loan_broker_id,
         amount=params.loan_cover_deposit_amount(),
     )
-    tx_submitted("LoanBrokerCoverDeposit", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("LoanBrokerCoverDeposit", response.result)
+    await submit_tx("LoanBrokerCoverDeposit", txn, client, owner.wallet)
 
 
 async def _loan_broker_cover_deposit_faulty(accounts, loan_brokers, client):
@@ -167,9 +139,7 @@ async def _loan_broker_cover_withdraw_valid(accounts, loan_brokers, client):
         loan_broker_id=broker.loan_broker_id,
         amount=params.loan_cover_deposit_amount(),
     )
-    tx_submitted("LoanBrokerCoverWithdraw", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("LoanBrokerCoverWithdraw", response.result)
+    await submit_tx("LoanBrokerCoverWithdraw", txn, client, owner.wallet)
 
 
 async def _loan_broker_cover_withdraw_faulty(accounts, loan_brokers, client):
@@ -205,19 +175,7 @@ async def _loan_set_valid(accounts, loan_brokers, loans, client):
         payment_interval=(pi := params.loan_payment_interval()),
         grace_period=params.loan_grace_period(pi),
     )
-    tx_submitted("LoanSet", txn)
-    response = await submit_and_wait(txn, client, borrower.wallet)
-    result = response.result
-    tx_result("LoanSet", result)
-    if result.get("engine_result") == "tesSUCCESS":
-        loan_id = _extract_created_id(result, "Loan")
-        if loan_id:
-            loans.append(Loan(
-                borrower=borrower.address,
-                loan_id=loan_id,
-                loan_broker_id=broker.loan_broker_id,
-            ))
-            log.info("Created loan %s", loan_id)
+    await submit_tx("LoanSet", txn, client, borrower.wallet)
 
 
 async def _loan_set_faulty(accounts, loan_brokers, loans, client):
@@ -246,11 +204,7 @@ async def _loan_delete_valid(accounts, loans, client):
         account=borrower.address,
         loan_id=loan.loan_id,
     )
-    tx_submitted("LoanDelete", txn)
-    response = await submit_and_wait(txn, client, borrower.wallet)
-    tx_result("LoanDelete", response.result)
-    if response.result.get("engine_result") == "tesSUCCESS":
-        loans.remove(loan)
+    await submit_tx("LoanDelete", txn, client, borrower.wallet)
 
 
 async def _loan_delete_faulty(accounts, loans, client):
@@ -282,9 +236,7 @@ async def _loan_manage_valid(accounts, loan_brokers, loans, client):
         loan_id=loan.loan_id,
         flags=flag,
     )
-    tx_submitted("LoanManage", txn)
-    response = await submit_and_wait(txn, client, owner.wallet)
-    tx_result("LoanManage", response.result)
+    await submit_tx("LoanManage", txn, client, owner.wallet)
 
 
 async def _loan_manage_faulty(accounts, loan_brokers, loans, client):
@@ -314,9 +266,7 @@ async def _loan_pay_valid(accounts, loans, client):
         loan_id=loan.loan_id,
         amount=params.loan_pay_amount(),
     )
-    tx_submitted("LoanPay", txn)
-    response = await submit_and_wait(txn, client, borrower.wallet)
-    tx_result("LoanPay", response.result)
+    await submit_tx("LoanPay", txn, client, borrower.wallet)
 
 
 async def _loan_pay_faulty(accounts, loans, client):
