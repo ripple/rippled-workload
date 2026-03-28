@@ -28,6 +28,7 @@ try:
 
     # Verify expected new endpoints exist
     expected = [
+        '/setup',
         '/credential/create/random',
         '/credential/accept/random',
         '/credential/delete/random',

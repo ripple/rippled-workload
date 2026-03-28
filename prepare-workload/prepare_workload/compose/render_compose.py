@@ -9,8 +9,9 @@ fuzzer_service_template = "fuzzer_service.yml.mako"
 
 container_config_path = "/opt/xrpld/etc"
 
-VALIDATOR_COMMAND = '["/opt/xrpld/bin/xrpld", "--start"]'
-PEER_COMMAND = '["/opt/xrpld/bin/xrpld", "--start"]'
+GENESIS_LEDGER_PATH = f"{container_config_path}/genesis_ledger.json"
+VALIDATOR_COMMAND = f'["/opt/xrpld/bin/xrpld", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
+PEER_COMMAND = f'["/opt/xrpld/bin/xrpld", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
 
 def render_peer(idx, data):
     return {

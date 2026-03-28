@@ -1,4 +1,3 @@
-import httpx
 import json
 import os
 import time
@@ -6,102 +5,37 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-import xrpl
-import copy
-from xrpl.models.transactions import NFTokenMint, NFTokenMintFlag
-from fastapi import Request
-
-from workload import logger, utils
-from workload.create import generate_wallets, generate_wallet_from_seed
-from workload.check_xrpld_sync_state import is_xrpld_synced # TODO:git use xrpld_sync.py
-from workload.config import conf_file, config_file
-from workload.models import UserAccount
-from workload.nft import mint_nft
-from workload.randoms import sample, choice
-from workload.txn_factory import generate_txn
-from workload import params
 from antithesis import lifecycle
-from asyncio import TaskGroup
 from fastapi import FastAPI, Depends
-from workload import txn_factory
-from xrpl.asyncio.account import get_next_valid_seq_number
 from xrpl.asyncio.clients import AsyncJsonRpcClient
-from xrpl.asyncio.ledger import get_latest_validated_ledger_sequence
-from xrpl.asyncio.transaction import submit_and_wait, autofill_and_sign, sign_and_submit, submit
-from xrpl.constants import CryptoAlgorithm
-from xrpl.core.binarycodec import encode_for_signing, encode
-from xrpl.core.keypairs import sign
-from xrpl.models import IssuedCurrency, IssuedCurrencyAmount
-from xrpl.models.transactions import (
-    AccountSetAsfFlag,
-    AccountSet,
-    AccountSetFlag,
-    TrustSet,
-    TrustSetFlag,
-    PaymentFlag,
-    NFTokenCreateOffer,
-    NFTokenCreateOfferFlag,
-    NFTokenBurn,
-    Payment,
-    )
+from xrpl.constants import CryptoAlgorithm, XRPLException
+from xrpl.models import IssuedCurrency
 from xrpl.models.requests import ServerInfo, Fee
-from xrpl.models.response import ResponseStatus
-import time
 from xrpl.wallet import Wallet
 
-from dataclasses import dataclass, field
-
-DEFAULT_BALANCE = conf_file["workload"]["accounts"]["default_balance"]
-DEFAULT_PAYMENT = conf_file["workload"]["transactions"]["payment"]["default_amount"]
-
-
-@dataclass
-class AccountGenerator:
-    source: Wallet
-    client: AsyncJsonRpcClient
-    default_balance: int = field(default=DEFAULT_PAYMENT)
-
-    async def generate_accounts(self,
-                                num_accounts: int,
-                                amount: int | None = None,
-                                wait=True
-                                ):
-        submit_method = submit_and_wait if wait else sign_and_submit
-        # submit_method = submit_and_wait if wait else submit
-        amount = amount or self.default_balance
-        txns = []
-        wallets = generate_wallets(num_accounts)
-        seq = await get_next_valid_seq_number(address=self.source.address, client=self.client)
-        wallet_list = list(enumerate(wallets))
-        for idx, wallet in wallet_list :
-            if self.source.address == wallet.address:
-                logger.error("Generated source and destination same") # TODO: Fix selecting src != dst
-                continue
-            txns.append(Payment(
-                account=self.source.address,
-                destination=wallet.address,
-                amount=str(amount),
-                sequence=seq + idx
-            ))
-
-        tasks = []
-        start = time.time()
-
-        try:
-            async with TaskGroup() as tg:
-                for txn in txns:
-                    tasks.append(
-                        tg.create_task(
-                            submit_method(transaction=txn, client=self.client, wallet=self.source)
-                        )
-                    )
-            responses = [t.result() for t in tasks]
-            elapsed = time.time() - start
-            logger.debug(f"wait took: {elapsed}")
-            return zip(responses, wallets)
-        except* Exception as eg:
-            for e in eg.exceptions:
-                logger.error("handled other error: %s: %s", type(e).__name__, e)
+from workload import logger
+from workload.assertions import register_assertions
+from antithesis.assertions import always, reachable, unreachable
+from antithesis._internal import _HANDLER
+from workload.check_xrpld_sync_state import is_xrpld_synced
+from workload.config import conf_file, config_file
+from workload.models import UserAccount
+from workload.nft import nftoken_mint, nftoken_burn, nftoken_modify, nftoken_create_offer, nftoken_cancel_offer, nftoken_accept_offer
+from workload.payments import payment_random as payment_random_fn
+from workload.trustlines import trustline_create
+from workload.account_set import account_set_random
+from workload.tickets import ticket_create, ticket_use
+from workload.batch import batch_random
+from workload.credentials import credential_create, credential_accept, credential_delete
+from workload.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
+from workload.domains import permissioned_domain_set, permissioned_domain_delete
+from workload.delegation import delegate_set
+from workload.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
+from workload.lending import (
+    loan_broker_set, loan_broker_delete,
+    loan_broker_cover_deposit, loan_broker_cover_withdraw,
+    loan_set, loan_delete, loan_manage, loan_pay,
+)
 
 class Workload:
     def __init__(self, conf: dict[str, Any]):
@@ -111,7 +45,15 @@ class Workload:
         self.gateways = []
         self.amms = []
         self.nfts = []
+        self.nft_offers = []
         self.currencies = []
+        self.trust_lines = []
+        self.credentials = []
+        self.vaults = []
+        self.domains = []
+        self.mpt_issuances = []
+        self.loan_brokers = []
+        self.loans = []
         self.funding_wallet: Wallet = None
         self.failures = []
         self.currency_codes = conf["currencies"]["codes"]
@@ -119,26 +61,30 @@ class Workload:
         self.start_time = time.time()
         xrpld_host = os.environ.get("XRPLD_NAME", conf["xrpld"]["local"])
         xrpld_rpc_port = os.environ.get("XRPLD_RPC_PORT", conf["xrpld"]["json_rpc_port"])
+        xrpld_ws_port = os.environ.get("XRPLD_WS_PORT", conf["xrpld"]["ws_port"])
         self.xrpld = f"http://{xrpld_host}:{xrpld_rpc_port}"
+        self.xrpld_ws = f"ws://{xrpld_host}:{xrpld_ws_port}"
         logger.info("Connecting to xrpld at: %s", self.xrpld)
-        use_ledger = False
-        # if Path("/.dockerenv").is_file() and use_ledger:
-        accounts_json = Path("/accounts.json")
-        # else:
-            # accounts_json = "/home/emel/dev/Ripple/rippled-antithesis/rippled-workload/testnet/accounts.json"
-            # accounts_json = input("Enter path of accounts.json")
-        if use_ledger:
-            self.load_initial_accounts(accounts_json)
-            fw = self.accounts[list(self.accounts)[0]]
-            logger.info(f"Using {fw} for funding account")
-            self.funding_wallet = fw.wallet
-            # self.funding_wallet = generate_wallet_from_seed(self.config["genesis_account"]["master_seed"])
+
+        accounts_json = Path(os.environ.get("ACCOUNTS_JSON", "/accounts.json"))
+        if not accounts_json.exists():
+            logger.error("accounts.json not found at %s. Cannot start without pre-generated accounts.", accounts_json)
+            unreachable("workload::accounts_json_missing", {"path": str(accounts_json)})
         else:
-            self.funding_wallet = generate_wallet_from_seed(self.config["genesis_account"]["master_seed"])
+            self.load_initial_accounts(accounts_json)
+            reachable("workload::accounts_ready", {"count": len(self.accounts)})
+
+        default_algo = CryptoAlgorithm[conf_file["workload"]["accounts"]["default_crypto_algorithm"]]
+        self.funding_wallet = Wallet.from_seed(self.config["genesis_account"]["master_seed"], algorithm=default_algo)
         self.client = AsyncJsonRpcClient(self.xrpld)
-        self.account_generator = AccountGenerator(source=self.funding_wallet, client=self.client)
 
         self.wait_for_network(self.xrpld)
+
+        logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
+        reachable("workload::started", {})
+        always(True, "workload::sdk_works", {"message": "SDK canary assertion"})
+
+        register_assertions()
 
         workload_ready_msg = "Workload initialization complete"
         logger.info("%s after %ss", workload_ready_msg, int(time.time() - self.start_time))
@@ -149,21 +95,6 @@ class Workload:
     @property
     def addresses(self):
         return list(self.accounts.keys())
-
-    async def generate_accounts(self, n: int, wait=True):
-        logger.debug("Starting generate accounts()")
-        olf = await self.fee()
-        open_ledger_fee = int(olf["drops"]["open_ledger_fee"])
-        for result, wallet in await self.account_generator.generate_accounts(n, wait=wait):
-            if result.status == ResponseStatus.SUCCESS:
-                account = UserAccount(wallet)
-                self.accounts[account.address] =  account
-            else:
-                self.failures.append(wallet)
-        fee_paid = int(result.result["tx_json"]["Fee"])
-        if fee_paid > open_ledger_fee:
-            logger.debug(f"Paid {fee_paid=} vs {open_ledger_fee=}")
-        logger.debug(f"{len(self.addresses)} accounts")
 
     async def server_info(self):
         server_info_response = await self.client.request(ServerInfo())
@@ -185,34 +116,18 @@ class Workload:
         fee_response = await self.fee()
         return int(fee_response["expected_ledger_size"])
 
-    def load_initial_accounts(self, accounts_json):
-        # TODO: Doesn't need to be in workload
-        try:
-            accounts_json = Path(accounts_json)
-            logger.info(f"Loading accounts from {accounts_json}")
-            accounts = json.loads(accounts_json.read_text())
-        except FileNotFoundError:
-            logger.error("accounts.json not found.")
-            if True: # TODO: Fix this for some kind of local testing
-                local_path = "accounts.json"
-            # local_path = input("Enter local file path:")
-            accounts_json = Path(local_path)
-            logger.info(f"Using accounts.json at: {accounts_json.resolve()}")
-            accounts = json.loads(accounts_json.read_text())
-            logger.info(f"{len(accounts)} accounts found!")
-            for idx, i in enumerate(accounts):
-                logger.debug(f"{idx}: {i}")
-        self.account_data = accounts
+    def load_initial_accounts(self, accounts_json: Path):
+        """Load pre-generated accounts from a JSON file.
 
+        Expects format: [{"address": "r...", "seed": "s..."}, ...]
+        """
+        logger.info(f"Loading accounts from {accounts_json}")
+        accounts = json.loads(accounts_json.read_text())
         default_algo = CryptoAlgorithm[conf_file["workload"]["accounts"]["default_crypto_algorithm"]]
-
-        def generate_wallet_from_seed(seed: str, algorithm: CryptoAlgorithm = default_algo) -> Wallet:
-            wallet = Wallet.from_seed(seed=seed, algorithm=algorithm)
-            return wallet
-        for _, seed in self.account_data:
-            wallet = generate_wallet_from_seed(seed)
+        for entry in accounts:
+            wallet = Wallet.from_seed(seed=entry["seed"], algorithm=default_algo)
             self.accounts[wallet.address] = UserAccount(wallet=wallet)
-        logger.info(f"Loaded {len(self.accounts)} initial accounts")
+        logger.info(f"Loaded {len(self.accounts)} accounts")
 
     @classmethod
     def issue_currencies(cls, issuer: str, currency_code: list[str]) -> list[IssuedCurrency]:
@@ -248,485 +163,418 @@ class Workload:
             time.sleep(wait_time)
         logger.info("xrpld ready...")
 
-    async def gen_payment(self, src, dst, amount):
-        source = self.accounts[src]
-        seq = await get_next_valid_seq_number(address=src, client=self.client)
-        txn = Payment(
-            account=source.address,
-            destination=dst,
-            amount=amount,
-            sequence=seq,
-        )
-        return txn
-
-    async def submit_txn(self, txn, wait=True):
-        logger.info(txn)
-        submit_method = submit_and_wait if wait else sign_and_submit
-        source = self.accounts[txn.account]
-        logger.info(source)
-        wallet = source.wallet
-        response = await submit_method(transaction=txn, client=self.client, wallet=wallet)
-        logger.info(response)
-
-    async def make_payment(self, payment_data):
-        logger.info("hit make_payment()")
-        logger.info(f"{payment_data=}")
-        account = payment_data.account
-        destination = payment_data.destination
-        amount = payment_data.amount
-        txn = await self.gen_payment(account, destination, str(amount))
-        result = await self.submit_txn(txn)
-        logger.info(f"got result: {result}")
-
-    async def submit_payments(self, n: int, wallet: Wallet, destination_address: str):
-        seq = await get_next_valid_seq_number(wallet.address, client=self.client)
-        latest_ledger = await get_latest_validated_ledger_sequence(client=self.client)
-
-        signed_blobs = []
-        for i in range(n):
-            tx_json = Payment(
-                account=wallet.address,
-                amount=params.payment_amount(),
-                destination=destination_address,
-                sequence=seq + i,
-                fee=params.fee(),
-                last_ledger_sequence=latest_ledger + 10,
-                signing_pub_key=wallet.public_key
-            ).to_xrpl()
-
-            signing_blob = encode_for_signing(tx_json)
-            signature = sign(signing_blob, wallet.private_key)
-            tx_json["TxnSignature"] = signature
-
-            signed_blob = encode(tx_json)
-            signed_blobs.append(signed_blob)
-
-        responses = []
-        async with TaskGroup() as tg:
-            for blob in signed_blobs:
-                tg.create_task(self.submit_via_http(blob, responses))
-
-        return responses
-
-    async def submit_via_http(self, blob: str, responses: list):
-        # TODO: Remove this
-        payload = {
-            "method": "submit",
-            "params": [{"tx_blob": blob}]
-        }
-        async with httpx.AsyncClient() as client:
-            try:
-                resp = await client.post(self.xrpld, json=payload)
-                responses.append(resp.json())
-            except Exception as e:
-                responses.append({"error": str(e)})
-
-    async def pay(self):
-        src, dst = sample(self.account_data, 2)
-        src_secret = src[1]
-        dst_address = dst[0]
-        src_wallet = Wallet.from_secret(src_secret, algorithm=CryptoAlgorithm.SECP256K1)
-        responses = await self.submit_payments(100, src_wallet, dst_address)
-        for i in responses:
-            print(i)
-
-        return {"cool": "beans"}
-
-    async def mint_random_nft(self):
-        if not self.accounts:
-            return
-        account_id = choice(list(self.accounts))
-        account = self.accounts[account_id]
-        sequence = await get_next_valid_seq_number(account.address, self.client)
-        result = await mint_nft(account, sequence, self.client)
-        logger.info(json.dumps(result, indent=2))
-        logger.info(json.dumps(result["meta"]["nftoken_id"], indent=2))
-        logger.info(json.dumps(result["tx_json"]["Account"], indent=2))
-        nft_owner = result["tx_json"]["Account"]
-        nftoken_id = result["meta"]["nftoken_id"]
-        from workload.models import NFT
-        nft = NFT(owner=account.address, nftoken_id=nftoken_id)
-        self.nfts.append(nft)
-        account.nfts.add(nftoken_id)
-        # for a in self.accounts:
-        #     if a.address == nft_owner:
-        #         nft = NFT(owner=a, nftoken_id=nftoken_id)
-        #         self.nfts.append(nft)
-        #         logger.info(f"Added NFT {nftoken_id} with ownder {a}")
-        #         break
-
-        logger.info(f"Account {account.address}'s NFTs:")
-        for idx, nft in enumerate(account.nfts):
-            logger.info(f"{idx}: {nft}")
-
     def get_accounts(self):
         return self.accounts
 
     def get_nfts(self):
         return self.nfts
 
-    async def nftoken_create_offer(self, account, nft_id, wallet):
-        create_amount = params.nft_offer_amount()
-        logger.debug("Creating offer for %s's nft [%s]", account, nft_id)
-        nftoken_offer_create_txn = NFTokenCreateOffer(
-            account=account,
-            nftoken_id=nft_id,
-            amount=create_amount,
-            flags=NFTokenCreateOfferFlag.TF_SELL_NFTOKEN,
-        )
-        logger.debug(json.dumps(nftoken_offer_create_txn.to_xrpl(), indent=2))
-        nftoken_offer_create_txn_response = await submit_and_wait(transaction=nftoken_offer_create_txn, client=self.client, wallet=wallet)
-        return nftoken_offer_create_txn_response.result
-
-    async def create_random_nft_offer(self):
-        if not self.nfts:
-            logger.info("No NFTs to make offers on!")
-            return
-        nft = choice(self.nfts)
-        owner = self.accounts[nft.owner]
-        res = await self.nftoken_create_offer(owner.address, nft.nftoken_id, owner.wallet)
-        logger.debug(res)
-        return None
-
-    async def nft_burn_random(self):
-        if not self.nfts:
-            logger.debug("No NFTs to burn!")
-            return
-        nft = choice(self.nfts)
-        nft_owner = nft.owner
-        nft_owner = self.accounts[nft_owner]
-        nftburn_txn = NFTokenBurn(account=nft_owner.address, nftoken_id=nft.nftoken_id)
-        nftburn_txn_response = await submit_and_wait(transaction=nftburn_txn, client=self.client, wallet=nft_owner.wallet)
-        return nftburn_txn_response.result
-
-    async def payment_random(self):
-        if not self.accounts:
-            return
-        amount = params.payment_amount()
-        src_address, dst = sample(list(self.accounts), 2)
-        sequence = await get_next_valid_seq_number(src_address, self.client)
-        src = self.accounts[src_address]
-        payment_txn = Payment(account=src.address, amount=amount, destination=dst, sequence=sequence)
-        response = await sign_and_submit(payment_txn, self.client, src.wallet)
-        logger.debug("Payment from %s to %s for %s submitted.", src.address, dst, amount)
-        return response, src.address, dst, amount
-
-    async def create_ticket(self):
-        if not self.accounts:
-            return
-        ticket_count = params.ticket_count()
-        logger.debug(choice(list(self.accounts)))
-        account_id  = choice(list(self.accounts))
-        logger.debug(f"{account_id=}")
-        account = self.accounts[account_id]
-        logger.debug(f"Chose account: {account}")
-        ticket_create_txn = xrpl.models.TicketCreate(
-            account=account.address,
-            ticket_count=ticket_count,
-        )
-        response = await submit_and_wait(ticket_create_txn, self.client, account.wallet)
-        result = response.result
-        logger.debug(json.dumps(result, indent=2))
-
-        ticket_seq = result["tx_json"]["Sequence"] + 1
-        tix = [ticket_seq for ticket_seq in range(ticket_seq, ticket_seq + ticket_count)]
-        account.tickets.update(tix)
-        logger.debug(f"Account {account.address} tickets: {account.tickets=}")
-        # logger.info(f"Created tickets: {tickets}")
-        # self.accounts
-        return None
-
-    async def use_random_ticket(self):
-        if not self.accounts:
-            return
-        account_ids = self.addresses
-        len_account_ids = len(account_ids)
-        logger.debug(f"Length of account_ids: {len_account_ids}")
-        for aid in account_ids:
-            logger.debug(f"{self.accounts[aid].tickets}")
-            len_tickets = len(self.accounts[aid].tickets)
-            if len_tickets > 0:
-                account_id = aid
-                logger.debug(f"Found {aid} to have {len_tickets} tickets {self.accounts[aid].tickets}")
-                break
-            else:
-                logger.debug(f"removing {aid} from list")
-                account_ids.remove(aid)
-                logger.debug(f"list now {len(account_ids)} long")
-
-        # Our ticket holder is the source account
-        src = self.accounts[account_id]
-        logger.debug(f"Ticket holder: {src.address}")
-        # Use a random ticker of theirs
-        ticket_sequence = choice(list(src.tickets))
-        logger.debug(f"Using ticket: {ticket_sequence}")
-        # Pick a destination account that's not the source
-        account_ids = self.addresses
-        account_ids.remove(account_id)
-        dst = choice(account_ids)
-        payment_txn = Payment(
-            account=src.address,
-            destination=dst,
-            amount=params.payment_amount(),
-            sequence=0,
-            ticket_sequence=ticket_sequence,
-        )
-        result = await submit_and_wait(payment_txn, self.client, src.wallet)
-        logger.debug(result)
-        return result
-
-    async def random_batch(self):
-        if not self.accounts:
-            return
-        from xrpl.models import Batch, BatchFlag, Payment
-        src_address, dst = sample(list(self.accounts), 2)
-        sequence = await get_next_valid_seq_number(src_address, self.client)
-        src = self.accounts[src_address]
-        num_txns = params.batch_size()
-        batch_flag = choice(list(BatchFlag))
-        logger.info(f"Submitting Batch txn {batch_flag.name} ")
-        raw_transactions = [Payment(
-            account=src.address,
-            amount=params.batch_inner_amount(),
-            flags=xrpl.models.TransactionFlag.TF_INNER_BATCH_TXN,
-            destination=dst,
-            sequence=sequence + idx + 1,
-            fee="0",
-            signing_pub_key=""
-        ) for idx in range(num_txns)]
-
-        batch_txn = Batch(
-            account=src.address,
-            flags=batch_flag,
-            raw_transactions=[*raw_transactions],
-            sequence=sequence,
-        )
-
-        response = await submit_and_wait(batch_txn, self.client, src.wallet)
-        result = response.result
-        logger.info(json.dumps(result, indent=2))
-
-    async def mpt_create(self):
-        if not self.accounts:
-            return
-        from xrpl.models import MPTokenIssuanceCreate
-        # src_address, dst = sample(list(self.accounts), 2)
-        src_address = choice(list(self.accounts))
-        sequence = await get_next_valid_seq_number(src_address, self.client)
-        src = self.accounts[src_address]
-
-        mpt_txn = MPTokenIssuanceCreate(
-            account=src.address,
-            # asset_scale="2",
-            # maximum_amount="100000000",
-            # mptoken_metadata=b"cool".hex()
-        )
-        response = await submit_and_wait(mpt_txn, self.client, src.wallet)
-        result = response.result
-        logger.info(json.dumps(result, indent=2))
-
-    # async def make_request(self, request):
-    #     logger.info(f"got request: {request}")
-    #     payload = {"method": "server_info"}
-    #     logger.info(f"self.rippled: {self.rippled}")
-    #     response = httpx.post(self.rippled, json=payload)
-    #     logger.info(response.text)
-    #     res = response.json()
-    #     logger.info(res)
-    #     return res
-
-    async def test_txn_factory(self, singular=False):
-        ctx = txn_factory.TxnContext(
-            account=self.funding_wallet.address,
-            fee=await self.get_ref_fee(),
-            addresses=self.addresses,
-            )
-        if not self.addresses:
-            return
-        potential_destinations = copy.copy(self.addresses)
-        if ctx.account in potential_destinations:
-            potential_destinations.remove(ctx.account)
-        destination = choice(potential_destinations)
-        ica = IssuedCurrencyAmount(
-            issuer=destination,
-            currency=choice(self.currency_codes),
-            value=self.config["transactions"]["trustset"]["limit"],
-        )
-        seq = await get_next_valid_seq_number(
-                    address=self.funding_wallet.address,
-                    client=self.client
-                    )
-        aset = generate_txn("AccountSet", ctx,
-                            SetFlag=AccountSetAsfFlag.ASF_DEFAULT_RIPPLE,
-                            Sequence=seq,
-                            )
-        ts = generate_txn("TrustSet", ctx,
-                      LimitAmount=ica,
-                      Sequence=seq + 1
-                      )
-        p = generate_txn("Payment", ctx,
-                         Amount=DEFAULT_PAYMENT,
-                         Sequence=seq + 2
-                         )
-        n = generate_txn("NFTokenMint", ctx,
-                         Sequence=seq + 3,
-                         )
-        txns = [aset, ts, p, n]
-        signed_txns = [await autofill_and_sign(transaction=txn, client=self.client, wallet=self.funding_wallet) for txn in txns]
-        responses = []
-        if singular:
-            for txn in signed_txns:
-                response = await submit_and_wait(transaction=txn, client=self.client, wallet=self.funding_wallet)
-                responses.append(response)
-        else:
-            start = time.time()
-            tasks = []
-            try:
-                async with TaskGroup() as tg:
-                    for txn in signed_txns:
-                        tasks.append(
-                            tg.create_task(
-                                submit(transaction=txn, client=self.client)
-                            )
-                        )
-                responses = [t.result() for t in tasks]
-                elapsed = time.time() - start
-                # return zip(responses, wallets)
-            except* Exception as eg:
-                for e in eg.exceptions:
-                    logger.error("handled other error: %s: %s", type(e).__name__, e)
-
 def create_app(workload: Workload) -> FastAPI:
+    import asyncio
+    from workload.ws_listener import start_ws_listener
+
     app = FastAPI()
-    from pydantic import BaseModel
 
-    # class Item(BaseModel):
-    #     name: str
-    #     description: str | None = None
-    #     price: float
-    #     tax: float | None = None
-    # class PaymentM(BaseModel):
-    #     default_amount: int = 100
-    #     account: str
-    #     destination: str
-    #     amount: int = default_amount
-    # class NumAccounts(BaseModel):
-    #     n: int = 10
-
-    # @app.post("/payment1")
-    # async def payment1(data: Request):
-    #     try:
-    #         res = await data.json()
-    #     except Exception as ex:
-    #         res = str(ex)
-    #     logger.info(res)
-    #     return res
+    @app.on_event("startup")
+    async def startup():
+        asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
 
     def get_workload():
         return workload
 
-    @app.get("/mix")
-    async def mix(w: Workload = Depends(get_workload)):
+    @app.get("/setup")
+    async def setup_endpoint(w: Workload = Depends(get_workload)):
+        from workload.setup import run_setup
         try:
-            await w.test_txn_factory()
+            result = await run_setup(w)
+            reachable("workload::setup_complete_with_state", result)
+            return result
+        except XRPLException as e:
+            logger.warning(f"setup: {type(e).__name__}: {e}")
         except Exception as e:
-            logger.error(f"txn_factory failed: {type(e).__name__}: {e}")
-
-    @app.get("/generate_accounts")
-    async def generate_accounts(w: Workload = Depends(get_workload)):
-    # async def generate_accounts(data: Request, w: Workload = Depends(get_workload)):
-        # res = await data.json()
-        try:
-            await w.generate_accounts(100)
-        except Exception as e:
-            logger.error(f"generate_accounts failed: {type(e).__name__}: {e}")
+            logger.error(f"setup failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/setup", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/accounts")
     def get_accounts(w: Workload = Depends(get_workload)):
-        accounts = w.addresses
-        for a in accounts:
-            logger.info(a)
-        return accounts
+        return w.addresses
 
     @app.get("/nft/list")
     def get_nfts(w: Workload = Depends(get_workload)):
-        nfts = w.get_nfts()
-        for n in nfts:
-            logger.info(n)
+        return w.get_nfts()
 
+    # ── NFT ──────────────────────────────────────────────────────
     @app.get("/nft/mint/random")
-    async def mint_random_nft(w: Workload = Depends(get_workload)):
+    async def nft_mint_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.mint_random_nft()
+            return await nftoken_mint(w.accounts, w.nfts, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_mint: {type(e).__name__}: {e}")
         except Exception as e:
-            logger.error(f"mint_random_nft failed: {type(e).__name__}: {e}")
-
-    @app.get("/nft/create_offer/random")
-    async def create_random_nft_offer(w: Workload = Depends(get_workload)):
-        try:
-            return await w.create_random_nft_offer()
-        except Exception as e:
-            logger.error(f"create_random_nft_offer failed: {type(e).__name__}: {e}")
+            logger.error(f"nft_mint failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/nft/mint/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/nft/burn/random")
-    async def burn_nft(w: Workload = Depends(get_workload)):
+    async def nft_burn_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.nft_burn_random()
+            return await nftoken_burn(w.accounts, w.nfts, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_burn: {type(e).__name__}: {e}")
         except Exception as e:
-            logger.error(f"nft_burn_random failed: {type(e).__name__}: {e}")
+            logger.error(f"nft_burn failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/nft/burn/random", "error": f"{type(e).__name__}: {e}"})
 
-    @app.get("/pay")
-    async def payment_random(w: Workload = Depends(get_workload)):
+    @app.get("/nft/modify/random")
+    async def nft_modify_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.pay()
+            return await nftoken_modify(w.accounts, w.nfts, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_modify: {type(e).__name__}: {e}")
         except Exception as e:
-            logger.error(f"pay failed: {type(e).__name__}: {e}")
+            logger.error(f"nft_modify failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/nft/modify/random", "error": f"{type(e).__name__}: {e}"})
 
+    @app.get("/nft/create_offer/random")
+    async def nft_create_offer_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await nftoken_create_offer(w.accounts, w.nfts, w.nft_offers, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_create_offer: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"nft_create_offer failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/nft/create_offer/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/nft/cancel_offer/random")
+    async def nft_cancel_offer_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await nftoken_cancel_offer(w.accounts, w.nft_offers, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_cancel_offer: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"nft_cancel_offer failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/nft/cancel_offer/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/nft/accept_offer/random")
+    async def nft_accept_offer_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await nftoken_accept_offer(w.accounts, w.nfts, w.nft_offers, w.client)
+        except XRPLException as e:
+            logger.warning(f"nft_accept_offer: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"nft_accept_offer failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/nft/accept_offer/random", "error": f"{type(e).__name__}: {e}"})
+
+    # ── Account Set ───────────────────────────────────────────────
+    @app.get("/account/set/random")
+    async def account_set_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await account_set_random(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"account_set: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"account_set failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/account/set/random", "error": f"{type(e).__name__}: {e}"})
+
+    # ── Trust Lines ───────────────────────────────────────────────
+    @app.get("/trustline/create/random")
+    async def trustline_create_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await trustline_create(w.accounts, w.trust_lines, w.client)
+        except XRPLException as e:
+            logger.warning(f"trustline_create: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"trustline_create failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/trustline/create/random", "error": f"{type(e).__name__}: {e}"})
+
+    # ── Payments ─────────────────────────────────────────────────
     @app.get("/payment/random")
-    async def make_payment(w: Workload = Depends(get_workload)):
+    async def payment_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.payment_random()
+            return await payment_random_fn(w.accounts, w.trust_lines, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"payment_random: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"payment_random failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/payment/random", "error": f"{type(e).__name__}: {e}"})
 
+    # ── Tickets ──────────────────────────────────────────────────
     @app.get("/tickets/create/random")
-    async def create_ticket(w: Workload = Depends(get_workload)):
+    async def ticket_create_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.create_ticket()
+            return await ticket_create(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"ticket_create: {type(e).__name__}: {e}")
         except Exception as e:
-            logger.error(f"create_ticket failed: {type(e).__name__}: {e}")
+            logger.error(f"ticket_create failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/tickets/create/random", "error": f"{type(e).__name__}: {e}"})
 
     @app.get("/tickets/use/random")
-    async def use_random_ticket(w: Workload = Depends(get_workload)):
+    async def ticket_use_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.use_random_ticket()
+            return await ticket_use(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"ticket_use: {type(e).__name__}: {e}")
         except Exception as e:
-            logger.error(f"use_random_ticket failed: {type(e).__name__}: {e}")
+            logger.error(f"ticket_use failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/tickets/use/random", "error": f"{type(e).__name__}: {e}"})
 
+    # ── Batch ────────────────────────────────────────────────────
     @app.get("/batch/random")
-    async def batch(w: Workload = Depends(get_workload)):
+    async def batch_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.random_batch()
+            return await batch_random(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"batch_random: {type(e).__name__}: {e}")
         except Exception as e:
-            logger.error(f"random_batch failed: {type(e).__name__}: {e}")
+            logger.error(f"batch_random failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/batch/random", "error": f"{type(e).__name__}: {e}"})
 
-    @app.get("/mpt/create") # TODO: mpt/issuance/create
-    async def mpt_create(w: Workload = Depends(get_workload)):
+    # ── MPToken (tracked) ────────────────────────────────────────
+    @app.get("/mpt/create/random")
+    async def mpt_create_endpoint(w: Workload = Depends(get_workload)):
         try:
-            return await w.mpt_create()
+            return await mpt_create(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_create: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"mpt_create failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/mpt/create/random", "error": f"{type(e).__name__}: {e}"})
 
-    @app.get("/request")
-    async def request(w: Workload = Depends(get_workload), body: str = ""):
-        return await w.make_request(body)
-    ## This requires issued currencies
-    # @app.get("/offers/create/random")
-    # async def cancel_create_random_offer(w: Workload = Depends(get_workload)):
-    #     return await w.cancel_create_random_offer()
-    # @app.get("/offers/cancel/random")
-    # async def cancel_random_offer(w: Workload = Depends(get_workload)):
-    #     return await w.cancel_random_offer()
+    # ── Credentials ────────────────────────────────────────────────
+    @app.get("/credential/create/random")
+    async def credential_create_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await credential_create(w.accounts, w.credentials, w.client)
+        except XRPLException as e:
+            logger.warning(f"credential_create: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"credential_create failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/credential/create/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/credential/accept/random")
+    async def credential_accept_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await credential_accept(w.accounts, w.credentials, w.client)
+        except XRPLException as e:
+            logger.warning(f"credential_accept: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"credential_accept failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/credential/accept/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/credential/delete/random")
+    async def credential_delete_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await credential_delete(w.accounts, w.credentials, w.client)
+        except XRPLException as e:
+            logger.warning(f"credential_delete: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"credential_delete failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/credential/delete/random", "error": f"{type(e).__name__}: {e}"})
+
+    # ── Vaults ───────────────────────────────────────────────────
+    @app.get("/vault/create/random")
+    async def vault_create_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_create(w.accounts, w.vaults, w.trust_lines, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_create: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"vault_create failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/vault/create/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/vault/deposit/random")
+    async def vault_deposit_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_deposit(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_deposit: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"vault_deposit failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/vault/deposit/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/vault/withdraw/random")
+    async def vault_withdraw_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_withdraw(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_withdraw: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"vault_withdraw failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/vault/withdraw/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/vault/set/random")
+    async def vault_set_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_set(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_set: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"vault_set failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/vault/set/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/vault/delete/random")
+    async def vault_delete_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_delete(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_delete: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"vault_delete failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/vault/delete/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/vault/clawback/random")
+    async def vault_clawback_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await vault_clawback(w.accounts, w.vaults, w.client)
+        except XRPLException as e:
+            logger.warning(f"vault_clawback: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"vault_clawback failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/vault/clawback/random", "error": f"{type(e).__name__}: {e}"})
+
+    # ── Permissioned Domains ─────────────────────────────────────
+    @app.get("/domain/set/random")
+    async def domain_set(w: Workload = Depends(get_workload)):
+        try:
+            return await permissioned_domain_set(w.accounts, w.domains, w.client)
+        except XRPLException as e:
+            logger.warning(f"domain_set: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"domain_set failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/domain/set/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/domain/delete/random")
+    async def domain_delete(w: Workload = Depends(get_workload)):
+        try:
+            return await permissioned_domain_delete(w.accounts, w.domains, w.client)
+        except XRPLException as e:
+            logger.warning(f"domain_delete: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"domain_delete failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/domain/delete/random", "error": f"{type(e).__name__}: {e}"})
+
+    # ── Delegation ───────────────────────────────────────────────
+    @app.get("/delegate/set/random")
+    async def delegate_set_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await delegate_set(w.accounts, w.client)
+        except XRPLException as e:
+            logger.warning(f"delegate_set: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"delegate_set failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/delegate/set/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/mpt/authorize/random")
+    async def mpt_authorize_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await mpt_authorize(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_authorize: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"mpt_authorize failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/mpt/authorize/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/mpt/set/random")
+    async def mpt_set(w: Workload = Depends(get_workload)):
+        try:
+            return await mpt_issuance_set(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_set: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"mpt_set failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/mpt/set/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/mpt/destroy/random")
+    async def mpt_destroy_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await mpt_destroy(w.accounts, w.mpt_issuances, w.client)
+        except XRPLException as e:
+            logger.warning(f"mpt_destroy: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"mpt_destroy failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/mpt/destroy/random", "error": f"{type(e).__name__}: {e}"})
+
+    # ── Lending Protocol ─────────────────────────────────────────
+    @app.get("/loan/broker/set/random")
+    async def loan_broker_set_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_set(w.accounts, w.vaults, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_set: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_broker_set failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/set/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/loan/broker/delete/random")
+    async def loan_broker_delete_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_delete(w.accounts, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_delete: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_broker_delete failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/delete/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/loan/broker/cover/deposit/random")
+    async def loan_broker_cover_deposit_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_cover_deposit(w.accounts, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_cover_deposit: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_broker_cover_deposit failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/cover/deposit/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/loan/broker/cover/withdraw/random")
+    async def loan_broker_cover_withdraw_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_broker_cover_withdraw(w.accounts, w.loan_brokers, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_broker_cover_withdraw: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_broker_cover_withdraw failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/broker/cover/withdraw/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/loan/set/random")
+    async def loan_set_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_set(w.accounts, w.loan_brokers, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_set: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_set failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/set/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/loan/delete/random")
+    async def loan_delete_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_delete(w.accounts, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_delete: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_delete failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/delete/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/loan/manage/random")
+    async def loan_manage_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_manage(w.accounts, w.loan_brokers, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_manage: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_manage failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/manage/random", "error": f"{type(e).__name__}: {e}"})
+
+    @app.get("/loan/pay/random")
+    async def loan_pay_endpoint(w: Workload = Depends(get_workload)):
+        try:
+            return await loan_pay(w.accounts, w.loans, w.client)
+        except XRPLException as e:
+            logger.warning(f"loan_pay: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"loan_pay failed: {type(e).__name__}: {e}")
+            unreachable("workload::endpoint_exception", {"endpoint": "/loan/pay/random", "error": f"{type(e).__name__}: {e}"})
+
     return app
 
 def main():
