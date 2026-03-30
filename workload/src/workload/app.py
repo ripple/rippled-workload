@@ -21,18 +21,18 @@ from antithesis._internal import _HANDLER
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
-from workload.nft import nftoken_mint, nftoken_burn, nftoken_modify, nftoken_create_offer, nftoken_cancel_offer, nftoken_accept_offer
-from workload.payments import payment_random as payment_random_fn
-from workload.trustlines import trustline_create
-from workload.account_set import account_set_random
-from workload.tickets import ticket_create, ticket_use
-from workload.batch import batch_random
-from workload.credentials import credential_create, credential_accept, credential_delete
-from workload.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
-from workload.domains import permissioned_domain_set, permissioned_domain_delete
-from workload.delegation import delegate_set
-from workload.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
-from workload.lending import (
+from workload.transactions.nft import nftoken_mint, nftoken_burn, nftoken_modify, nftoken_create_offer, nftoken_cancel_offer, nftoken_accept_offer
+from workload.transactions.payments import payment_random as payment_random_fn
+from workload.transactions.trustlines import trustline_create
+from workload.transactions.account_set import account_set_random
+from workload.transactions.tickets import ticket_create, ticket_use
+from workload.transactions.batch import batch_random
+from workload.transactions.credentials import credential_create, credential_accept, credential_delete
+from workload.transactions.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
+from workload.transactions.domains import permissioned_domain_set, permissioned_domain_delete
+from workload.transactions.delegation import delegate_set
+from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
+from workload.transactions.lending import (
     loan_broker_set, loan_broker_delete,
     loan_broker_cover_deposit, loan_broker_cover_withdraw,
     loan_set, loan_delete, loan_manage, loan_pay,

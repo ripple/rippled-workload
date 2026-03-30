@@ -6,13 +6,13 @@ cd "$(dirname "$0")/../workload"
 echo "Checking all workload imports..."
 uv run python -c "
 from workload.app import main
-from workload.credentials import credential_create, credential_accept, credential_delete
-from workload.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
-from workload.domains import permissioned_domain_set, permissioned_domain_delete
-from workload.delegation import delegate_set
-from workload.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
-from workload.nft import nftoken_mint, nftoken_modify
-from workload.lending import (
+from workload.transactions.credentials import credential_create, credential_accept, credential_delete
+from workload.transactions.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
+from workload.transactions.domains import permissioned_domain_set, permissioned_domain_delete
+from workload.transactions.delegation import delegate_set
+from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
+from workload.transactions.nft import nftoken_mint, nftoken_modify
+from workload.transactions.lending import (
     loan_broker_set, loan_broker_delete,
     loan_broker_cover_deposit, loan_broker_cover_withdraw,
     loan_set, loan_delete, loan_manage, loan_pay,
