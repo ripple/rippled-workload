@@ -120,8 +120,6 @@ def encode_nft_id(
 # ── Mint (dispatch) ──────────────────────────────────────────────────
 
 async def nftoken_mint(accounts, nfts, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _nftoken_mint_faulty(accounts, nfts, client)
     return await _nftoken_mint_valid(accounts, nfts, client)
@@ -149,8 +147,6 @@ async def _nftoken_mint_faulty(accounts, nfts, client):
 # ── Burn ─────────────────────────────────────────────────────────────
 
 async def nftoken_burn(accounts, nfts, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _nftoken_burn_faulty(accounts, nfts, client)
     return await _nftoken_burn_valid(accounts, nfts, client)
@@ -176,8 +172,6 @@ async def _nftoken_burn_faulty(accounts, nfts, client):
 # ── Modify ───────────────────────────────────────────────────────────
 
 async def nftoken_modify(accounts, nfts, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _nftoken_modify_faulty(accounts, client)
     return await _nftoken_modify_valid(accounts, nfts, client)
@@ -207,7 +201,7 @@ async def _nftoken_modify_faulty(accounts, client):
 # ── Create Offer ─────────────────────────────────────────────────────
 
 async def nftoken_create_offer(accounts, nfts, nft_offers, client):
-    if not accounts or not nfts:
+    if not nfts:
         return
     if params.should_send_faulty():
         return await _nftoken_create_offer_faulty(accounts, nfts, nft_offers, client)
@@ -253,8 +247,6 @@ async def _nftoken_create_offer_faulty(accounts, nfts, nft_offers, client):
 # ── Cancel Offer ─────────────────────────────────────────────────────
 
 async def nftoken_cancel_offer(accounts, nft_offers, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _nftoken_cancel_offer_faulty(accounts, nft_offers, client)
     return await _nftoken_cancel_offer_valid(accounts, nft_offers, client)
@@ -282,8 +274,6 @@ async def _nftoken_cancel_offer_faulty(accounts, nft_offers, client):
 # ── Accept Offer ─────────────────────────────────────────────────────
 
 async def nftoken_accept_offer(accounts, nfts, nft_offers, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _nftoken_accept_offer_faulty(accounts, nfts, nft_offers, client)
     return await _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client)

@@ -20,8 +20,6 @@ _BATCH_SAFE_FLAGS = [
 
 
 async def batch_random(accounts, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _batch_random_faulty(accounts, client)
     return await _batch_random_valid(accounts, client)

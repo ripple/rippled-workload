@@ -25,8 +25,6 @@ log = logging.getLogger(__name__)
 # ── Loan Broker Set ──────────────────────────────────────────────────
 
 async def loan_broker_set(accounts, vaults, loan_brokers, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _loan_broker_set_faulty(accounts, vaults, loan_brokers, client)
     return await _loan_broker_set_valid(accounts, vaults, loan_brokers, client)
@@ -60,8 +58,6 @@ async def _loan_broker_set_faulty(accounts, vaults, loan_brokers, client):
 # ── Loan Broker Delete ───────────────────────────────────────────────
 
 async def loan_broker_delete(accounts, loan_brokers, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _loan_broker_delete_faulty(accounts, loan_brokers, client)
     return await _loan_broker_delete_valid(accounts, loan_brokers, client)
@@ -89,8 +85,6 @@ async def _loan_broker_delete_faulty(accounts, loan_brokers, client):
 # ── Loan Broker Cover Deposit ────────────────────────────────────────
 
 async def loan_broker_cover_deposit(accounts, loan_brokers, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _loan_broker_cover_deposit_faulty(accounts, loan_brokers, client)
     return await _loan_broker_cover_deposit_valid(accounts, loan_brokers, client)
@@ -119,8 +113,6 @@ async def _loan_broker_cover_deposit_faulty(accounts, loan_brokers, client):
 # ── Loan Broker Cover Withdraw ───────────────────────────────────────
 
 async def loan_broker_cover_withdraw(accounts, loan_brokers, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _loan_broker_cover_withdraw_faulty(accounts, loan_brokers, client)
     return await _loan_broker_cover_withdraw_valid(accounts, loan_brokers, client)
@@ -149,8 +141,6 @@ async def _loan_broker_cover_withdraw_faulty(accounts, loan_brokers, client):
 # ── Loan Set ─────────────────────────────────────────────────────────
 
 async def loan_set(accounts, loan_brokers, loans, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _loan_set_faulty(accounts, loan_brokers, loans, client)
     return await _loan_set_valid(accounts, loan_brokers, loans, client)
@@ -185,8 +175,6 @@ async def _loan_set_faulty(accounts, loan_brokers, loans, client):
 # ── Loan Delete ──────────────────────────────────────────────────────
 
 async def loan_delete(accounts, loans, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _loan_delete_faulty(accounts, loans, client)
     return await _loan_delete_valid(accounts, loans, client)
@@ -214,8 +202,6 @@ async def _loan_delete_faulty(accounts, loans, client):
 # ── Loan Manage ──────────────────────────────────────────────────────
 
 async def loan_manage(accounts, loan_brokers, loans, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _loan_manage_faulty(accounts, loan_brokers, loans, client)
     return await _loan_manage_valid(accounts, loan_brokers, loans, client)
@@ -246,8 +232,6 @@ async def _loan_manage_faulty(accounts, loan_brokers, loans, client):
 # ── Loan Pay ─────────────────────────────────────────────────────────
 
 async def loan_pay(accounts, loans, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _loan_pay_faulty(accounts, loans, client)
     return await _loan_pay_valid(accounts, loans, client)

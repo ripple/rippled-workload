@@ -16,8 +16,6 @@ log = logging.getLogger(__name__)
 
 
 async def trustline_create(accounts, trust_lines, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _trustline_create_faulty(accounts, trust_lines, client)
     return await _trustline_create_valid(accounts, trust_lines, client)

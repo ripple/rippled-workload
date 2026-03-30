@@ -10,8 +10,6 @@ log = logging.getLogger(__name__)
 
 
 async def delegate_set(accounts, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _delegate_set_faulty(accounts, client)
     return await _delegate_set_valid(accounts, client)

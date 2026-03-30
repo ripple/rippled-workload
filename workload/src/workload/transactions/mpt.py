@@ -16,8 +16,6 @@ log = logging.getLogger(__name__)
 # ── Create ───────────────────────────────────────────────────────────
 
 async def mpt_create(accounts, mpt_issuances, client):
-    if not accounts:
-        return
     return await _mpt_create_valid(accounts, mpt_issuances, client)
 
 
@@ -35,8 +33,6 @@ async def _mpt_create_valid(accounts, mpt_issuances, client):
 # ── Authorize ────────────────────────────────────────────────────────
 
 async def mpt_authorize(accounts, mpt_issuances, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _mpt_authorize_faulty(accounts, mpt_issuances, client)
     return await _mpt_authorize_valid(accounts, mpt_issuances, client)
@@ -69,8 +65,6 @@ async def _mpt_authorize_faulty(accounts, mpt_issuances, client):
 # ── Set ──────────────────────────────────────────────────────────────
 
 async def mpt_issuance_set(accounts, mpt_issuances, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _mpt_issuance_set_faulty(accounts, mpt_issuances, client)
     return await _mpt_issuance_set_valid(accounts, mpt_issuances, client)
@@ -98,8 +92,6 @@ async def _mpt_issuance_set_faulty(accounts, mpt_issuances, client):
 # ── Destroy ──────────────────────────────────────────────────────────
 
 async def mpt_destroy(accounts, mpt_issuances, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _mpt_destroy_faulty(accounts, mpt_issuances, client)
     return await _mpt_destroy_valid(accounts, mpt_issuances, client)

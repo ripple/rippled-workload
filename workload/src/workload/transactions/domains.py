@@ -15,8 +15,6 @@ log = logging.getLogger(__name__)
 # ── Set ──────────────────────────────────────────────────────────────
 
 async def permissioned_domain_set(accounts, domains, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _permissioned_domain_set_faulty(accounts, domains, client)
     return await _permissioned_domain_set_valid(accounts, domains, client)
@@ -47,8 +45,6 @@ async def _permissioned_domain_set_faulty(accounts, domains, client):
 # ── Delete ───────────────────────────────────────────────────────────
 
 async def permissioned_domain_delete(accounts, domains, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _permissioned_domain_delete_faulty(accounts, domains, client)
     return await _permissioned_domain_delete_valid(accounts, domains, client)

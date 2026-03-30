@@ -17,8 +17,6 @@ log = logging.getLogger(__name__)
 # ── Create ───────────────────────────────────────────────────────────
 
 async def credential_create(accounts, credentials, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _credential_create_faulty(accounts, credentials, client)
     return await _credential_create_valid(accounts, credentials, client)
@@ -45,8 +43,6 @@ async def _credential_create_faulty(accounts, credentials, client):
 # ── Accept ───────────────────────────────────────────────────────────
 
 async def credential_accept(accounts, credentials, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _credential_accept_faulty(accounts, credentials, client)
     return await _credential_accept_valid(accounts, credentials, client)
@@ -74,8 +70,6 @@ async def _credential_accept_faulty(accounts, credentials, client):
 # ── Delete ───────────────────────────────────────────────────────────
 
 async def credential_delete(accounts, credentials, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _credential_delete_faulty(accounts, credentials, client)
     return await _credential_delete_valid(accounts, credentials, client)

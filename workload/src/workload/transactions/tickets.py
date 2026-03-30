@@ -12,8 +12,6 @@ log = logging.getLogger(__name__)
 # ── Create ───────────────────────────────────────────────────────────
 
 async def ticket_create(accounts, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _ticket_create_faulty(accounts, client)
     return await _ticket_create_valid(accounts, client)
@@ -37,8 +35,6 @@ async def _ticket_create_faulty(accounts, client):
 # ── Use ──────────────────────────────────────────────────────────────
 
 async def ticket_use(accounts, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _ticket_use_faulty(accounts, client)
     return await _ticket_use_valid(accounts, client)

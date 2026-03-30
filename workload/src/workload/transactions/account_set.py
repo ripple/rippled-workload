@@ -27,8 +27,6 @@ INTERESTING_FLAGS = [
 
 
 async def account_set_random(accounts, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _account_set_faulty(accounts, client)
     return await _account_set_valid(accounts, client)

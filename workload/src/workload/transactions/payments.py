@@ -11,8 +11,6 @@ log = logging.getLogger(__name__)
 
 
 async def payment_random(accounts, trust_lines, mpt_issuances, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _payment_random_faulty(accounts, trust_lines, mpt_issuances, client)
     return await _payment_random_valid(accounts, trust_lines, mpt_issuances, client)

@@ -52,8 +52,6 @@ def _random_asset(trust_lines, mpt_issuances):
 
 
 async def vault_create(accounts, vaults, trust_lines, mpt_issuances, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, client)
     return await _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, client)
@@ -79,8 +77,6 @@ async def _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, cli
 # ── Deposit ──────────────────────────────────────────────────────────
 
 async def vault_deposit(accounts, vaults, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _vault_deposit_faulty(accounts, vaults, client)
     return await _vault_deposit_valid(accounts, vaults, client)
@@ -108,8 +104,6 @@ async def _vault_deposit_faulty(accounts, vaults, client):
 # ── Withdraw ─────────────────────────────────────────────────────────
 
 async def vault_withdraw(accounts, vaults, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _vault_withdraw_faulty(accounts, vaults, client)
     return await _vault_withdraw_valid(accounts, vaults, client)
@@ -138,8 +132,6 @@ async def _vault_withdraw_faulty(accounts, vaults, client):
 # ── Set ──────────────────────────────────────────────────────────────
 
 async def vault_set(accounts, vaults, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _vault_set_faulty(accounts, vaults, client)
     return await _vault_set_valid(accounts, vaults, client)
@@ -169,8 +161,6 @@ async def _vault_set_faulty(accounts, vaults, client):
 # ── Delete ───────────────────────────────────────────────────────────
 
 async def vault_delete(accounts, vaults, client):
-    if not accounts:
-        return
     if params.should_send_faulty():
         return await _vault_delete_faulty(accounts, vaults, client)
     return await _vault_delete_valid(accounts, vaults, client)
@@ -198,8 +188,6 @@ async def _vault_delete_faulty(accounts, vaults, client):
 # ── Clawback ─────────────────────────────────────────────────────────
 
 async def vault_clawback(accounts, vaults, client):
-    if len(accounts) < 2:
-        return
     if params.should_send_faulty():
         return await _vault_clawback_faulty(accounts, vaults, client)
     return await _vault_clawback_valid(accounts, vaults, client)
