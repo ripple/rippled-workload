@@ -102,8 +102,8 @@ def credential_type() -> str:
 
 
 def credential_uri() -> str:
-    """Random hex-encoded URI for credentials (max 256 bytes)."""
-    length = randint(10, 256)
+    """Random hex-encoded URI for credentials (max 256 hex chars = 128 bytes)."""
+    length = randint(5, 128)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
@@ -142,8 +142,8 @@ def domain_credential_count() -> int:
 
 # ── NFToken Modify ───────────────────────────────────────────────────
 def nft_uri() -> str:
-    """Random hex-encoded URI for NFTs (max 256 bytes)."""
-    length = randint(10, 256)
+    """Random hex-encoded URI for NFTs (max 512 hex chars = 256 bytes)."""
+    length = randint(5, 256)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 

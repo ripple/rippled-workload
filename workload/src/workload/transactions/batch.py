@@ -10,6 +10,12 @@ from xrpl.models.transactions import AccountSet, AccountSetAsfFlag
 
 log = logging.getLogger(__name__)
 
+# Flags that work without extra fields (ASF_AUTHORIZED_NFTOKEN_MINTER requires nftoken_minter)
+_BATCH_SAFE_FLAGS = [
+    f for f in AccountSetAsfFlag
+    if f != AccountSetAsfFlag.ASF_AUTHORIZED_NFTOKEN_MINTER
+]
+
 
 async def batch_random(accounts, client):
     if len(accounts) < 2:
@@ -43,7 +49,7 @@ async def _batch_random_valid(accounts, client):
         else:
             inner = AccountSet(
                 account=src.address,
-                set_flag=choice(list(AccountSetAsfFlag)),
+                set_flag=choice(_BATCH_SAFE_FLAGS),
                 flags=xrpl.models.TransactionFlag.TF_INNER_BATCH_TXN,
                 sequence=sequence + idx + 1,
                 fee="0",
