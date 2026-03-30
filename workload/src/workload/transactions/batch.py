@@ -10,7 +10,9 @@ from xrpl.models.transactions import AccountSet, AccountSetAsfFlag
 
 log = logging.getLogger(__name__)
 
-# Flags that work without extra fields (ASF_AUTHORIZED_NFTOKEN_MINTER requires nftoken_minter)
+# Flags that work without extra fields.
+# TODO: ASF_AUTHORIZED_NFTOKEN_MINTER excluded — requires nftoken_minter field.
+#       Add back when we implement proper NFToken minter authorization with a real account from the pool.
 _BATCH_SAFE_FLAGS = [
     f for f in AccountSetAsfFlag
     if f != AccountSetAsfFlag.ASF_AUTHORIZED_NFTOKEN_MINTER
