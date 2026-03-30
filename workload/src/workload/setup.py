@@ -207,10 +207,11 @@ async def run_setup(workload) -> dict:
                 ), src.wallet))
     summary["vaults"] = await _submit_batch("vaults", vault_txns, client)
 
-    # ── 7b. Vault deposits: deposit into XRP vaults so withdraws work ─
+    # ── 7b. Vault deposits: deposit XRP into first 3 vaults (XRP vaults)
+    # IOU vaults (indices 3,4) need IOU amounts — skip for now
     await asyncio.sleep(3)  # wait for WS to populate vault state
     deposit_txns = []
-    for vault in workload.vaults:
+    for vault in workload.vaults[:3]:
         if vault.owner not in workload.accounts:
             continue
         owner = workload.accounts[vault.owner]
@@ -302,27 +303,9 @@ async def run_setup(workload) -> dict:
         ), owner.wallet))
     summary["loan_brokers"] = await _submit_batch("loan_brokers", broker_txns, client)
 
-    # ── 13. Loans: create against brokers ─────────────────────────────
-    await asyncio.sleep(3)  # wait for WS to populate broker state
-    loan_txns = []
-    for broker in workload.loan_brokers[:3]:
-        # Find a borrower that isn't the broker owner
-        other = [a for a in list(workload.accounts.keys())[:20] if a != broker.owner]
-        if not other:
-            continue
-        borrower_id = other[0]
-        borrower = workload.accounts[borrower_id]
-        pi = params.loan_payment_interval()
-        loan_txns.append(("LoanSet", LoanSet(
-            account=borrower.address,
-            loan_broker_id=broker.loan_broker_id,
-            principal_requested=params.loan_principal(),
-            interest_rate=params.loan_interest_rate(),
-            payment_interval=pi,
-            payment_total=params.loan_payment_total(),
-            grace_period=params.loan_grace_period(pi),
-        ), borrower.wallet))
-    summary["loans"] = await _submit_batch("loans", loan_txns, client)
+    # ── 13. Loans: TODO — LoanSet requires counterparty_signature (temBAD_SIGNER)
+    # Need to investigate two-party signing for lending protocol
+    summary["loans"] = 0
 
     # Fire reachable assertions
     for key, count in summary.items():
