@@ -20,7 +20,7 @@ import xrpl.models
 from workload import logging
 from workload.submit import submit_tx
 from antithesis.assertions import reachable
-from xrpl.models import IssuedCurrencyAmount
+from xrpl.models import IssuedCurrency, IssuedCurrencyAmount
 from xrpl.models.amounts import MPTAmount
 from xrpl.models.transactions import (
     AccountSet, AccountSetAsfFlag,
@@ -142,11 +142,9 @@ async def run_setup(workload) -> dict:
     ], client)
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
-    # Note: we submit authorizations now, but the issuance IDs won't be
-    # available until WS listener processes step 4. We use a short sleep
-    # to let the WS listener catch up, then build authorizations from
-    # the populated mpt_issuances list.
-    await asyncio.sleep(3)
+    # Wait for WS listener to process MPT issuance results so we have IDs
+    await asyncio.sleep(5)
+    log.info("Setup: MPT issuances in state: %d", len(workload.mpt_issuances))
     mpt_auth_txns = []
     for mpt in workload.mpt_issuances:
         for holder_idx in holder_indices:
@@ -157,7 +155,7 @@ async def run_setup(workload) -> dict:
                 continue  # issuer can't authorize themselves
             mpt_auth_txns.append(("MPTokenAuthorize", MPTokenAuthorize(
                 account=holder.address,
-                mpt_issuance_id=mpt.mpt_issuance_id,
+                mptoken_issuance_id=mpt.mpt_issuance_id,
             ), holder.wallet))
     summary["mpt_authorizations"] = await _submit_batch("mpt_auth", mpt_auth_txns, client)
 
@@ -200,10 +198,9 @@ async def run_setup(workload) -> dict:
             if gw_idx < len(accs):
                 vault_txns.append(("VaultCreate", VaultCreate(
                     account=src.address,
-                    asset=IssuedCurrencyAmount(
+                    asset=IssuedCurrency(
                         currency=currencies[0],
                         issuer=accs[gw_idx].address,
-                        value="0",
                     ),
                     assets_maximum=_VAULT_ASSETS_MAXIMUM,
                 ), src.wallet))

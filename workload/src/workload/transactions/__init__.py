@@ -109,14 +109,10 @@ def _on_nftoken_cancel_offer(w, tx, meta):
 
 
 def _on_mpt_create(w, tx, meta):
-    # MPTokenIssuanceID is a 192-bit ID in NewFields, NOT the LedgerIndex (which is 256-bit)
-    for node in meta.get("AffectedNodes", []):
-        created = node.get("CreatedNode", {})
-        if created.get("LedgerEntryType") == "MPTokenIssuance":
-            mpt_id = created.get("NewFields", {}).get("MPTokenIssuanceID")
-            if mpt_id:
-                w.mpt_issuances.append(MPTokenIssuance(issuer=tx["Account"], mpt_issuance_id=mpt_id))
-                return
+    # mpt_issuance_id is at the top level of meta (like nftoken_id for NFTs)
+    mpt_id = meta.get("mpt_issuance_id")
+    if mpt_id:
+        w.mpt_issuances.append(MPTokenIssuance(issuer=tx["Account"], mpt_issuance_id=mpt_id))
 
 
 def _on_mpt_destroy(w, tx, meta):
