@@ -17,7 +17,7 @@ from xrpl.models.transactions import (
     AccountSet, AccountSetAsfFlag,
     TrustSet, NFTokenMint, NFTokenMintFlag,
     CredentialCreate, TicketCreate, PermissionedDomainSet,
-    MPTokenIssuanceCreate, DelegateSet,
+    MPTokenIssuanceCreate,
 )
 from xrpl.models.transactions.transaction import Memo
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
@@ -47,7 +47,7 @@ _INNER_TYPES = [
     "MPTokenIssuanceCreate",
     "TicketCreate",
     "PermissionedDomainSet",
-    "DelegateSet",
+    # DelegateSet excluded — requires complex permissions list that can't be built inline
 ]
 
 
@@ -99,9 +99,6 @@ def _build_inner(src, dst, sequence):
             )],
             **common,
         )
-
-    if tx_type == "DelegateSet":
-        return DelegateSet(authorize=dst, **common)
 
     return Payment(amount=params.batch_inner_amount(), destination=dst, **common)
 

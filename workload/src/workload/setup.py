@@ -17,7 +17,7 @@ Account allocation:
 import asyncio
 
 import xrpl.models
-from workload import logging
+from workload import logging, params
 from workload.submit import submit_tx
 from antithesis.assertions import reachable
 from xrpl.models import IssuedCurrency, IssuedCurrencyAmount
@@ -26,9 +26,10 @@ from xrpl.models.transactions import (
     AccountSet, AccountSetAsfFlag,
     TrustSet, Payment,
     MPTokenIssuanceCreate, MPTokenAuthorize,
-    VaultCreate,
-    NFTokenMint, NFTokenMintFlag,
+    VaultCreate, VaultDeposit,
+    NFTokenMint, NFTokenMintFlag, NFTokenCreateOffer, NFTokenCreateOfferFlag,
     CredentialCreate, TicketCreate, PermissionedDomainSet,
+    LoanBrokerSet, LoanSet,
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 
@@ -206,6 +207,20 @@ async def run_setup(workload) -> dict:
                 ), src.wallet))
     summary["vaults"] = await _submit_batch("vaults", vault_txns, client)
 
+    # ── 7b. Vault deposits: deposit into XRP vaults so withdraws work ─
+    await asyncio.sleep(3)  # wait for WS to populate vault state
+    deposit_txns = []
+    for vault in workload.vaults:
+        if vault.owner not in workload.accounts:
+            continue
+        owner = workload.accounts[vault.owner]
+        deposit_txns.append(("VaultDeposit", VaultDeposit(
+            account=owner.address,
+            vault_id=vault.vault_id,
+            amount=params.vault_deposit_amount(),
+        ), owner.wallet))
+    summary["vault_deposits"] = await _submit_batch("vault_deposits", deposit_txns, client)
+
     # ── 8. NFTs: 5 from accounts[20..24] ─────────────────────────────
     summary["nfts"] = await _submit_batch("nfts", [
         ("NFTokenMint", NFTokenMint(
@@ -215,6 +230,21 @@ async def run_setup(workload) -> dict:
         ), accs[20 + i].wallet)
         for i in range(min(5, max(0, len(accs) - 20)))
     ], client)
+
+    # ── 8b. NFT offers: create sell offers so cancel/accept have state ─
+    await asyncio.sleep(3)  # wait for WS to populate NFT state
+    nft_offer_txns = []
+    for nft in workload.nfts:
+        if nft.owner not in workload.accounts:
+            continue
+        owner = workload.accounts[nft.owner]
+        nft_offer_txns.append(("NFTokenCreateOffer", NFTokenCreateOffer(
+            account=owner.address,
+            nftoken_id=nft.nftoken_id,
+            amount=params.nft_offer_amount(),
+            flags=NFTokenCreateOfferFlag.TF_SELL_NFTOKEN,
+        ), owner.wallet))
+    summary["nft_offers"] = await _submit_batch("nft_offers", nft_offer_txns, client)
 
     # ── 9. Credentials: 5, issuer=accounts[30], subjects=accounts[31..35]
     if len(accs) > 35:
@@ -255,6 +285,44 @@ async def run_setup(workload) -> dict:
         ], client)
     else:
         summary["domains"] = 0
+
+    # ── 12. Loan brokers: create on existing vaults ─────────────────
+    await asyncio.sleep(3)  # ensure vaults are in state
+    broker_txns = []
+    for vault in workload.vaults[:3]:  # use first 3 vaults
+        if vault.owner not in workload.accounts:
+            continue
+        owner = workload.accounts[vault.owner]
+        broker_txns.append(("LoanBrokerSet", LoanBrokerSet(
+            account=owner.address,
+            vault_id=vault.vault_id,
+            management_fee_rate=params.loan_broker_management_fee_rate(),
+            cover_rate_minimum=params.loan_broker_cover_rate_minimum(),
+            cover_rate_liquidation=params.loan_broker_cover_rate_liquidation(),
+        ), owner.wallet))
+    summary["loan_brokers"] = await _submit_batch("loan_brokers", broker_txns, client)
+
+    # ── 13. Loans: create against brokers ─────────────────────────────
+    await asyncio.sleep(3)  # wait for WS to populate broker state
+    loan_txns = []
+    for broker in workload.loan_brokers[:3]:
+        # Find a borrower that isn't the broker owner
+        other = [a for a in list(workload.accounts.keys())[:20] if a != broker.owner]
+        if not other:
+            continue
+        borrower_id = other[0]
+        borrower = workload.accounts[borrower_id]
+        pi = params.loan_payment_interval()
+        loan_txns.append(("LoanSet", LoanSet(
+            account=borrower.address,
+            loan_broker_id=broker.loan_broker_id,
+            principal_requested=params.loan_principal(),
+            interest_rate=params.loan_interest_rate(),
+            payment_interval=pi,
+            payment_total=params.loan_payment_total(),
+            grace_period=params.loan_grace_period(pi),
+        ), borrower.wallet))
+    summary["loans"] = await _submit_batch("loans", loan_txns, client)
 
     # Fire reachable assertions
     for key, count in summary.items():

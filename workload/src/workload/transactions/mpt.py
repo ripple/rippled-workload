@@ -9,6 +9,7 @@ from xrpl.models.transactions import (
     MPTokenIssuanceSet,
     MPTokenAuthorize,
 )
+from xrpl.models.transactions.mptoken_issuance_set import MPTokenIssuanceSetFlag
 
 log = logging.getLogger(__name__)
 
@@ -78,9 +79,11 @@ async def _mpt_issuance_set_valid(accounts, mpt_issuances, client):
     if mpt.issuer not in accounts:
         return
     issuer = accounts[mpt.issuer]
+    flag = choice(list(MPTokenIssuanceSetFlag))
     txn = MPTokenIssuanceSet(
         account=issuer.address,
         mptoken_issuance_id=mpt.mpt_issuance_id,
+        flags=flag,
     )
     await submit_tx("MPTokenIssuanceSet", txn, client, issuer.wallet)
 
