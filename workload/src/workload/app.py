@@ -21,22 +21,7 @@ from antithesis._internal import _HANDLER
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
-from workload.transactions.nft import nftoken_mint, nftoken_burn, nftoken_modify, nftoken_create_offer, nftoken_cancel_offer, nftoken_accept_offer
-from workload.transactions.payments import payment_random as payment_random_fn
-from workload.transactions.trustlines import trustline_create
-from workload.transactions.account_set import account_set_random
-from workload.transactions.tickets import ticket_create, ticket_use
-from workload.transactions.batch import batch_random
-from workload.transactions.credentials import credential_create, credential_accept, credential_delete
-from workload.transactions.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
-from workload.transactions.domains import permissioned_domain_set, permissioned_domain_delete
-from workload.transactions.delegation import delegate_set
-from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
-from workload.transactions.lending import (
-    loan_broker_set, loan_broker_delete,
-    loan_broker_cover_deposit, loan_broker_cover_withdraw,
-    loan_set, loan_delete, loan_manage, loan_pay,
-)
+from workload.transactions import REGISTRY
 
 class Workload:
     def __init__(self, conf: dict[str, Any]):
@@ -153,62 +138,6 @@ class Workload:
         return self.nfts
 
 
-# ── Transaction endpoint definitions ─────────────────────────────────
-# Each entry: (path, name, handler_fn, args_fn)
-# args_fn takes a Workload and returns the args tuple to pass to handler_fn.
-
-_ENDPOINTS = [
-    # NFT
-    ("/nft/mint/random",         "nft_mint",         nftoken_mint,         lambda w: (w.accounts, w.nfts, w.client)),
-    ("/nft/burn/random",         "nft_burn",         nftoken_burn,         lambda w: (w.accounts, w.nfts, w.client)),
-    ("/nft/modify/random",       "nft_modify",       nftoken_modify,       lambda w: (w.accounts, w.nfts, w.client)),
-    ("/nft/create_offer/random", "nft_create_offer", nftoken_create_offer, lambda w: (w.accounts, w.nfts, w.nft_offers, w.client)),
-    ("/nft/cancel_offer/random", "nft_cancel_offer", nftoken_cancel_offer, lambda w: (w.accounts, w.nft_offers, w.client)),
-    ("/nft/accept_offer/random", "nft_accept_offer", nftoken_accept_offer, lambda w: (w.accounts, w.nfts, w.nft_offers, w.client)),
-    # Account
-    ("/account/set/random",      "account_set",      account_set_random,   lambda w: (w.accounts, w.client)),
-    # Trust Lines
-    ("/trustline/create/random", "trustline_create",  trustline_create,    lambda w: (w.accounts, w.trust_lines, w.client)),
-    # Payments
-    ("/payment/random",          "payment_random",    payment_random_fn,   lambda w: (w.accounts, w.trust_lines, w.mpt_issuances, w.client)),
-    # Tickets
-    ("/tickets/create/random",   "ticket_create",     ticket_create,       lambda w: (w.accounts, w.client)),
-    ("/tickets/use/random",      "ticket_use",        ticket_use,          lambda w: (w.accounts, w.client)),
-    # Batch
-    ("/batch/random",            "batch_random",      batch_random,        lambda w: (w.accounts, w.client)),
-    # MPToken
-    ("/mpt/create/random",       "mpt_create",        mpt_create,          lambda w: (w.accounts, w.mpt_issuances, w.client)),
-    ("/mpt/authorize/random",    "mpt_authorize",     mpt_authorize,       lambda w: (w.accounts, w.mpt_issuances, w.client)),
-    ("/mpt/set/random",          "mpt_set",           mpt_issuance_set,    lambda w: (w.accounts, w.mpt_issuances, w.client)),
-    ("/mpt/destroy/random",      "mpt_destroy",       mpt_destroy,         lambda w: (w.accounts, w.mpt_issuances, w.client)),
-    # Credentials
-    ("/credential/create/random", "credential_create", credential_create,  lambda w: (w.accounts, w.credentials, w.client)),
-    ("/credential/accept/random", "credential_accept", credential_accept,  lambda w: (w.accounts, w.credentials, w.client)),
-    ("/credential/delete/random", "credential_delete", credential_delete,  lambda w: (w.accounts, w.credentials, w.client)),
-    # Vaults
-    ("/vault/create/random",     "vault_create",      vault_create,        lambda w: (w.accounts, w.vaults, w.trust_lines, w.mpt_issuances, w.client)),
-    ("/vault/deposit/random",    "vault_deposit",     vault_deposit,       lambda w: (w.accounts, w.vaults, w.client)),
-    ("/vault/withdraw/random",   "vault_withdraw",    vault_withdraw,      lambda w: (w.accounts, w.vaults, w.client)),
-    ("/vault/set/random",        "vault_set",         vault_set,           lambda w: (w.accounts, w.vaults, w.client)),
-    ("/vault/delete/random",     "vault_delete",      vault_delete,        lambda w: (w.accounts, w.vaults, w.client)),
-    ("/vault/clawback/random",   "vault_clawback",    vault_clawback,      lambda w: (w.accounts, w.vaults, w.client)),
-    # Permissioned Domains
-    ("/domain/set/random",       "domain_set",        permissioned_domain_set,    lambda w: (w.accounts, w.domains, w.client)),
-    ("/domain/delete/random",    "domain_delete",     permissioned_domain_delete, lambda w: (w.accounts, w.domains, w.client)),
-    # Delegation
-    ("/delegate/set/random",     "delegate_set",      delegate_set,        lambda w: (w.accounts, w.client)),
-    # Lending
-    ("/loan/broker/set/random",             "loan_broker_set",             loan_broker_set,             lambda w: (w.accounts, w.vaults, w.loan_brokers, w.client)),
-    ("/loan/broker/delete/random",          "loan_broker_delete",          loan_broker_delete,          lambda w: (w.accounts, w.loan_brokers, w.client)),
-    ("/loan/broker/cover/deposit/random",   "loan_broker_cover_deposit",   loan_broker_cover_deposit,   lambda w: (w.accounts, w.loan_brokers, w.client)),
-    ("/loan/broker/cover/withdraw/random",  "loan_broker_cover_withdraw",  loan_broker_cover_withdraw,  lambda w: (w.accounts, w.loan_brokers, w.client)),
-    ("/loan/set/random",                    "loan_set",                    loan_set,                    lambda w: (w.accounts, w.loan_brokers, w.loans, w.client)),
-    ("/loan/delete/random",                 "loan_delete",                 loan_delete,                 lambda w: (w.accounts, w.loans, w.client)),
-    ("/loan/manage/random",                 "loan_manage",                 loan_manage,                 lambda w: (w.accounts, w.loan_brokers, w.loans, w.client)),
-    ("/loan/pay/random",                    "loan_pay",                    loan_pay,                    lambda w: (w.accounts, w.loans, w.client)),
-]
-
-
 def _make_endpoint(path: str, name: str, handler_fn, args_fn):
     """Create an endpoint handler with standardized error handling."""
     async def endpoint(w: Workload = Depends(get_workload)):
@@ -264,8 +193,8 @@ def create_app(workload: Workload) -> FastAPI:
     def get_nfts(w: Workload = Depends(get_workload)):
         return w.get_nfts()
 
-    # Register all transaction endpoints from the table
-    for path, name, handler_fn, args_fn in _ENDPOINTS:
+    # Register all transaction endpoints from the registry
+    for name, path, handler_fn, args_fn, _ in REGISTRY:
         app.get(path)(_make_endpoint(path, name, handler_fn, args_fn))
 
     return app

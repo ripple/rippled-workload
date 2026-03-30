@@ -12,47 +12,6 @@ so we pre-register all known transaction types via register_assertions().
 from antithesis.assertions import assert_raw
 from antithesis.lifecycle import send_event
 
-# All transaction types that the workload can generate.
-# Add new types here when adding new transaction modules.
-TX_TYPES: list[str] = [
-    "AccountSet",
-    "Batch",
-    "CredentialAccept",
-    "CredentialCreate",
-    "CredentialDelete",
-    "DelegateSet",
-    "LoanBrokerCoverDeposit",
-    "LoanBrokerCoverWithdraw",
-    "LoanBrokerDelete",
-    "LoanBrokerSet",
-    "LoanDelete",
-    "LoanManage",
-    "LoanPay",
-    "LoanSet",
-    "MPTokenAuthorize",
-    "MPTokenIssuanceCreate",
-    "MPTokenIssuanceDestroy",
-    "MPTokenIssuanceSet",
-    "NFTokenAcceptOffer",
-    "NFTokenBurn",
-    "NFTokenCancelOffer",
-    "NFTokenCreateOffer",
-    "NFTokenMint",
-    "NFTokenModify",
-    "Payment",
-    "PermissionedDomainDelete",
-    "PermissionedDomainSet",
-    "TicketCreate",
-    "TicketUse",
-    "TrustSet",
-    "VaultClawback",
-    "VaultCreate",
-    "VaultDelete",
-    "VaultDeposit",
-    "VaultSet",
-    "VaultWithdraw",
-]
-
 _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
 _LOC_COL = 0
@@ -94,6 +53,7 @@ def register_assertions() -> None:
 
     Call once at app startup before any transactions are submitted.
     """
+    from workload.transactions import TX_TYPES
     for name in TX_TYPES:
         _emit_catalog_entry(_seen_id(name), "reachability", "Reachable", must_hit=True)
         _emit_catalog_entry(_success_id(name), "sometimes", "Sometimes", must_hit=True)
