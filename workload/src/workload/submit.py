@@ -23,10 +23,10 @@ async def submit_tx(name: str, txn, client, wallet: Wallet) -> dict:
     refused, malformed request, etc.) — let it propagate to the endpoint
     handler's XRPLException catch.
     """
-    tx_submitted(name, txn)
     signed = await autofill_and_sign(txn, client, wallet)
     response = await submit(signed, client)
     result = response.result
+    tx_submitted(name, txn)
     preliminary = result.get("engine_result", "")
     tx_hash = result.get("tx_json", {}).get("hash", "")
     log.debug("Submitted %s: %s (hash=%s)", name, preliminary, tx_hash[:16])

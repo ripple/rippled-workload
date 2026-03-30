@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import uvicorn
 from antithesis import lifecycle
 from fastapi import FastAPI, Depends
