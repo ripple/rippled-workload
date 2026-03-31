@@ -5,8 +5,10 @@ then loans are taken against the broker.
 """
 
 from workload import logging, params
+from workload.assertions import tx_submitted
 from workload.randoms import choice
 from workload.submit import submit_tx
+from xrpl.asyncio.transaction import autofill_and_sign, submit as xrpl_submit
 from xrpl.models.transactions import (
     LoanBrokerSet,
     LoanBrokerDelete,
@@ -18,6 +20,7 @@ from xrpl.models.transactions import (
     LoanPay,
 )
 from xrpl.models.transactions.loan_manage import LoanManageFlag
+from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 
 log = logging.getLogger(__name__)
 
@@ -151,21 +154,32 @@ async def _loan_set_valid(accounts, loan_brokers, loans, client):
         log.debug("No loan brokers for loan_set")
         return
     broker = choice(loan_brokers)
+    if broker.owner not in accounts:
+        return
+    broker_wallet = accounts[broker.owner].wallet
     other_accounts = [a for a in accounts if a != broker.owner]
     if not other_accounts:
         return
     borrower_id = choice(other_accounts)
     borrower = accounts[borrower_id]
+    pi = params.loan_payment_interval()
     txn = LoanSet(
         account=borrower.address,
         loan_broker_id=broker.loan_broker_id,
+        counterparty=broker.owner,
         principal_requested=params.loan_principal(),
         interest_rate=params.loan_interest_rate(),
         payment_total=params.loan_payment_total(),
-        payment_interval=(pi := params.loan_payment_interval()),
+        payment_interval=pi,
         grace_period=params.loan_grace_period(pi),
     )
-    await submit_tx("LoanSet", txn, client, borrower.wallet)
+    # LoanSet requires counterparty co-signing: borrower signs, then broker co-signs
+    signed = await autofill_and_sign(txn, client, borrower.wallet)
+    cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
+    tx_submitted("LoanSet", txn)
+    response = await xrpl_submit(cosigned.tx, client)
+    result = response.result
+    log.debug("Submitted LoanSet: %s", result.get("engine_result", ""))
 
 
 async def _loan_set_faulty(accounts, loan_brokers, loans, client):

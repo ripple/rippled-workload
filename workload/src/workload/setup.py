@@ -29,7 +29,7 @@ from xrpl.models.transactions import (
     VaultCreate, VaultDeposit,
     NFTokenMint, NFTokenMintFlag, NFTokenCreateOffer, NFTokenCreateOfferFlag,
     CredentialCreate, TicketCreate, PermissionedDomainSet,
-    LoanBrokerSet, LoanSet,
+    LoanBrokerSet, LoanBrokerCoverDeposit, LoanSet,
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 
@@ -297,15 +297,77 @@ async def run_setup(workload) -> dict:
         broker_txns.append(("LoanBrokerSet", LoanBrokerSet(
             account=owner.address,
             vault_id=vault.vault_id,
-            management_fee_rate=params.loan_broker_management_fee_rate(),
-            cover_rate_minimum=params.loan_broker_cover_rate_minimum(),
-            cover_rate_liquidation=params.loan_broker_cover_rate_liquidation(),
+            management_fee_rate=100,             # 0.1% — low fixed fee
+            cover_rate_minimum=1000,              # 1% — minimal collateral requirement
+            cover_rate_liquidation=500,           # 0.5% — below minimum
         ), owner.wallet))
     summary["loan_brokers"] = await _submit_batch("loan_brokers", broker_txns, client)
 
-    # ── 13. Loans: TODO — LoanSet requires counterparty_signature (temBAD_SIGNER)
-    # Need to investigate two-party signing for lending protocol
-    summary["loans"] = 0
+    # ── 12b. Broker cover deposits: fund first-loss capital so loans can be created
+    await asyncio.sleep(3)  # wait for WS to populate broker state
+    _COVER_DEPOSIT = "10000000"  # 10 XRP — enough to cover several small loans
+    cover_txns = []
+    for broker in workload.loan_brokers[:3]:
+        if broker.owner not in workload.accounts:
+            continue
+        owner = workload.accounts[broker.owner]
+        cover_txns.append(("LoanBrokerCoverDeposit", LoanBrokerCoverDeposit(
+            account=owner.address,
+            loan_broker_id=broker.loan_broker_id,
+            amount=_COVER_DEPOSIT,
+        ), owner.wallet))
+    summary["cover_deposits"] = await _submit_batch("cover_deposits", cover_txns, client)
+
+    # ── 13. Loans: create against brokers (requires counterparty co-signing)
+    # Use small fixed principal and low cover rates so borrowers can afford collateral.
+    from xrpl.asyncio.transaction import autofill_and_sign
+    from xrpl.asyncio.transaction import submit as xrpl_submit
+    from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
+    await asyncio.sleep(3)  # wait for WS to populate broker state
+    _SETUP_PRINCIPAL = "1000000"  # 1 XRP — small enough that any account can cover
+    _SETUP_INTEREST = 1000        # 1% annualized
+    _SETUP_INTERVAL = 3600        # 1 hour
+    _SETUP_TOTAL = 3              # 3 payments
+    _SETUP_GRACE = 600            # 10 minutes
+    loan_count = 0
+    # Use holder accounts as borrowers — they have plenty of XRP
+    borrower_indices = list(_HOLDER_RANGE)
+    for idx, broker in enumerate(workload.loan_brokers[:3]):
+        if broker.owner not in workload.accounts:
+            continue
+        broker_wallet = workload.accounts[broker.owner].wallet
+        # Pick a borrower that isn't the broker owner
+        b_idx = borrower_indices[idx] if idx < len(borrower_indices) else None
+        if b_idx is None or b_idx >= len(accs) or accs[b_idx].address == broker.owner:
+            continue
+        borrower = accs[b_idx]
+        try:
+            txn = LoanSet(
+                account=borrower.address,
+                loan_broker_id=broker.loan_broker_id,
+                counterparty=broker.owner,
+                principal_requested=_SETUP_PRINCIPAL,
+                interest_rate=_SETUP_INTEREST,
+                payment_interval=_SETUP_INTERVAL,
+                payment_total=_SETUP_TOTAL,
+                grace_period=_SETUP_GRACE,
+            )
+            # 1. Borrower signs
+            signed = await autofill_and_sign(txn, client, borrower.wallet)
+            # 2. Broker co-signs
+            result = sign_loan_set_by_counterparty(broker_wallet, signed)
+            # 3. Submit the doubly-signed tx
+            resp = await xrpl_submit(result.tx, client)
+            engine = resp.result.get("engine_result", "")
+            if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
+                loan_count += 1
+                log.info("Setup: loan submitted (broker=%s borrower=%s)", broker.owner, borrower.address)
+            else:
+                log.warning("Setup: loan failed: %s (%s)", engine,
+                            resp.result.get("engine_result_message", ""))
+        except Exception as exc:
+            log.error("Setup: loan creation failed: %s", exc)
+    summary["loans"] = loan_count
 
     # Fire reachable assertions
     for key, count in summary.items():

@@ -66,7 +66,8 @@ def register_assertions() -> None:
         "mpt_issuances", "mpt_authorizations", "mpt_distribution",
         "vaults", "vault_deposits", "nfts", "nft_offers",
         "credentials", "tickets", "domains",
-        "loan_brokers", "loans",
+        "loan_brokers", "cover_deposits",
+        "loans",
     ]:
         _emit_catalog_entry(f"workload::setup_{setup_key}", "reachability", "Reachable", must_hit=True)
 
