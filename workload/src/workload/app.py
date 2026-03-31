@@ -119,17 +119,30 @@ class Workload:
         return issued_currencies
 
     def wait_for_network(self, xrpld) -> None:
+        """Wait for xrpld to be stably synced (multiple consecutive checks).
+
+        A single 'full' response can be a transient moment during validator
+        convergence. Requiring consecutive successes ensures the snapshot
+        taken after setup_complete() captures a stable network state.
+        """
         timeout = self.config["xrpld"]["timeout"]
         wait_start = time.time()
-        logger.debug("Waiting %ss for xrpld at %s to be running.", timeout, xrpld)
-        while not (is_xrpld_synced(xrpld)):
-            irs = is_xrpld_synced(xrpld)
-            logger.info(f"is_xrpld_synced returning: {irs}")
-            if (xrpld_ready_time := int(time.time() - self.start_time)) > timeout:
-                logger.info("xrpld ready after %ss", xrpld_ready_time)
-            logger.info("Waited %ss so far", int(time.time() - wait_start))
-            time.sleep(10)
-        logger.info("xrpld ready...")
+        required_consecutive = 3
+        consecutive_ok = 0
+        while consecutive_ok < required_consecutive:
+            if is_xrpld_synced(xrpld):
+                consecutive_ok += 1
+                logger.info("Sync check %d/%d passed", consecutive_ok, required_consecutive)
+            else:
+                if consecutive_ok > 0:
+                    logger.info("Sync check failed after %d consecutive, resetting", consecutive_ok)
+                consecutive_ok = 0
+            if time.time() - wait_start > timeout:
+                logger.error("xrpld not stably synced after %ds, proceeding anyway", timeout)
+                break
+            if consecutive_ok < required_consecutive:
+                time.sleep(2)
+        logger.info("xrpld stably synced after %ds", int(time.time() - wait_start))
 
     def get_accounts(self):
         return self.accounts
