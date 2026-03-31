@@ -62,6 +62,8 @@ async def _ticket_use_valid(accounts, client):
         sequence=0,
         ticket_sequence=ticket_sequence,
     )
+    # Remove ticket optimistically to avoid reuse by concurrent calls
+    src.tickets.discard(ticket_sequence)
     await submit_tx("TicketUse", payment_txn, client, src.wallet)
 
 

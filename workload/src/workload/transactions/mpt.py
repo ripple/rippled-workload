@@ -9,6 +9,7 @@ from xrpl.models.transactions import (
     MPTokenIssuanceSet,
     MPTokenAuthorize,
 )
+from xrpl.models.transactions.mptoken_issuance_create import MPTokenIssuanceCreateFlag
 from xrpl.models.transactions.mptoken_issuance_set import MPTokenIssuanceSetFlag
 
 log = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ async def _mpt_create_valid(accounts, mpt_issuances, client):
         account=src.address,
         maximum_amount=params.mpt_maximum_amount(),
         mptoken_metadata=params.mpt_metadata(),
+        flags=MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK,
     )
     await submit_tx("MPTokenIssuanceCreate", txn, client, src.wallet)
 

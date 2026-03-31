@@ -25,7 +25,7 @@ from xrpl.models.amounts import MPTAmount
 from xrpl.models.transactions import (
     AccountSet, AccountSetAsfFlag,
     TrustSet, Payment,
-    MPTokenIssuanceCreate, MPTokenAuthorize,
+    MPTokenIssuanceCreate, MPTokenAuthorize, MPTokenIssuanceCreateFlag,
     VaultCreate, VaultDeposit,
     NFTokenMint, NFTokenMintFlag, NFTokenCreateOffer, NFTokenCreateOfferFlag,
     CredentialCreate, TicketCreate, PermissionedDomainSet,
@@ -138,7 +138,10 @@ async def run_setup(workload) -> dict:
 
     # ── 4. MPT issuances: 5 from accounts[0..4] ─────────────────────
     summary["mpt_issuances"] = await _submit_batch("mpt", [
-        ("MPTokenIssuanceCreate", MPTokenIssuanceCreate(account=accs[i].address), accs[i].wallet)
+        ("MPTokenIssuanceCreate", MPTokenIssuanceCreate(
+            account=accs[i].address,
+            flags=MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK,
+        ), accs[i].wallet)
         for i in range(min(5, len(accs)))
     ], client)
 
