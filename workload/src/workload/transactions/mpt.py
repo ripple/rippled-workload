@@ -1,27 +1,39 @@
 """MPToken transaction generators for the antithesis workload."""
 
-from workload import logging, params
-from workload.randoms import choice
-from workload.submit import submit_tx
+from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import (
+    MPTokenAuthorize,
     MPTokenIssuanceCreate,
     MPTokenIssuanceDestroy,
     MPTokenIssuanceSet,
-    MPTokenAuthorize,
 )
 from xrpl.models.transactions.mptoken_issuance_create import MPTokenIssuanceCreateFlag
 from xrpl.models.transactions.mptoken_issuance_set import MPTokenIssuanceSetFlag
+
+from workload import logging, params
+from workload.models import MPTokenIssuance, UserAccount
+from workload.randoms import choice
+from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
 
 
 # ── Create ───────────────────────────────────────────────────────────
 
-async def mpt_create(accounts, mpt_issuances, client):
+
+async def mpt_create(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     return await _mpt_create_valid(accounts, mpt_issuances, client)
 
 
-async def _mpt_create_valid(accounts, mpt_issuances, client):
+async def _mpt_create_valid(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     src_address = choice(list(accounts))
     src = accounts[src_address]
     txn = MPTokenIssuanceCreate(
@@ -35,13 +47,22 @@ async def _mpt_create_valid(accounts, mpt_issuances, client):
 
 # ── Authorize ────────────────────────────────────────────────────────
 
-async def mpt_authorize(accounts, mpt_issuances, client):
+
+async def mpt_authorize(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     if params.should_send_faulty():
         return await _mpt_authorize_faulty(accounts, mpt_issuances, client)
     return await _mpt_authorize_valid(accounts, mpt_issuances, client)
 
 
-async def _mpt_authorize_valid(accounts, mpt_issuances, client):
+async def _mpt_authorize_valid(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not mpt_issuances:
         log.debug("No MPT issuances to authorize")
         return
@@ -61,19 +82,32 @@ async def _mpt_authorize_valid(accounts, mpt_issuances, client):
     await submit_tx("MPTokenAuthorize", txn, client, issuer.wallet)
 
 
-async def _mpt_authorize_faulty(accounts, mpt_issuances, client):
+async def _mpt_authorize_faulty(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Set ──────────────────────────────────────────────────────────────
 
-async def mpt_issuance_set(accounts, mpt_issuances, client):
+
+async def mpt_issuance_set(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     if params.should_send_faulty():
         return await _mpt_issuance_set_faulty(accounts, mpt_issuances, client)
     return await _mpt_issuance_set_valid(accounts, mpt_issuances, client)
 
 
-async def _mpt_issuance_set_valid(accounts, mpt_issuances, client):
+async def _mpt_issuance_set_valid(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not mpt_issuances:
         log.debug("No MPT issuances to set")
         return
@@ -90,19 +124,32 @@ async def _mpt_issuance_set_valid(accounts, mpt_issuances, client):
     await submit_tx("MPTokenIssuanceSet", txn, client, issuer.wallet)
 
 
-async def _mpt_issuance_set_faulty(accounts, mpt_issuances, client):
+async def _mpt_issuance_set_faulty(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Destroy ──────────────────────────────────────────────────────────
 
-async def mpt_destroy(accounts, mpt_issuances, client):
+
+async def mpt_destroy(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     if params.should_send_faulty():
         return await _mpt_destroy_faulty(accounts, mpt_issuances, client)
     return await _mpt_destroy_valid(accounts, mpt_issuances, client)
 
 
-async def _mpt_destroy_valid(accounts, mpt_issuances, client):
+async def _mpt_destroy_valid(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not mpt_issuances:
         log.debug("No MPT issuances to destroy")
         return
@@ -117,5 +164,9 @@ async def _mpt_destroy_valid(accounts, mpt_issuances, client):
     await submit_tx("MPTokenIssuanceDestroy", txn, client, issuer.wallet)
 
 
-async def _mpt_destroy_faulty(accounts, mpt_issuances, client):
+async def _mpt_destroy_faulty(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection

@@ -1,27 +1,27 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import httpx
 import uvicorn
 from antithesis import lifecycle
-from fastapi import FastAPI, Depends
+from antithesis._internal import _HANDLER
+from antithesis.assertions import always, reachable, unreachable
+from fastapi import Depends, FastAPI
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.constants import CryptoAlgorithm, XRPLException
-from xrpl.models import IssuedCurrency
-from xrpl.models.requests import ServerInfo, Fee
 from xrpl.wallet import Wallet
 
 from workload import logger
 from workload.assertions import register_assertions
-from antithesis.assertions import always, reachable, unreachable
-from antithesis._internal import _HANDLER
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
 from workload.transactions import REGISTRY
+
 
 class Workload:
     def __init__(self, conf: dict[str, Any]):
@@ -53,14 +53,21 @@ class Workload:
 
         accounts_json = Path(os.environ.get("ACCOUNTS_JSON", "/accounts.json"))
         if not accounts_json.exists():
-            logger.error("accounts.json not found at %s. Cannot start without pre-generated accounts.", accounts_json)
+            logger.error(
+                "accounts.json not found at %s. Cannot start without pre-generated accounts.",
+                accounts_json,
+            )
             unreachable("workload::accounts_json_missing", {"path": str(accounts_json)})
         else:
             self.load_initial_accounts(accounts_json)
             reachable("workload::accounts_ready", {"count": len(self.accounts)})
 
-        default_algo = CryptoAlgorithm[conf_file["workload"]["accounts"]["default_crypto_algorithm"]]
-        self.funding_wallet = Wallet.from_seed(self.config["genesis_account"]["master_seed"], algorithm=default_algo)
+        default_algo = CryptoAlgorithm[
+            conf_file["workload"]["accounts"]["default_crypto_algorithm"]
+        ]
+        self.funding_wallet = Wallet.from_seed(
+            self.config["genesis_account"]["master_seed"], algorithm=default_algo
+        )
         self.client = AsyncJsonRpcClient(self.xrpld)
 
         self.wait_for_network(self.xrpld)
@@ -75,50 +82,22 @@ class Workload:
         logger.info("%s after %ss", workload_ready_msg, int(time.time() - self.start_time))
         lifecycle.setup_complete(details={"message": workload_ready_msg})
 
-    @property
-    def addresses(self):
-        return list(self.accounts.keys())
-
-    async def server_info(self):
-        server_info_response = await self.client.request(ServerInfo())
-        return server_info_response.result["info"]
-
-    async def fee(self):
-        fee_response = await self.client.request(Fee())
-        return fee_response.result
-
-    async def get_ref_fee(self):
-        fee_response = await self.fee()
-        return fee_response["drops"]["base_fee"]
-
-    async def get_open_ledger_fee(self):
-        fee_response = await self.fee()
-        return fee_response["drops"]["open_ledger_fee"]
-
-    async def expected_ledger_size(self):
-        fee_response = await self.fee()
-        return int(fee_response["expected_ledger_size"])
-
-    def load_initial_accounts(self, accounts_json: Path):
+    def load_initial_accounts(self, accounts_json: Path) -> None:
         """Load pre-generated accounts from a JSON file.
 
         Expects format: [{"address": "r...", "seed": "s..."}, ...]
         """
         logger.info(f"Loading accounts from {accounts_json}")
         accounts = json.loads(accounts_json.read_text())
-        default_algo = CryptoAlgorithm[conf_file["workload"]["accounts"]["default_crypto_algorithm"]]
+        default_algo = CryptoAlgorithm[
+            conf_file["workload"]["accounts"]["default_crypto_algorithm"]
+        ]
         for entry in accounts:
             wallet = Wallet.from_seed(seed=entry["seed"], algorithm=default_algo)
             self.accounts[wallet.address] = UserAccount(wallet=wallet)
         logger.info(f"Loaded {len(self.accounts)} accounts")
 
-    @classmethod
-    def issue_currencies(cls, issuer: str, currency_code: list[str]) -> list[IssuedCurrency]:
-        issued_currencies = [IssuedCurrency.from_dict(dict(issuer=issuer, currency=cc)) for cc in currency_code]
-        logger.debug("Issued %s currencies", len(issued_currencies))
-        return issued_currencies
-
-    def wait_for_network(self, xrpld) -> None:
+    def wait_for_network(self, xrpld: str) -> None:
         """Wait for xrpld to be stably synced (multiple consecutive checks).
 
         A single 'full' response can be a transient moment during validator
@@ -144,15 +123,10 @@ class Workload:
                 time.sleep(2)
         logger.info("xrpld stably synced after %ds", int(time.time() - wait_start))
 
-    def get_accounts(self):
-        return self.accounts
 
-    def get_nfts(self):
-        return self.nfts
-
-
-def _make_endpoint(path: str, name: str, handler_fn, args_fn):
+def _make_endpoint(path: str, name: str, handler_fn: Callable, args_fn: Callable) -> Callable:
     """Create an endpoint handler with standardized error handling."""
+
     async def endpoint(w: Workload = Depends(get_workload)):
         try:
             return await handler_fn(*args_fn(w))
@@ -160,7 +134,11 @@ def _make_endpoint(path: str, name: str, handler_fn, args_fn):
             logger.warning(f"{name}: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"{name} failed: {type(e).__name__}: {e}")
-            unreachable("workload::endpoint_exception", {"endpoint": path, "error": f"{type(e).__name__}: {e}"})
+            unreachable(
+                "workload::endpoint_exception",
+                {"endpoint": path, "error": f"{type(e).__name__}: {e}"},
+            )
+
     endpoint.__name__ = f"{name}_endpoint"
     return endpoint
 
@@ -171,11 +149,13 @@ get_workload = None
 
 def create_app(workload: Workload) -> FastAPI:
     import asyncio
+
     from workload.ws_listener import start_ws_listener
 
     app = FastAPI()
 
     global get_workload
+
     def get_workload():
         return workload
 
@@ -187,6 +167,7 @@ def create_app(workload: Workload) -> FastAPI:
     @app.get("/setup")
     async def setup_endpoint(w: Workload = Depends(get_workload)):
         from workload.setup import run_setup
+
         try:
             result = await run_setup(w)
             reachable("workload::setup_complete_with_state", result)
@@ -195,16 +176,10 @@ def create_app(workload: Workload) -> FastAPI:
             logger.warning(f"setup: {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"setup failed: {type(e).__name__}: {e}")
-            unreachable("workload::endpoint_exception", {"endpoint": "/setup", "error": f"{type(e).__name__}: {e}"})
-
-    # Info endpoints
-    @app.get("/accounts")
-    def get_accounts(w: Workload = Depends(get_workload)):
-        return w.addresses
-
-    @app.get("/nft/list")
-    def get_nfts(w: Workload = Depends(get_workload)):
-        return w.get_nfts()
+            unreachable(
+                "workload::endpoint_exception",
+                {"endpoint": "/setup", "error": f"{type(e).__name__}: {e}"},
+            )
 
     # Register all transaction endpoints from the registry
     for name, path, handler_fn, args_fn, _ in REGISTRY:
@@ -213,7 +188,7 @@ def create_app(workload: Workload) -> FastAPI:
     return app
 
 
-def main():
+def main() -> None:
     logger.info("Loaded config from %s", config_file)
     conf = conf_file["workload"]
     logger.info("Config %s", json.dumps(conf, indent=2))

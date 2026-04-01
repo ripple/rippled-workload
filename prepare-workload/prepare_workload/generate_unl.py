@@ -30,14 +30,14 @@ def gen_validator(algo: xrpl.CryptoAlgorithm = ALGO):
     signing_pubkey, signing_privkey = xrpl.core.keypairs.derive_keypair(signing_seed, validator=True, algorithm=algo)
 
     return {
-            "master_seed": master_seed,
-            "signing_seed": signing_seed,
-            "node_public_key": xrpl.core.addresscodec.encode_node_public_key(bytes.fromhex(master_pubkey)),
-            "master_pubkey": master_pubkey,
-            "master_privkey": master_privkey,
-            "signing_pubkey": signing_pubkey,
-            "signing_privkey": signing_privkey,
-        }
+        "master_seed": master_seed,
+        "signing_seed": signing_seed,
+        "node_public_key": xrpl.core.addresscodec.encode_node_public_key(bytes.fromhex(master_pubkey)),
+        "master_pubkey": master_pubkey,
+        "master_privkey": master_privkey,
+        "signing_pubkey": signing_pubkey,
+        "signing_privkey": signing_privkey,
+    }
 
 
 def generate_validator_manifest(creds, sequence: int, domain: str | None = None):
@@ -106,14 +106,16 @@ def generate_unl_data(validators, publisher, sequence: int | None = None):
     validators_entries = [generate_validator_manifest(v, sequence) for v in validators]
     publisher_manifest_b64 = generate_publisher_manifest(publisher, sequence)
     return sign_unl_blob(
-            publisher,
-            publisher_manifest_b64,
-            validators=validators_entries,
-            sequence=sequence,
+        publisher,
+        publisher_manifest_b64,
+        validators=validators_entries,
+        sequence=sequence,
     )
 
 
-def generate_unl(output_dir: Path, num_validators: int, verbose=False) -> dict:  # FIX: https://docs.astral.sh/ruff/rules/boolean-default-value-positional-argument
+def generate_unl(
+    output_dir: Path, num_validators: int, verbose=False
+) -> dict:  # FIX: https://docs.astral.sh/ruff/rules/boolean-default-value-positional-argument
     """Write an XRPL UNL.
 
     Args:
@@ -138,7 +140,7 @@ def generate_unl(output_dir: Path, num_validators: int, verbose=False) -> dict: 
         publisher,
         publisher_manifest_b64,
         validators=validators_entries,
-        )
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     if verbose:
@@ -146,12 +148,17 @@ def generate_unl(output_dir: Path, num_validators: int, verbose=False) -> dict: 
         unl_blob_json = output_dir / "unl_blob.json"
         unl_blob_json.write_text(json.dumps(json.loads(base64.b64decode(unl["blob"]).decode()), indent=2))
         nodes = output_dir / "node_data.json"
-        nodes.write_text(json.dumps({
-            "publisher": publisher,
-            "publisher_manifest_b64": publisher_manifest_b64,
-            "validators": validators,
-            "validators_manifests": validators_entries,
-        }, indent=2))
+        nodes.write_text(
+            json.dumps(
+                {
+                    "publisher": publisher,
+                    "publisher_manifest_b64": publisher_manifest_b64,
+                    "validators": validators,
+                    "validators_manifests": validators_entries,
+                },
+                indent=2,
+            )
+        )
 
     validator_public_keys = [v["node_public_key"] for v in validators]
     validator_seeds = [v["master_seed"] for v in validators]
@@ -185,18 +192,27 @@ def generate_unl(output_dir: Path, num_validators: int, verbose=False) -> dict: 
 
 def parse_args():
     ap = argparse.ArgumentParser(
-                    prog="XRPL UNL Manifest-er",
-                    description=("Generate a quick example XRPL UNL"
-                                 "Generates all credentials for publisher, validators and writes UNL."
-                                 ),
-                    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                    )
-    ap.add_argument("-n", "--num_validators", type=int, default=DEFAULT_NUM_VAL,
-                    help="Number of validators to create in UNL.",
-                    )
-    ap.add_argument("-o", "--output-dir", type=Path, nargs="?", default=Path().cwd(),
-                    help="Dump all data to filesystem.",
-                    )
+        prog="XRPL UNL Manifest-er",
+        description=(
+            "Generate a quick example XRPL UNLGenerates all credentials for publisher, validators and writes UNL."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    ap.add_argument(
+        "-n",
+        "--num_validators",
+        type=int,
+        default=DEFAULT_NUM_VAL,
+        help="Number of validators to create in UNL.",
+    )
+    ap.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        nargs="?",
+        default=Path().cwd(),
+        help="Dump all data to filesystem.",
+    )
     return ap.parse_args()
 
 

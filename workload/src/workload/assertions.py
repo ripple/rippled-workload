@@ -54,25 +54,40 @@ def register_assertions() -> None:
     Call once at app startup before any transactions are submitted.
     """
     from workload.transactions import TX_TYPES
+
     for name in TX_TYPES:
         _emit_catalog_entry(_seen_id(name), "reachability", "Reachable", must_hit=True)
         _emit_catalog_entry(_success_id(name), "sometimes", "Sometimes", must_hit=True)
         _emit_catalog_entry(_failure_id(name), "sometimes", "Sometimes", must_hit=True)
     _emit_catalog_entry("workload::always : valid_engine_result", "always", "Always", must_hit=True)
-    _emit_catalog_entry("workload::always : no_internal_rippled_error", "always", "Always", must_hit=True)
+    _emit_catalog_entry(
+        "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
+    )
     # Setup phase assertions
     for setup_key in [
-        "gateways", "trust_lines", "iou_distribution",
-        "mpt_issuances", "mpt_authorizations", "mpt_distribution",
-        "vaults", "vault_deposits", "nfts", "nft_offers",
-        "credentials", "tickets", "domains",
-        "loan_brokers", "cover_deposits",
+        "gateways",
+        "trust_lines",
+        "iou_distribution",
+        "mpt_issuances",
+        "mpt_authorizations",
+        "mpt_distribution",
+        "vaults",
+        "vault_deposits",
+        "nfts",
+        "nft_offers",
+        "credentials",
+        "tickets",
+        "domains",
+        "loan_brokers",
+        "cover_deposits",
         "loans",
     ]:
-        _emit_catalog_entry(f"workload::setup_{setup_key}", "reachability", "Reachable", must_hit=True)
+        _emit_catalog_entry(
+            f"workload::setup_{setup_key}", "reachability", "Reachable", must_hit=True
+        )
 
 
-def tx_submitted(name: str, txn=None) -> None:
+def tx_submitted(name: str, txn: object = None) -> None:
     """Report that a transaction was created and submitted to the network."""
     details = {}
     if txn is not None:
@@ -105,9 +120,7 @@ def tx_result(name: str, result: dict) -> None:
     plus a lifecycle event with full result details.
     """
     engine_result = (
-        result.get("engine_result")
-        or result.get("meta", {}).get("TransactionResult")
-        or "unknown"
+        result.get("engine_result") or result.get("meta", {}).get("TransactionResult") or "unknown"
     )
     details = {
         "engine_result": engine_result,

@@ -4,36 +4,51 @@ Lending requires a vault to exist first, then a broker is created on that vault,
 then loans are taken against the broker.
 """
 
-from workload import logging, params
-from workload.assertions import tx_submitted
-from workload.randoms import choice
-from workload.submit import submit_tx
-from xrpl.asyncio.transaction import autofill_and_sign, submit as xrpl_submit
+from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.asyncio.transaction import autofill_and_sign
+from xrpl.asyncio.transaction import submit as xrpl_submit
 from xrpl.models.transactions import (
-    LoanBrokerSet,
-    LoanBrokerDelete,
     LoanBrokerCoverDeposit,
     LoanBrokerCoverWithdraw,
-    LoanSet,
+    LoanBrokerDelete,
+    LoanBrokerSet,
     LoanDelete,
     LoanManage,
     LoanPay,
+    LoanSet,
 )
 from xrpl.models.transactions.loan_manage import LoanManageFlag
 from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
+
+from workload import logging, params
+from workload.assertions import tx_submitted
+from workload.models import Loan, LoanBroker, UserAccount, Vault
+from workload.randoms import choice
+from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
 
 
 # ── Loan Broker Set ──────────────────────────────────────────────────
 
-async def loan_broker_set(accounts, vaults, loan_brokers, client):
+
+async def loan_broker_set(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    loan_brokers: list[LoanBroker],
+    client: AsyncJsonRpcClient,
+) -> None:
     if params.should_send_faulty():
         return await _loan_broker_set_faulty(accounts, vaults, loan_brokers, client)
     return await _loan_broker_set_valid(accounts, vaults, loan_brokers, client)
 
 
-async def _loan_broker_set_valid(accounts, vaults, loan_brokers, client):
+async def _loan_broker_set_valid(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    loan_brokers: list[LoanBroker],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not vaults:
         log.debug("No vaults for loan_broker_set")
         return
@@ -54,19 +69,29 @@ async def _loan_broker_set_valid(accounts, vaults, loan_brokers, client):
     await submit_tx("LoanBrokerSet", txn, client, owner.wallet)
 
 
-async def _loan_broker_set_faulty(accounts, vaults, loan_brokers, client):
+async def _loan_broker_set_faulty(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    loan_brokers: list[LoanBroker],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Loan Broker Delete ───────────────────────────────────────────────
 
-async def loan_broker_delete(accounts, loan_brokers, client):
+
+async def loan_broker_delete(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _loan_broker_delete_faulty(accounts, loan_brokers, client)
     return await _loan_broker_delete_valid(accounts, loan_brokers, client)
 
 
-async def _loan_broker_delete_valid(accounts, loan_brokers, client):
+async def _loan_broker_delete_valid(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     if not loan_brokers:
         log.debug("No loan brokers to delete")
         return
@@ -81,19 +106,26 @@ async def _loan_broker_delete_valid(accounts, loan_brokers, client):
     await submit_tx("LoanBrokerDelete", txn, client, owner.wallet)
 
 
-async def _loan_broker_delete_faulty(accounts, loan_brokers, client):
+async def _loan_broker_delete_faulty(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Loan Broker Cover Deposit ────────────────────────────────────────
 
-async def loan_broker_cover_deposit(accounts, loan_brokers, client):
+
+async def loan_broker_cover_deposit(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _loan_broker_cover_deposit_faulty(accounts, loan_brokers, client)
     return await _loan_broker_cover_deposit_valid(accounts, loan_brokers, client)
 
 
-async def _loan_broker_cover_deposit_valid(accounts, loan_brokers, client):
+async def _loan_broker_cover_deposit_valid(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     if not loan_brokers:
         log.debug("No loan brokers for cover deposit")
         return
@@ -109,19 +141,26 @@ async def _loan_broker_cover_deposit_valid(accounts, loan_brokers, client):
     await submit_tx("LoanBrokerCoverDeposit", txn, client, owner.wallet)
 
 
-async def _loan_broker_cover_deposit_faulty(accounts, loan_brokers, client):
+async def _loan_broker_cover_deposit_faulty(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Loan Broker Cover Withdraw ───────────────────────────────────────
 
-async def loan_broker_cover_withdraw(accounts, loan_brokers, client):
+
+async def loan_broker_cover_withdraw(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _loan_broker_cover_withdraw_faulty(accounts, loan_brokers, client)
     return await _loan_broker_cover_withdraw_valid(accounts, loan_brokers, client)
 
 
-async def _loan_broker_cover_withdraw_valid(accounts, loan_brokers, client):
+async def _loan_broker_cover_withdraw_valid(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     if not loan_brokers:
         log.debug("No loan brokers for cover withdraw")
         return
@@ -137,19 +176,32 @@ async def _loan_broker_cover_withdraw_valid(accounts, loan_brokers, client):
     await submit_tx("LoanBrokerCoverWithdraw", txn, client, owner.wallet)
 
 
-async def _loan_broker_cover_withdraw_faulty(accounts, loan_brokers, client):
+async def _loan_broker_cover_withdraw_faulty(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Loan Set ─────────────────────────────────────────────────────────
 
-async def loan_set(accounts, loan_brokers, loans, client):
+
+async def loan_set(
+    accounts: dict[str, UserAccount],
+    loan_brokers: list[LoanBroker],
+    loans: list[Loan],
+    client: AsyncJsonRpcClient,
+) -> None:
     if params.should_send_faulty():
         return await _loan_set_faulty(accounts, loan_brokers, loans, client)
     return await _loan_set_valid(accounts, loan_brokers, loans, client)
 
 
-async def _loan_set_valid(accounts, loan_brokers, loans, client):
+async def _loan_set_valid(
+    accounts: dict[str, UserAccount],
+    loan_brokers: list[LoanBroker],
+    loans: list[Loan],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not loan_brokers:
         log.debug("No loan brokers for loan_set")
         return
@@ -182,19 +234,29 @@ async def _loan_set_valid(accounts, loan_brokers, loans, client):
     log.debug("Submitted LoanSet: %s", result.get("engine_result", ""))
 
 
-async def _loan_set_faulty(accounts, loan_brokers, loans, client):
+async def _loan_set_faulty(
+    accounts: dict[str, UserAccount],
+    loan_brokers: list[LoanBroker],
+    loans: list[Loan],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Loan Delete ──────────────────────────────────────────────────────
 
-async def loan_delete(accounts, loans, client):
+
+async def loan_delete(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _loan_delete_faulty(accounts, loans, client)
     return await _loan_delete_valid(accounts, loans, client)
 
 
-async def _loan_delete_valid(accounts, loans, client):
+async def _loan_delete_valid(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
     if not loans:
         log.debug("No loans to delete")
         return
@@ -209,19 +271,32 @@ async def _loan_delete_valid(accounts, loans, client):
     await submit_tx("LoanDelete", txn, client, borrower.wallet)
 
 
-async def _loan_delete_faulty(accounts, loans, client):
+async def _loan_delete_faulty(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Loan Manage ──────────────────────────────────────────────────────
 
-async def loan_manage(accounts, loan_brokers, loans, client):
+
+async def loan_manage(
+    accounts: dict[str, UserAccount],
+    loan_brokers: list[LoanBroker],
+    loans: list[Loan],
+    client: AsyncJsonRpcClient,
+) -> None:
     if params.should_send_faulty():
         return await _loan_manage_faulty(accounts, loan_brokers, loans, client)
     return await _loan_manage_valid(accounts, loan_brokers, loans, client)
 
 
-async def _loan_manage_valid(accounts, loan_brokers, loans, client):
+async def _loan_manage_valid(
+    accounts: dict[str, UserAccount],
+    loan_brokers: list[LoanBroker],
+    loans: list[Loan],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not loans or not loan_brokers:
         log.debug("No loans to manage")
         return
@@ -230,7 +305,13 @@ async def _loan_manage_valid(accounts, loan_brokers, loans, client):
     if not broker or broker.owner not in accounts:
         return
     owner = accounts[broker.owner]
-    flag = choice([LoanManageFlag.TF_LOAN_DEFAULT, LoanManageFlag.TF_LOAN_IMPAIR, LoanManageFlag.TF_LOAN_UNIMPAIR])
+    flag = choice(
+        [
+            LoanManageFlag.TF_LOAN_DEFAULT,
+            LoanManageFlag.TF_LOAN_IMPAIR,
+            LoanManageFlag.TF_LOAN_UNIMPAIR,
+        ]
+    )
     txn = LoanManage(
         account=owner.address,
         loan_id=loan.loan_id,
@@ -239,19 +320,29 @@ async def _loan_manage_valid(accounts, loan_brokers, loans, client):
     await submit_tx("LoanManage", txn, client, owner.wallet)
 
 
-async def _loan_manage_faulty(accounts, loan_brokers, loans, client):
+async def _loan_manage_faulty(
+    accounts: dict[str, UserAccount],
+    loan_brokers: list[LoanBroker],
+    loans: list[Loan],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Loan Pay ─────────────────────────────────────────────────────────
 
-async def loan_pay(accounts, loans, client):
+
+async def loan_pay(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _loan_pay_faulty(accounts, loans, client)
     return await _loan_pay_valid(accounts, loans, client)
 
 
-async def _loan_pay_valid(accounts, loans, client):
+async def _loan_pay_valid(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
     if not loans:
         log.debug("No loans to pay")
         return
@@ -267,5 +358,7 @@ async def _loan_pay_valid(accounts, loans, client):
     await submit_tx("LoanPay", txn, client, borrower.wallet)
 
 
-async def _loan_pay_faulty(accounts, loans, client):
+async def _loan_pay_faulty(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection

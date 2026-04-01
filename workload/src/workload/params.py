@@ -4,7 +4,7 @@ Every tunable transaction parameter lives here. Call these functions
 at the point of use — never cache the return value.
 """
 
-from workload.randoms import randint, choice, random
+from workload.randoms import choice, randint, random
 
 
 # ── Fuzzing ──────────────────────────────────────────────────────────
@@ -17,6 +17,7 @@ def should_send_faulty() -> bool:
 def fake_account() -> str:
     """Generate a valid-format but non-existent XRPL account address."""
     from xrpl.wallet import Wallet
+
     return Wallet.create().address
 
 

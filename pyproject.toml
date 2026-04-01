@@ -1,0 +1,36 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+exclude = [".git", "local-test"]
+
+[tool.ruff.lint]
+select = [
+    "E",       # pycodestyle
+    "F",       # pyflakes
+    "ANN001",  # missing parameter type annotation
+    "ANN201",  # missing return type annotation
+    "UP",      # pyupgrade — modern Python syntax
+    "I",       # isort — import ordering
+    "B",       # bugbear — common pitfalls
+    "SIM",     # simplify — redundant code
+    "C4",      # comprehension simplifications
+    "RUF",     # ruff-specific rules
+    "PIE",     # misc cleanups
+]
+ignore = [
+    "B008",    # function-call-in-default-argument — FastAPI Depends() pattern
+    "RUF006",  # asyncio-dangling-task — FastAPI startup pattern
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["workload"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true

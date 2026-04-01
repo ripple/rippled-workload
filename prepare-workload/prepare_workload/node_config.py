@@ -68,9 +68,9 @@ def get_node_configs(settings):
     node_configs = {"validators": [], "peers": []}
 
     # Determine if fuzzer is enabled
-    fuzzer_enabled = getattr(settings.fuzzer, 'enabled', False)
-    fuzzer_container = getattr(settings.fuzzer, 'container_name', 'fuzzer')
-    fuzzer_real_peer_port = getattr(settings.fuzzer, 'real_peer_port', 51234)
+    fuzzer_enabled = getattr(settings.fuzzer, "enabled", False)
+    fuzzer_container = getattr(settings.fuzzer, "container_name", "fuzzer")
+    fuzzer_real_peer_port = getattr(settings.fuzzer, "real_peer_port", 51234)
 
     for n in peers:
         is_validator = n.startswith(settings.network.validator_name)
@@ -85,11 +85,11 @@ def get_node_configs(settings):
             node_peers = peers[n]
 
         cfg = {
-                "name": n,
-                "peers": node_peers,
-                "peer_private": str(n in private_peers).lower(),
-                "is_validator": is_validator,
-            }
+            "name": n,
+            "peers": node_peers,
+            "peer_private": str(n in private_peers).lower(),
+            "is_validator": is_validator,
+        }
         if is_validator:
             node_configs["validators"].append(cfg)
         else:

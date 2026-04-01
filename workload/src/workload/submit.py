@@ -5,15 +5,20 @@ validation. The WebSocket listener (ws_listener.py) observes validated
 results and fires assertions / updates state.
 """
 
+from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.asyncio.transaction import autofill_and_sign, submit
+from xrpl.models.transactions.transaction import Transaction
+from xrpl.wallet import Wallet
+
 from workload import logging
 from workload.assertions import tx_submitted
-from xrpl.asyncio.transaction import autofill_and_sign, submit
-from xrpl.wallet import Wallet
 
 log = logging.getLogger(__name__)
 
 
-async def submit_tx(name: str, txn, client, wallet: Wallet) -> dict:
+async def submit_tx(
+    name: str, txn: Transaction, client: AsyncJsonRpcClient, wallet: Wallet
+) -> dict:
     """Sign and submit a transaction. Returns the submit response result.
 
     The returned dict contains the preliminary (tentative) engine_result

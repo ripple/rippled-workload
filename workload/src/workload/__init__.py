@@ -12,6 +12,7 @@ log_path = pathlib.Path("logs")
 with config_file.open() as f_in:
     conf_file = json.load(f_in)
 
+
 def setup_logging(logging_config: dict[str, Any]) -> None:
     logfile_name = f"{pkg_root.name}.log"
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")

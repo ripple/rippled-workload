@@ -14,28 +14,50 @@ Account allocation:
   [62..71] — IOU/MPT holders (trust lines + balances for all currencies)
 """
 
+from __future__ import annotations
+
 import asyncio
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from workload.app import Workload
 
 import xrpl.models
-from workload import logging, params
-from workload.submit import submit_tx
 from antithesis.assertions import reachable
+from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrency, IssuedCurrencyAmount
 from xrpl.models.amounts import MPTAmount
 from xrpl.models.transactions import (
-    AccountSet, AccountSetAsfFlag,
-    TrustSet, Payment,
-    MPTokenIssuanceCreate, MPTokenAuthorize, MPTokenIssuanceCreateFlag,
-    VaultCreate, VaultDeposit,
-    NFTokenMint, NFTokenMintFlag, NFTokenCreateOffer, NFTokenCreateOfferFlag,
-    CredentialCreate, TicketCreate, PermissionedDomainSet,
-    LoanBrokerSet, LoanBrokerCoverDeposit, LoanSet,
+    AccountSet,
+    AccountSetAsfFlag,
+    CredentialCreate,
+    LoanBrokerCoverDeposit,
+    LoanBrokerSet,
+    LoanSet,
+    MPTokenAuthorize,
+    MPTokenIssuanceCreate,
+    MPTokenIssuanceCreateFlag,
+    NFTokenCreateOffer,
+    NFTokenCreateOfferFlag,
+    NFTokenMint,
+    NFTokenMintFlag,
+    Payment,
+    PermissionedDomainSet,
+    TicketCreate,
+    TrustSet,
+    VaultCreate,
+    VaultDeposit,
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
+from xrpl.wallet import Wallet
+
+from workload import logging, params
+from workload.models import UserAccount
+from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
 
-_SETUP_CREDENTIAL_TYPE = "setup".encode("utf-8").hex()
+_SETUP_CREDENTIAL_TYPE = b"setup".hex()
 _TRUSTLINE_LIMIT = "1000000000000000"
 _VAULT_ASSETS_MAXIMUM = "1000000000"
 _TICKET_COUNT = 5
@@ -50,14 +72,16 @@ _GATEWAYS = [
 
 # Accounts that receive IOU/MPT balances
 _HOLDER_RANGE = range(62, 72)  # accounts[62..71]
-_VAULT_RANGE = range(10, 15)   # accounts[10..14] also get balances for non-XRP vaults
+_VAULT_RANGE = range(10, 15)  # accounts[10..14] also get balances for non-XRP vaults
 
 
-def _accounts_list(workload) -> list:
+def _accounts_list(workload: Workload) -> list[UserAccount]:
     return list(workload.accounts.values())
 
 
-async def _submit_batch(name: str, txns: list[tuple], client) -> int:
+async def _submit_batch(
+    name: str, txns: list[tuple[str, object, Wallet]], client: AsyncJsonRpcClient
+) -> int:
     """Submit a batch of (tx_type_name, txn, wallet) tuples. Returns count of accepted."""
     created = 0
     for i, (tx_type, txn, wallet) in enumerate(txns):
@@ -73,7 +97,7 @@ async def _submit_batch(name: str, txns: list[tuple], client) -> int:
     return created
 
 
-async def run_setup(workload) -> dict:
+async def run_setup(workload: Workload) -> dict[str, int]:
     """Submit deterministic setup transactions. State tracking via WS listener."""
     log.info("Setup: starting (%d accounts available)", len(workload.accounts))
     accs = _accounts_list(workload)
@@ -84,14 +108,22 @@ async def run_setup(workload) -> dict:
     holder_indices = list(_HOLDER_RANGE) + list(_VAULT_RANGE)
 
     # ── 1. Gateway setup: set DefaultRipple ──────────────────────────
-    summary["gateways"] = await _submit_batch("gateways", [
-        ("AccountSet", AccountSet(
-            account=accs[gw_idx].address,
-            set_flag=AccountSetAsfFlag.ASF_DEFAULT_RIPPLE,
-        ), accs[gw_idx].wallet)
-        for gw_idx, _ in _GATEWAYS
-        if gw_idx < len(accs)
-    ], client)
+    summary["gateways"] = await _submit_batch(
+        "gateways",
+        [
+            (
+                "AccountSet",
+                AccountSet(
+                    account=accs[gw_idx].address,
+                    set_flag=AccountSetAsfFlag.ASF_DEFAULT_RIPPLE,
+                ),
+                accs[gw_idx].wallet,
+            )
+            for gw_idx, _ in _GATEWAYS
+            if gw_idx < len(accs)
+        ],
+        client,
+    )
 
     # ── 2. Trust lines: holders → gateways for each currency ─────────
     trust_txns = []
@@ -104,14 +136,20 @@ async def run_setup(workload) -> dict:
                 continue
             holder = accs[holder_idx]
             for currency in currencies:
-                trust_txns.append(("TrustSet", TrustSet(
-                    account=holder.address,
-                    limit_amount=IssuedCurrencyAmount(
-                        currency=currency,
-                        issuer=gateway.address,
-                        value=_TRUSTLINE_LIMIT,
-                    ),
-                ), holder.wallet))
+                trust_txns.append(
+                    (
+                        "TrustSet",
+                        TrustSet(
+                            account=holder.address,
+                            limit_amount=IssuedCurrencyAmount(
+                                currency=currency,
+                                issuer=gateway.address,
+                                value=_TRUSTLINE_LIMIT,
+                            ),
+                        ),
+                        holder.wallet,
+                    )
+                )
     summary["trust_lines"] = await _submit_batch("trust_lines", trust_txns, client)
 
     # ── 3. IOU distribution: gateways send tokens to holders ─────────
@@ -125,25 +163,39 @@ async def run_setup(workload) -> dict:
                 continue
             holder = accs[holder_idx]
             for currency in currencies:
-                iou_txns.append(("Payment", Payment(
-                    account=gateway.address,
-                    destination=holder.address,
-                    amount=IssuedCurrencyAmount(
-                        currency=currency,
-                        issuer=gateway.address,
-                        value=_IOU_DISTRIBUTION_AMOUNT,
-                    ),
-                ), gateway.wallet))
+                iou_txns.append(
+                    (
+                        "Payment",
+                        Payment(
+                            account=gateway.address,
+                            destination=holder.address,
+                            amount=IssuedCurrencyAmount(
+                                currency=currency,
+                                issuer=gateway.address,
+                                value=_IOU_DISTRIBUTION_AMOUNT,
+                            ),
+                        ),
+                        gateway.wallet,
+                    )
+                )
     summary["iou_distribution"] = await _submit_batch("iou_distribution", iou_txns, client)
 
     # ── 4. MPT issuances: 5 from accounts[0..4] ─────────────────────
-    summary["mpt_issuances"] = await _submit_batch("mpt", [
-        ("MPTokenIssuanceCreate", MPTokenIssuanceCreate(
-            account=accs[i].address,
-            flags=MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK,
-        ), accs[i].wallet)
-        for i in range(min(5, len(accs)))
-    ], client)
+    summary["mpt_issuances"] = await _submit_batch(
+        "mpt",
+        [
+            (
+                "MPTokenIssuanceCreate",
+                MPTokenIssuanceCreate(
+                    account=accs[i].address,
+                    flags=MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK,
+                ),
+                accs[i].wallet,
+            )
+            for i in range(min(5, len(accs)))
+        ],
+        client,
+    )
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
     # Wait for WS listener to process MPT issuance results so we have IDs
@@ -157,10 +209,16 @@ async def run_setup(workload) -> dict:
             holder = accs[holder_idx]
             if holder.address == mpt.issuer:
                 continue  # issuer can't authorize themselves
-            mpt_auth_txns.append(("MPTokenAuthorize", MPTokenAuthorize(
-                account=holder.address,
-                mptoken_issuance_id=mpt.mpt_issuance_id,
-            ), holder.wallet))
+            mpt_auth_txns.append(
+                (
+                    "MPTokenAuthorize",
+                    MPTokenAuthorize(
+                        account=holder.address,
+                        mptoken_issuance_id=mpt.mpt_issuance_id,
+                    ),
+                    holder.wallet,
+                )
+            )
     summary["mpt_authorizations"] = await _submit_batch("mpt_auth", mpt_auth_txns, client)
 
     # ── 6. MPT distribution: issuers send tokens to authorized holders
@@ -175,14 +233,20 @@ async def run_setup(workload) -> dict:
             holder = accs[holder_idx]
             if holder.address == mpt.issuer:
                 continue
-            mpt_dist_txns.append(("Payment", Payment(
-                account=mpt.issuer,
-                destination=holder.address,
-                amount=MPTAmount(
-                    mpt_issuance_id=mpt.mpt_issuance_id,
-                    value=_MPT_DISTRIBUTION_AMOUNT,
-                ),
-            ), issuer_acc.wallet))
+            mpt_dist_txns.append(
+                (
+                    "Payment",
+                    Payment(
+                        account=mpt.issuer,
+                        destination=holder.address,
+                        amount=MPTAmount(
+                            mpt_issuance_id=mpt.mpt_issuance_id,
+                            value=_MPT_DISTRIBUTION_AMOUNT,
+                        ),
+                    ),
+                    issuer_acc.wallet,
+                )
+            )
     summary["mpt_distribution"] = await _submit_batch("mpt_distribution", mpt_dist_txns, client)
 
     # ── 7. Vaults: mix of XRP and IOU assets ─────────────────────────
@@ -191,23 +255,35 @@ async def run_setup(workload) -> dict:
         src = accs[10 + i]
         if i < 3:
             # First 3 vaults: XRP
-            vault_txns.append(("VaultCreate", VaultCreate(
-                account=src.address,
-                asset=xrpl.models.XRP(),
-                assets_maximum=_VAULT_ASSETS_MAXIMUM,
-            ), src.wallet))
+            vault_txns.append(
+                (
+                    "VaultCreate",
+                    VaultCreate(
+                        account=src.address,
+                        asset=xrpl.models.XRP(),
+                        assets_maximum=_VAULT_ASSETS_MAXIMUM,
+                    ),
+                    src.wallet,
+                )
+            )
         else:
             # Last 2 vaults: IOU (use first gateway's first currency)
             gw_idx, currencies = _GATEWAYS[0]
             if gw_idx < len(accs):
-                vault_txns.append(("VaultCreate", VaultCreate(
-                    account=src.address,
-                    asset=IssuedCurrency(
-                        currency=currencies[0],
-                        issuer=accs[gw_idx].address,
-                    ),
-                    assets_maximum=_VAULT_ASSETS_MAXIMUM,
-                ), src.wallet))
+                vault_txns.append(
+                    (
+                        "VaultCreate",
+                        VaultCreate(
+                            account=src.address,
+                            asset=IssuedCurrency(
+                                currency=currencies[0],
+                                issuer=accs[gw_idx].address,
+                            ),
+                            assets_maximum=_VAULT_ASSETS_MAXIMUM,
+                        ),
+                        src.wallet,
+                    )
+                )
     summary["vaults"] = await _submit_batch("vaults", vault_txns, client)
 
     # ── 7b. Vault deposits: deposit XRP into first 3 vaults (XRP vaults)
@@ -218,22 +294,36 @@ async def run_setup(workload) -> dict:
         if vault.owner not in workload.accounts:
             continue
         owner = workload.accounts[vault.owner]
-        deposit_txns.append(("VaultDeposit", VaultDeposit(
-            account=owner.address,
-            vault_id=vault.vault_id,
-            amount=params.vault_deposit_amount(),
-        ), owner.wallet))
+        deposit_txns.append(
+            (
+                "VaultDeposit",
+                VaultDeposit(
+                    account=owner.address,
+                    vault_id=vault.vault_id,
+                    amount=params.vault_deposit_amount(),
+                ),
+                owner.wallet,
+            )
+        )
     summary["vault_deposits"] = await _submit_batch("vault_deposits", deposit_txns, client)
 
     # ── 8. NFTs: 5 from accounts[20..24] ─────────────────────────────
-    summary["nfts"] = await _submit_batch("nfts", [
-        ("NFTokenMint", NFTokenMint(
-            account=accs[20 + i].address,
-            nftoken_taxon=0,
-            flags=NFTokenMintFlag.TF_TRANSFERABLE,
-        ), accs[20 + i].wallet)
-        for i in range(min(5, max(0, len(accs) - 20)))
-    ], client)
+    summary["nfts"] = await _submit_batch(
+        "nfts",
+        [
+            (
+                "NFTokenMint",
+                NFTokenMint(
+                    account=accs[20 + i].address,
+                    nftoken_taxon=0,
+                    flags=NFTokenMintFlag.TF_TRANSFERABLE,
+                ),
+                accs[20 + i].wallet,
+            )
+            for i in range(min(5, max(0, len(accs) - 20)))
+        ],
+        client,
+    )
 
     # ── 8b. NFT offers: create sell offers so cancel/accept have state ─
     await asyncio.sleep(3)  # wait for WS to populate NFT state
@@ -242,51 +332,83 @@ async def run_setup(workload) -> dict:
         if nft.owner not in workload.accounts:
             continue
         owner = workload.accounts[nft.owner]
-        nft_offer_txns.append(("NFTokenCreateOffer", NFTokenCreateOffer(
-            account=owner.address,
-            nftoken_id=nft.nftoken_id,
-            amount=params.nft_offer_amount(),
-            flags=NFTokenCreateOfferFlag.TF_SELL_NFTOKEN,
-        ), owner.wallet))
+        nft_offer_txns.append(
+            (
+                "NFTokenCreateOffer",
+                NFTokenCreateOffer(
+                    account=owner.address,
+                    nftoken_id=nft.nftoken_id,
+                    amount=params.nft_offer_amount(),
+                    flags=NFTokenCreateOfferFlag.TF_SELL_NFTOKEN,
+                ),
+                owner.wallet,
+            )
+        )
     summary["nft_offers"] = await _submit_batch("nft_offers", nft_offer_txns, client)
 
     # ── 9. Credentials: 5, issuer=accounts[30], subjects=accounts[31..35]
     if len(accs) > 35:
         issuer = accs[30]
-        summary["credentials"] = await _submit_batch("credentials", [
-            ("CredentialCreate", CredentialCreate(
-                account=issuer.address,
-                subject=accs[31 + i].address,
-                credential_type=_SETUP_CREDENTIAL_TYPE,
-            ), issuer.wallet)
-            for i in range(5)
-        ], client)
+        summary["credentials"] = await _submit_batch(
+            "credentials",
+            [
+                (
+                    "CredentialCreate",
+                    CredentialCreate(
+                        account=issuer.address,
+                        subject=accs[31 + i].address,
+                        credential_type=_SETUP_CREDENTIAL_TYPE,
+                    ),
+                    issuer.wallet,
+                )
+                for i in range(5)
+            ],
+            client,
+        )
     else:
         summary["credentials"] = 0
 
     # ── 10. Tickets: 3 accounts[40..42], 5 tickets each ──────────────
-    summary["tickets"] = await _submit_batch("tickets", [
-        ("TicketCreate", TicketCreate(
-            account=accs[40 + i].address,
-            ticket_count=_TICKET_COUNT,
-        ), accs[40 + i].wallet)
-        for i in range(min(3, max(0, len(accs) - 40)))
-    ], client)
+    summary["tickets"] = await _submit_batch(
+        "tickets",
+        [
+            (
+                "TicketCreate",
+                TicketCreate(
+                    account=accs[40 + i].address,
+                    ticket_count=_TICKET_COUNT,
+                ),
+                accs[40 + i].wallet,
+            )
+            for i in range(min(3, max(0, len(accs) - 40)))
+        ],
+        client,
+    )
     summary["tickets"] *= _TICKET_COUNT
 
     # ── 11. Permissioned domains: 3 from accounts[50..52] ────────────
     if len(accs) > 52:
         cred_issuer = accs[30].address
-        summary["domains"] = await _submit_batch("domains", [
-            ("PermissionedDomainSet", PermissionedDomainSet(
-                account=accs[50 + i].address,
-                accepted_credentials=[XRPLCredential(
-                    issuer=cred_issuer,
-                    credential_type=_SETUP_CREDENTIAL_TYPE,
-                )],
-            ), accs[50 + i].wallet)
-            for i in range(3)
-        ], client)
+        summary["domains"] = await _submit_batch(
+            "domains",
+            [
+                (
+                    "PermissionedDomainSet",
+                    PermissionedDomainSet(
+                        account=accs[50 + i].address,
+                        accepted_credentials=[
+                            XRPLCredential(
+                                issuer=cred_issuer,
+                                credential_type=_SETUP_CREDENTIAL_TYPE,
+                            )
+                        ],
+                    ),
+                    accs[50 + i].wallet,
+                )
+                for i in range(3)
+            ],
+            client,
+        )
     else:
         summary["domains"] = 0
 
@@ -297,13 +419,19 @@ async def run_setup(workload) -> dict:
         if vault.owner not in workload.accounts:
             continue
         owner = workload.accounts[vault.owner]
-        broker_txns.append(("LoanBrokerSet", LoanBrokerSet(
-            account=owner.address,
-            vault_id=vault.vault_id,
-            management_fee_rate=100,             # 0.1% — low fixed fee
-            cover_rate_minimum=1000,              # 1% — minimal collateral requirement
-            cover_rate_liquidation=500,           # 0.5% — below minimum
-        ), owner.wallet))
+        broker_txns.append(
+            (
+                "LoanBrokerSet",
+                LoanBrokerSet(
+                    account=owner.address,
+                    vault_id=vault.vault_id,
+                    management_fee_rate=100,  # 0.1% — low fixed fee
+                    cover_rate_minimum=1000,  # 1% — minimal collateral requirement
+                    cover_rate_liquidation=500,  # 0.5% — below minimum
+                ),
+                owner.wallet,
+            )
+        )
     summary["loan_brokers"] = await _submit_batch("loan_brokers", broker_txns, client)
 
     # ── 12b. Broker cover deposits: fund first-loss capital so loans can be created
@@ -314,11 +442,17 @@ async def run_setup(workload) -> dict:
         if broker.owner not in workload.accounts:
             continue
         owner = workload.accounts[broker.owner]
-        cover_txns.append(("LoanBrokerCoverDeposit", LoanBrokerCoverDeposit(
-            account=owner.address,
-            loan_broker_id=broker.loan_broker_id,
-            amount=_COVER_DEPOSIT,
-        ), owner.wallet))
+        cover_txns.append(
+            (
+                "LoanBrokerCoverDeposit",
+                LoanBrokerCoverDeposit(
+                    account=owner.address,
+                    loan_broker_id=broker.loan_broker_id,
+                    amount=_COVER_DEPOSIT,
+                ),
+                owner.wallet,
+            )
+        )
     summary["cover_deposits"] = await _submit_batch("cover_deposits", cover_txns, client)
 
     # ── 13. Loans: create against brokers (requires counterparty co-signing)
@@ -326,12 +460,13 @@ async def run_setup(workload) -> dict:
     from xrpl.asyncio.transaction import autofill_and_sign
     from xrpl.asyncio.transaction import submit as xrpl_submit
     from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
+
     await asyncio.sleep(3)  # wait for WS to populate broker state
     _SETUP_PRINCIPAL = "1000000"  # 1 XRP — small enough that any account can cover
-    _SETUP_INTEREST = 1000        # 1% annualized
-    _SETUP_INTERVAL = 3600        # 1 hour
-    _SETUP_TOTAL = 3              # 3 payments
-    _SETUP_GRACE = 600            # 10 minutes
+    _SETUP_INTEREST = 1000  # 1% annualized
+    _SETUP_INTERVAL = 3600  # 1 hour
+    _SETUP_TOTAL = 3  # 3 payments
+    _SETUP_GRACE = 600  # 10 minutes
     loan_count = 0
     # Use holder accounts as borrowers — they have plenty of XRP
     borrower_indices = list(_HOLDER_RANGE)
@@ -364,10 +499,15 @@ async def run_setup(workload) -> dict:
             engine = resp.result.get("engine_result", "")
             if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
                 loan_count += 1
-                log.info("Setup: loan submitted (broker=%s borrower=%s)", broker.owner, borrower.address)
+                log.info(
+                    "Setup: loan submitted (broker=%s borrower=%s)", broker.owner, borrower.address
+                )
             else:
-                log.warning("Setup: loan failed: %s (%s)", engine,
-                            resp.result.get("engine_result_message", ""))
+                log.warning(
+                    "Setup: loan failed: %s (%s)",
+                    engine,
+                    resp.result.get("engine_result_message", ""),
+                )
         except Exception as exc:
             log.error("Setup: loan creation failed: %s", exc)
     summary["loans"] = loan_count
@@ -382,9 +522,15 @@ async def run_setup(workload) -> dict:
     # Give WS listener time to process all validated results
     await asyncio.sleep(5)
 
-    log.info("Setup: state after wait — vaults=%d nfts=%d mpt=%d creds=%d "
-             "domains=%d trust=%d loans=%d brokers=%d",
-             len(workload.vaults), len(workload.nfts), len(workload.mpt_issuances),
-             len(workload.credentials), len(workload.domains), len(workload.trust_lines),
-             len(workload.loans), len(workload.loan_brokers))
+    log.info(
+        "Setup: state — v=%d nft=%d mpt=%d cred=%d dom=%d tl=%d loan=%d broker=%d",
+        len(workload.vaults),
+        len(workload.nfts),
+        len(workload.mpt_issuances),
+        len(workload.credentials),
+        len(workload.domains),
+        len(workload.trust_lines),
+        len(workload.loans),
+        len(workload.loan_brokers),
+    )
     return summary

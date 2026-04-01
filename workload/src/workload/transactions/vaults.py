@@ -1,27 +1,32 @@
 """Vault transaction generators for the antithesis workload."""
 
 import xrpl.models
-from workload import logging, params
-from workload.randoms import choice, random
-from workload.submit import submit_tx
-from xrpl.models import IssuedCurrency, IssuedCurrencyAmount as IOUAmount
+from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.models import IssuedCurrency
+from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.amounts import MPTAmount
 from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import (
+    VaultClawback,
     VaultCreate,
-    VaultSet,
     VaultDelete,
     VaultDeposit,
+    VaultSet,
     VaultWithdraw,
-    VaultClawback,
 )
+
+from workload import logging, params
+from workload.models import MPTokenIssuance, TrustLine, UserAccount, Vault
+from workload.randoms import choice, random
+from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
 
 
 # ── Create ───────────────────────────────────────────────────────────
 
-def _amount_for_asset(asset):
+
+def _amount_for_asset(asset: object) -> IOUAmount | MPTAmount | str:
     """Create an Amount matching the vault's asset type."""
     if isinstance(asset, IssuedCurrency):
         return IOUAmount(
@@ -38,7 +43,9 @@ def _amount_for_asset(asset):
     return params.vault_deposit_amount()
 
 
-def _random_asset(trust_lines, mpt_issuances):
+def _random_asset(
+    trust_lines: list[TrustLine], mpt_issuances: list[MPTokenIssuance]
+) -> IssuedCurrency | MPTCurrency | xrpl.models.XRP:
     """Pick a random asset: XRP, IOU, or MPT based on available state."""
     roll = random()
     if trust_lines and roll < 0.33:
@@ -51,13 +58,25 @@ def _random_asset(trust_lines, mpt_issuances):
     return xrpl.models.XRP()
 
 
-async def vault_create(accounts, vaults, trust_lines, mpt_issuances, client):
+async def vault_create(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    trust_lines: list[TrustLine],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     if params.should_send_faulty():
         return await _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, client)
     return await _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, client)
 
 
-async def _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, client):
+async def _vault_create_valid(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    trust_lines: list[TrustLine],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     src_address = choice(list(accounts))
     src = accounts[src_address]
     asset = _random_asset(trust_lines, mpt_issuances)
@@ -70,19 +89,30 @@ async def _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, clie
     await submit_tx("VaultCreate", txn, client, src.wallet)
 
 
-async def _vault_create_faulty(accounts, vaults, trust_lines, mpt_issuances, client):
+async def _vault_create_faulty(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    trust_lines: list[TrustLine],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Deposit ──────────────────────────────────────────────────────────
 
-async def vault_deposit(accounts, vaults, client):
+
+async def vault_deposit(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _vault_deposit_faulty(accounts, vaults, client)
     return await _vault_deposit_valid(accounts, vaults, client)
 
 
-async def _vault_deposit_valid(accounts, vaults, client):
+async def _vault_deposit_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if not vaults:
         log.debug("No vaults to deposit into")
         return
@@ -97,19 +127,26 @@ async def _vault_deposit_valid(accounts, vaults, client):
     await submit_tx("VaultDeposit", txn, client, depositor.wallet)
 
 
-async def _vault_deposit_faulty(accounts, vaults, client):
+async def _vault_deposit_faulty(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Withdraw ─────────────────────────────────────────────────────────
 
-async def vault_withdraw(accounts, vaults, client):
+
+async def vault_withdraw(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _vault_withdraw_faulty(accounts, vaults, client)
     return await _vault_withdraw_valid(accounts, vaults, client)
 
 
-async def _vault_withdraw_valid(accounts, vaults, client):
+async def _vault_withdraw_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if not vaults:
         log.debug("No vaults to withdraw from")
         return
@@ -125,19 +162,26 @@ async def _vault_withdraw_valid(accounts, vaults, client):
     await submit_tx("VaultWithdraw", txn, client, owner.wallet)
 
 
-async def _vault_withdraw_faulty(accounts, vaults, client):
+async def _vault_withdraw_faulty(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Set ──────────────────────────────────────────────────────────────
 
-async def vault_set(accounts, vaults, client):
+
+async def vault_set(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _vault_set_faulty(accounts, vaults, client)
     return await _vault_set_valid(accounts, vaults, client)
 
 
-async def _vault_set_valid(accounts, vaults, client):
+async def _vault_set_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if not vaults:
         log.debug("No vaults to modify")
         return
@@ -154,19 +198,26 @@ async def _vault_set_valid(accounts, vaults, client):
     await submit_tx("VaultSet", txn, client, owner.wallet)
 
 
-async def _vault_set_faulty(accounts, vaults, client):
+async def _vault_set_faulty(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Delete ───────────────────────────────────────────────────────────
 
-async def vault_delete(accounts, vaults, client):
+
+async def vault_delete(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _vault_delete_faulty(accounts, vaults, client)
     return await _vault_delete_valid(accounts, vaults, client)
 
 
-async def _vault_delete_valid(accounts, vaults, client):
+async def _vault_delete_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if not vaults:
         log.debug("No vaults to delete")
         return
@@ -181,19 +232,26 @@ async def _vault_delete_valid(accounts, vaults, client):
     await submit_tx("VaultDelete", txn, client, owner.wallet)
 
 
-async def _vault_delete_faulty(accounts, vaults, client):
+async def _vault_delete_faulty(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Clawback ─────────────────────────────────────────────────────────
 
-async def vault_clawback(accounts, vaults, client):
+
+async def vault_clawback(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _vault_clawback_faulty(accounts, vaults, client)
     return await _vault_clawback_valid(accounts, vaults, client)
 
 
-async def _vault_clawback_valid(accounts, vaults, client):
+async def _vault_clawback_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     if not vaults:
         log.debug("No vaults for clawback")
         return
@@ -213,5 +271,7 @@ async def _vault_clawback_valid(accounts, vaults, client):
     await submit_tx("VaultClawback", txn, client, owner.wallet)
 
 
-async def _vault_clawback_faulty(accounts, vaults, client):
+async def _vault_clawback_faulty(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection

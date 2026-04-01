@@ -6,13 +6,14 @@ import urllib.request
 
 from workload import logger
 
-def make_request(url: str, command: dict):
+
+def make_request(url: str, command: dict) -> bytes | None:
     payload = bytes(json.dumps(command), encoding="utf-8")
     try:
         response = urllib.request.urlopen(url, data=payload).read()
     except urllib.error.HTTPError:
         logger.debug("Bad response from %s", url)
-    except urllib.error.URLError as e:
+    except urllib.error.URLError:
         logger.debug("No response from %s. Probably not running...", url)
     except ConnectionResetError:
         logger.debug("xrpld is not running")
@@ -34,7 +35,9 @@ def is_xrpld_synced(url: str) -> bool:
     try:
         if server_info := get_server_info(url, ["complete_ledgers", "server_state"]):
             complete_ledgers, server_state = server_info.values()
-            synced = complete_ledgers != "empty" and server_state == "full"  # if not custom net, check real validator
+            synced = (
+                complete_ledgers != "empty" and server_state == "full"
+            )  # if not custom net, check real validator
             # TODO: get last ledger, wait a bit, do it again to insure increasing
         else:
             logger.info("Received no server_info from %s", url)
@@ -45,11 +48,8 @@ def is_xrpld_synced(url: str) -> bool:
         logger.exception("Couldn't get server_info")
     return synced
 
-# TODO: get_latest_ledger_{xrpld,clio}
-# TODO: report if ledgers even advancing
 
-
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("xrpld", nargs="?", default=None, type=str)
     # parser.add_argument("xrpld_rpc", help="Other network endpoint to compare with xrpld")

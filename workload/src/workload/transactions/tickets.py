@@ -1,23 +1,29 @@
 """Ticket transaction generators for the antithesis workload."""
 
 import xrpl.models
+from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.models.transactions import Payment
+
 from workload import logging, params
+from workload.models import UserAccount
 from workload.randoms import choice
 from workload.submit import submit_tx
-from xrpl.models.transactions import Payment
 
 log = logging.getLogger(__name__)
 
 
 # ── Create ───────────────────────────────────────────────────────────
 
-async def ticket_create(accounts, client):
+
+async def ticket_create(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
     if params.should_send_faulty():
         return await _ticket_create_faulty(accounts, client)
     return await _ticket_create_valid(accounts, client)
 
 
-async def _ticket_create_valid(accounts, client):
+async def _ticket_create_valid(
+    accounts: dict[str, UserAccount], client: AsyncJsonRpcClient
+) -> None:
     account_id = choice(list(accounts))
     account = accounts[account_id]
     ticket_count = params.ticket_count()
@@ -28,23 +34,24 @@ async def _ticket_create_valid(accounts, client):
     await submit_tx("TicketCreate", txn, client, account.wallet)
 
 
-async def _ticket_create_faulty(accounts, client):
+async def _ticket_create_faulty(
+    accounts: dict[str, UserAccount], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Use ──────────────────────────────────────────────────────────────
 
-async def ticket_use(accounts, client):
+
+async def ticket_use(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
     if params.should_send_faulty():
         return await _ticket_use_faulty(accounts, client)
     return await _ticket_use_valid(accounts, client)
 
 
-async def _ticket_use_valid(accounts, client):
+async def _ticket_use_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
     # Find an account with tickets
-    accounts_with_tickets = [
-        (addr, acc) for addr, acc in accounts.items() if acc.tickets
-    ]
+    accounts_with_tickets = [(addr, acc) for addr, acc in accounts.items() if acc.tickets]
     if not accounts_with_tickets:
         log.debug("No accounts with tickets")
         return
@@ -67,5 +74,5 @@ async def _ticket_use_valid(accounts, client):
     await submit_tx("TicketUse", payment_txn, client, src.wallet)
 
 
-async def _ticket_use_faulty(accounts, client):
+async def _ticket_use_faulty(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
     pass  # TODO: fault injection

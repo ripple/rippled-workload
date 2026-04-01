@@ -1,27 +1,40 @@
 """NFToken transaction generators for the antithesis workload."""
 
-from workload import logging, params
-from workload.randoms import choice
-from workload.submit import submit_tx
+from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import (
-    NFTokenMint, NFTokenMintFlag, NFTokenBurn, NFTokenModify,
-    NFTokenCreateOffer, NFTokenCreateOfferFlag,
-    NFTokenCancelOffer, NFTokenAcceptOffer,
+    NFTokenAcceptOffer,
+    NFTokenBurn,
+    NFTokenCancelOffer,
+    NFTokenCreateOffer,
+    NFTokenCreateOfferFlag,
+    NFTokenMint,
+    NFTokenMintFlag,
+    NFTokenModify,
 )
 from xrpl.models.transactions.transaction import Memo
+
+from workload import logging, params
+from workload.models import NFT, NFTOffer, UserAccount
+from workload.randoms import choice
+from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
 
 
 # ── Mint ─────────────────────────────────────────────────────────────
 
-async def nftoken_mint(accounts, nfts, client):
+
+async def nftoken_mint(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     if params.should_send_faulty():
         return await _nftoken_mint_faulty(accounts, nfts, client)
     return await _nftoken_mint_valid(accounts, nfts, client)
 
 
-async def _nftoken_mint_valid(accounts, nfts, client):
+async def _nftoken_mint_valid(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     account_id = choice(list(accounts))
     account = accounts[account_id]
     txn = NFTokenMint(
@@ -34,13 +47,18 @@ async def _nftoken_mint_valid(accounts, nfts, client):
     await submit_tx("NFTokenMint", txn, client, account.wallet)
 
 
-async def _nftoken_mint_faulty(accounts, nfts, client):
+async def _nftoken_mint_faulty(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Burn ─────────────────────────────────────────────────────────────
 
-async def nftoken_burn(accounts, nfts, client):
+
+async def nftoken_burn(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     if not nfts:
         return
     if params.should_send_faulty():
@@ -48,7 +66,9 @@ async def nftoken_burn(accounts, nfts, client):
     return await _nftoken_burn_valid(accounts, nfts, client)
 
 
-async def _nftoken_burn_valid(accounts, nfts, client):
+async def _nftoken_burn_valid(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     nft = choice(nfts)
     if nft.owner not in accounts:
         return
@@ -57,13 +77,18 @@ async def _nftoken_burn_valid(accounts, nfts, client):
     await submit_tx("NFTokenBurn", txn, client, owner.wallet)
 
 
-async def _nftoken_burn_faulty(accounts, nfts, client):
+async def _nftoken_burn_faulty(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Modify ───────────────────────────────────────────────────────────
 
-async def nftoken_modify(accounts, nfts, client):
+
+async def nftoken_modify(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     if not nfts:
         return
     if params.should_send_faulty():
@@ -71,7 +96,9 @@ async def nftoken_modify(accounts, nfts, client):
     return await _nftoken_modify_valid(accounts, nfts, client)
 
 
-async def _nftoken_modify_valid(accounts, nfts, client):
+async def _nftoken_modify_valid(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     nft = choice(nfts)
     if nft.owner not in accounts:
         return
@@ -84,13 +111,21 @@ async def _nftoken_modify_valid(accounts, nfts, client):
     await submit_tx("NFTokenModify", txn, client, owner.wallet)
 
 
-async def _nftoken_modify_faulty(accounts, nfts, client):
+async def _nftoken_modify_faulty(
+    accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Create Offer ─────────────────────────────────────────────────────
 
-async def nftoken_create_offer(accounts, nfts, nft_offers, client):
+
+async def nftoken_create_offer(
+    accounts: dict[str, UserAccount],
+    nfts: list[NFT],
+    nft_offers: list[NFTOffer],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not nfts:
         return
     if params.should_send_faulty():
@@ -98,7 +133,12 @@ async def nftoken_create_offer(accounts, nfts, nft_offers, client):
     return await _nftoken_create_offer_valid(accounts, nfts, nft_offers, client)
 
 
-async def _nftoken_create_offer_valid(accounts, nfts, nft_offers, client):
+async def _nftoken_create_offer_valid(
+    accounts: dict[str, UserAccount],
+    nfts: list[NFT],
+    nft_offers: list[NFTOffer],
+    client: AsyncJsonRpcClient,
+) -> None:
     nft = choice(nfts)
     if nft.owner not in accounts:
         return
@@ -127,13 +167,21 @@ async def _nftoken_create_offer_valid(accounts, nfts, nft_offers, client):
     await submit_tx("NFTokenCreateOffer", txn, client, wallet)
 
 
-async def _nftoken_create_offer_faulty(accounts, nfts, nft_offers, client):
+async def _nftoken_create_offer_faulty(
+    accounts: dict[str, UserAccount],
+    nfts: list[NFT],
+    nft_offers: list[NFTOffer],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Cancel Offer ─────────────────────────────────────────────────────
 
-async def nftoken_cancel_offer(accounts, nft_offers, client):
+
+async def nftoken_cancel_offer(
+    accounts: dict[str, UserAccount], nft_offers: list[NFTOffer], client: AsyncJsonRpcClient
+) -> None:
     if not nft_offers:
         return
     if params.should_send_faulty():
@@ -141,7 +189,9 @@ async def nftoken_cancel_offer(accounts, nft_offers, client):
     return await _nftoken_cancel_offer_valid(accounts, nft_offers, client)
 
 
-async def _nftoken_cancel_offer_valid(accounts, nft_offers, client):
+async def _nftoken_cancel_offer_valid(
+    accounts: dict[str, UserAccount], nft_offers: list[NFTOffer], client: AsyncJsonRpcClient
+) -> None:
     offer = choice(nft_offers)
     if offer.creator not in accounts:
         return
@@ -153,13 +203,21 @@ async def _nftoken_cancel_offer_valid(accounts, nft_offers, client):
     await submit_tx("NFTokenCancelOffer", txn, client, creator.wallet)
 
 
-async def _nftoken_cancel_offer_faulty(accounts, nft_offers, client):
+async def _nftoken_cancel_offer_faulty(
+    accounts: dict[str, UserAccount], nft_offers: list[NFTOffer], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
 
 
 # ── Accept Offer ─────────────────────────────────────────────────────
 
-async def nftoken_accept_offer(accounts, nfts, nft_offers, client):
+
+async def nftoken_accept_offer(
+    accounts: dict[str, UserAccount],
+    nfts: list[NFT],
+    nft_offers: list[NFTOffer],
+    client: AsyncJsonRpcClient,
+) -> None:
     if not nft_offers:
         return
     if params.should_send_faulty():
@@ -167,7 +225,12 @@ async def nftoken_accept_offer(accounts, nfts, nft_offers, client):
     return await _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client)
 
 
-async def _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client):
+async def _nftoken_accept_offer_valid(
+    accounts: dict[str, UserAccount],
+    nfts: list[NFT],
+    nft_offers: list[NFTOffer],
+    client: AsyncJsonRpcClient,
+) -> None:
     offer = choice(nft_offers)
     if offer.is_sell:
         other_accounts = [a for a in accounts if a != offer.creator]
@@ -192,5 +255,10 @@ async def _nftoken_accept_offer_valid(accounts, nfts, nft_offers, client):
     await submit_tx("NFTokenAcceptOffer", txn, client, wallet)
 
 
-async def _nftoken_accept_offer_faulty(accounts, nfts, nft_offers, client):
+async def _nftoken_accept_offer_faulty(
+    accounts: dict[str, UserAccount],
+    nfts: list[NFT],
+    nft_offers: list[NFTOffer],
+    client: AsyncJsonRpcClient,
+) -> None:
     pass  # TODO: fault injection

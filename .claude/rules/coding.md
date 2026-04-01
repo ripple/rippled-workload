@@ -30,3 +30,15 @@ Exception: `LoanSet` uses manual counterparty co-signing in `lending.py`.
 - All `parallel_driver_*.sh` must use `curl --silent`
 - `first_setup.sh` calls `/setup` deterministically before fault injection
 - Never reference a non-existent endpoint
+
+## Modern Python style (enforced by ruff)
+- All functions must have parameter and return type annotations (ANN001, ANN201)
+- Use `from __future__ import annotations` + `TYPE_CHECKING` for forward refs
+- Use modern syntax: `dict`, `list`, `set` (not `Dict`, `List`, `Set`); `X | Y` (not `Union[X, Y]`)
+- Imports sorted by isort (I) with `workload` as first-party
+- No ambiguous variable names, no unused variables, no unnecessary dict()/list() calls
+- Line length 100 chars max (aligned with rippled C++ codebase)
+- Run `ruff check` and `ruff format` before committing:
+```bash
+nix develop --command bash -c "cd workload && ruff check src/workload/ && ruff format --check src/workload/"
+```

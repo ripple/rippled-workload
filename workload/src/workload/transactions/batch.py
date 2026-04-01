@@ -8,37 +8,43 @@ to _build_inner() as a batch inner type if it's not in the disabled list.
 """
 
 import xrpl.models
-from workload import logging, params
-from workload.randoms import sample, choice
-from workload.submit import submit_tx
 from xrpl.asyncio.account import get_next_valid_seq_number
-from xrpl.models import Batch, BatchFlag, Payment, IssuedCurrencyAmount
+from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.models import Batch, BatchFlag, IssuedCurrencyAmount, Payment
 from xrpl.models.transactions import (
-    AccountSet, AccountSetAsfFlag,
-    TrustSet, NFTokenMint, NFTokenMintFlag,
-    CredentialCreate, TicketCreate, PermissionedDomainSet,
+    AccountSet,
+    AccountSetAsfFlag,
+    CredentialCreate,
     MPTokenIssuanceCreate,
+    NFTokenMint,
+    PermissionedDomainSet,
+    TicketCreate,
+    TrustSet,
 )
-from xrpl.models.transactions.transaction import Memo
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
+from xrpl.models.transactions.transaction import Memo, Transaction
+
+from workload import logging, params
+from workload.models import UserAccount
+from workload.randoms import choice, sample
+from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
 
 # TODO: ASF_AUTHORIZED_NFTOKEN_MINTER excluded — requires nftoken_minter field (AXRT-118)
-_BATCH_SAFE_FLAGS = [
-    f for f in AccountSetAsfFlag
-    if f != AccountSetAsfFlag.ASF_AUTHORIZED_NFTOKEN_MINTER
+_BATCH_SAFE_FLAGS: list[AccountSetAsfFlag] = [
+    f for f in AccountSetAsfFlag if f != AccountSetAsfFlag.ASF_AUTHORIZED_NFTOKEN_MINTER
 ]
 
-_INNER_COMMON = dict(
-    flags=xrpl.models.TransactionFlag.TF_INNER_BATCH_TXN,
-    fee="0",
-    signing_pub_key="",
-)
+_INNER_COMMON: dict[str, object] = {
+    "flags": xrpl.models.TransactionFlag.TF_INNER_BATCH_TXN,
+    "fee": "0",
+    "signing_pub_key": "",
+}
 
 # All currently implemented types that are allowed in batch.
 # Excluded: Vault*, Loan* (in Batch::disabledTxTypes), Batch (cannot nest).
-_INNER_TYPES = [
+_INNER_TYPES: list[str] = [
     "Payment",
     "AccountSet",
     "TrustSet",
@@ -51,7 +57,7 @@ _INNER_TYPES = [
 ]
 
 
-def _build_inner(src, dst, sequence):
+def _build_inner(src: UserAccount, dst: str, sequence: int) -> Transaction:
     """Build a random inner transaction for the batch."""
     tx_type = choice(_INNER_TYPES)
     common = {**_INNER_COMMON, "account": src.address, "sequence": sequence}
@@ -65,7 +71,9 @@ def _build_inner(src, dst, sequence):
     if tx_type == "TrustSet":
         return TrustSet(
             limit_amount=IssuedCurrencyAmount(
-                currency=params.currency_code(), issuer=dst, value=params.trustline_limit(),
+                currency=params.currency_code(),
+                issuer=dst,
+                value=params.trustline_limit(),
             ),
             **common,
         )
@@ -93,32 +101,31 @@ def _build_inner(src, dst, sequence):
 
     if tx_type == "PermissionedDomainSet":
         return PermissionedDomainSet(
-            accepted_credentials=[XRPLCredential(
-                issuer=dst,
-                credential_type=params.credential_type(),
-            )],
+            accepted_credentials=[
+                XRPLCredential(
+                    issuer=dst,
+                    credential_type=params.credential_type(),
+                )
+            ],
             **common,
         )
 
     return Payment(amount=params.batch_inner_amount(), destination=dst, **common)
 
 
-async def batch_random(accounts, client):
+async def batch_random(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
     if params.should_send_faulty():
         return await _batch_random_faulty(accounts, client)
     return await _batch_random_valid(accounts, client)
 
 
-async def _batch_random_valid(accounts, client):
+async def _batch_random_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
     src_address, dst = sample(list(accounts), 2)
     sequence = await get_next_valid_seq_number(src_address, client)
     src = accounts[src_address]
     num_txns = params.batch_size()
 
-    inner_txns = [
-        _build_inner(src, dst, sequence + idx + 1)
-        for idx in range(num_txns)
-    ]
+    inner_txns = [_build_inner(src, dst, sequence + idx + 1) for idx in range(num_txns)]
 
     batch_txn = Batch(
         account=src.address,
@@ -129,5 +136,7 @@ async def _batch_random_valid(accounts, client):
     await submit_tx("Batch", batch_txn, client, src.wallet)
 
 
-async def _batch_random_faulty(accounts, client):
+async def _batch_random_faulty(
+    accounts: dict[str, UserAccount], client: AsyncJsonRpcClient
+) -> None:
     pass  # TODO: fault injection
