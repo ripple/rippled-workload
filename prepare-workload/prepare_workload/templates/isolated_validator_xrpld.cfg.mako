@@ -43,7 +43,7 @@ huge
 1
 
 [rpc_startup]
-{ "command": "log_level", "severity": "info" }
+{ "command": "log_level", "severity": "warning" }
 
 [ssl_verify]
 0
