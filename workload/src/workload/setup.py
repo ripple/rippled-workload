@@ -79,10 +79,34 @@ def _accounts_list(workload: Workload) -> list[UserAccount]:
     return list(workload.accounts.values())
 
 
+async def _wait_for_sync(client: AsyncJsonRpcClient, timeout: int = 60) -> None:
+    """Wait until xrpld can accept transactions."""
+    from xrpl.models.requests import ServerInfo
+
+    start = asyncio.get_event_loop().time()
+    while True:
+        try:
+            resp = await client.request(ServerInfo())
+            state = resp.result.get("info", {}).get("server_state")
+            if state == "full":
+                return
+        except Exception:
+            pass
+        elapsed = asyncio.get_event_loop().time() - start
+        if elapsed > timeout:
+            log.warning("Setup: sync wait timed out after %ds", timeout)
+            return
+        await asyncio.sleep(2)
+
+
 async def _submit_batch(
-    name: str, txns: list[tuple[str, object, Wallet]], client: AsyncJsonRpcClient
+    name: str,
+    txns: list[tuple[str, object, Wallet]],
+    client: AsyncJsonRpcClient,
 ) -> int:
-    """Submit a batch of (tx_type_name, txn, wallet) tuples. Returns count of accepted."""
+    """Submit a batch, waiting for sync if the node is temporarily unavailable."""
+    if not txns:
+        return 0
     created = 0
     for i, (tx_type, txn, wallet) in enumerate(txns):
         try:
@@ -93,7 +117,21 @@ async def _submit_batch(
             else:
                 log.warning("Setup %s[%d]: %s", name, i, engine)
         except Exception as exc:
-            log.error("Setup %s[%d] failed: %s", name, i, exc)
+            if "notSynced" in str(exc):
+                log.info("Setup %s: node desynced, waiting...", name)
+                await _wait_for_sync(client)
+                # retry this one transaction
+                try:
+                    result = await submit_tx(tx_type, txn, client, wallet)
+                    engine = result.get("engine_result", "")
+                    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
+                        created += 1
+                    else:
+                        log.warning("Setup %s[%d]: %s", name, i, engine)
+                except Exception as retry_exc:
+                    log.error("Setup %s[%d] retry failed: %s", name, i, retry_exc)
+            else:
+                log.error("Setup %s[%d] failed: %s", name, i, exc)
     return created
 
 

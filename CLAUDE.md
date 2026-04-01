@@ -53,7 +53,6 @@ workload/src/workload/
 │   ├── trustlines.py   # TrustSet
 │   └── vaults.py       # VaultCreate/Deposit/Withdraw/Set/Delete/Clawback
 test_composer/all_transactions/
-├── first_setup.sh            # Seeds state before fault injection
 └── parallel_driver_*.sh      # 35 shell scripts (one per transaction type)
 genesis/
 ├── genesis_ledger.json       # Committed base (CI injects amendment hashes)

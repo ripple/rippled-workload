@@ -28,7 +28,7 @@ Exception: `LoanSet` uses manual counterparty co-signing in `lending.py`.
 
 ## Test composer scripts
 - All `parallel_driver_*.sh` must use `curl --silent`
-- `first_setup.sh` calls `/setup` deterministically before fault injection
+- Setup runs during FastAPI startup (before `setup_complete()`) — no `first_*` scripts needed
 - Never reference a non-existent endpoint
 
 ## Modern Python style (enforced by ruff)

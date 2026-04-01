@@ -78,9 +78,7 @@ class Workload:
 
         register_assertions()
 
-        workload_ready_msg = "Workload initialization complete"
-        logger.info("%s after %ss", workload_ready_msg, int(time.time() - self.start_time))
-        lifecycle.setup_complete(details={"message": workload_ready_msg})
+        logger.info("Workload initialized after %ss", int(time.time() - self.start_time))
 
     def load_initial_accounts(self, accounts_json: Path) -> None:
         """Load pre-generated accounts from a JSON file.
@@ -149,37 +147,36 @@ get_workload = None
 
 def create_app(workload: Workload) -> FastAPI:
     import asyncio
+    from contextlib import asynccontextmanager
 
     from workload.ws_listener import start_ws_listener
 
-    app = FastAPI()
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        from workload.setup import run_setup
+
+        asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
+        await asyncio.sleep(1)  # let WS listener connect before setup submits
+
+        try:
+            result = await run_setup(workload)
+            reachable("workload::setup_complete_with_state", result)
+        except Exception as e:
+            logger.error(f"setup failed: {type(e).__name__}: {e}")
+            unreachable(
+                "workload::setup_failed",
+                {"error": f"{type(e).__name__}: {e}"},
+            )
+
+        lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
+        yield  # app runs here, shutdown after yield
+
+    app = FastAPI(lifespan=lifespan)
 
     global get_workload
 
     def get_workload():
         return workload
-
-    @app.on_event("startup")
-    async def startup():
-        asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
-
-    # Setup endpoint (special — has its own logic)
-    @app.get("/setup")
-    async def setup_endpoint(w: Workload = Depends(get_workload)):
-        from workload.setup import run_setup
-
-        try:
-            result = await run_setup(w)
-            reachable("workload::setup_complete_with_state", result)
-            return result
-        except (XRPLException, httpx.TimeoutException) as e:
-            logger.warning(f"setup: {type(e).__name__}: {e}")
-        except Exception as e:
-            logger.error(f"setup failed: {type(e).__name__}: {e}")
-            unreachable(
-                "workload::endpoint_exception",
-                {"endpoint": "/setup", "error": f"{type(e).__name__}: {e}"},
-            )
 
     # Register all transaction endpoints from the registry
     for name, path, handler_fn, args_fn, _ in REGISTRY:
