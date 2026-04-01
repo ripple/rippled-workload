@@ -69,31 +69,33 @@ class Amendment:
 
 
 def parse_features_macro(macro_path: Path) -> list[str]:
-    """Extract all supported amendment names from a rippled features.macro file.
+    """Extract amendment names from a rippled features.macro file.
 
-    Parses XRPL_FEATURE/XRPL_FIX entries with Supported::yes and all
-    XRPL_RETIRE_FEATURE/XRPL_RETIRE_FIX entries (which are implicitly supported).
+    Parses XRPL_FEATURE/XRPL_FIX entries with both Supported::yes and
+    Supported::no. Features with Supported::no are implemented but not
+    yet enabled for voting — they still need testing.
 
-    Returns a sorted list of amendment name strings suitable for the
-    [features] config section.
+    Excludes XRPL_RETIRE_FEATURE/XRPL_RETIRE_FIX — retired amendments are
+    permanently enabled and cannot be disabled; they only exist to support
+    replaying older ledgers with newer binaries.
+
+    Returns a sorted list of amendment name strings.
     """
-    text = macro_path.read_text()
+    # Strip C/C++ line comments to avoid matching examples in comments
+    text = "\n".join(
+        line for line in macro_path.read_text().splitlines()
+        if not line.lstrip().startswith("//")
+    )
     amendments = []
 
     for m in re.finditer(
-        r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text
+        r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::(yes|no)\s*,", text
     ):
         amendments.append(m.group(1))
 
     for m in re.finditer(
-        r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text
+        r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::(yes|no)\s*,", text
     ):
-        amendments.append("fix" + m.group(1))
-
-    for m in re.finditer(r"XRPL_RETIRE_FEATURE\s*\(\s*(\w+)\s*\)", text):
-        amendments.append(m.group(1))
-
-    for m in re.finditer(r"XRPL_RETIRE_FIX\s*\(\s*(\w+)\s*\)", text):
         amendments.append("fix" + m.group(1))
 
     return sorted(amendments)

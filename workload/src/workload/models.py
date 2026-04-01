@@ -13,6 +13,14 @@ class NFT:
 
 
 @dataclass
+class NFTOffer:
+    creator: str
+    offer_id: str
+    nftoken_id: str
+    is_sell: bool
+
+
+@dataclass
 class Account:
     wallet: Wallet
     address: str = field(init=False)
@@ -60,3 +68,50 @@ class Amm:
     account: str
     assets: list[IssuedCurrency]
     lp_token: list[IssuedCurrency]
+
+
+@dataclass
+class Credential:
+    issuer: str
+    subject: str
+    credential_type: str
+
+
+@dataclass
+class Vault:
+    owner: str
+    vault_id: str
+    asset: object = None  # XRP(), IssuedCurrency, or MPTCurrency
+
+
+@dataclass
+class PermissionedDomain:
+    owner: str
+    domain_id: str
+
+
+@dataclass
+class MPTokenIssuance:
+    issuer: str
+    mpt_issuance_id: str
+
+
+@dataclass
+class TrustLine:
+    account_a: str
+    account_b: str
+    currency: str
+
+
+@dataclass
+class LoanBroker:
+    owner: str
+    loan_broker_id: str
+    vault_id: str
+
+
+@dataclass
+class Loan:
+    borrower: str
+    loan_id: str
+    loan_broker_id: str
