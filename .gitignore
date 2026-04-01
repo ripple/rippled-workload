@@ -1,3 +1,7 @@
+!CLAUDE.md
+!.claude/
+.claude/settings.local.json
+
 .idea/
 .idea_modules/
 .devcontainer/
