@@ -4,17 +4,16 @@ Follows the fuzzer's naming convention:
   "workload::seen : TxType"    — transaction was created and submitted (reachable)
   "workload::success : TxType" — transaction got tesSUCCESS (sometimes)
 
-Uses assert_raw() to register catalog entries at startup and emit assertions
-at runtime. The static scanner cannot extract assertion names from f-strings,
-so we pre-register all known transaction types via register_assertions().
+Catalog entries are pre-registered at startup via assert_raw(hit=False) because
+the static scanner cannot extract assertion names from f-strings. Runtime
+assertions use the simple SDK functions (reachable, sometimes, always) which
+match catalog entries by message string.
 """
 
-from antithesis.assertions import assert_raw
+from antithesis.assertions import assert_raw, always, sometimes, reachable
 from antithesis.lifecycle import send_event
 
-_LOC_FILE = "workload/assertions.py"
-_LOC_CLASS = ""
-_LOC_COL = 0
+_RIPPLED_INTERNAL_ERRORS = ("tefEXCEPTION", "tefINTERNAL", "tefINVARIANT_FAILED", "tefFAILURE")
 
 
 def _seen_id(name: str) -> str:
@@ -29,51 +28,38 @@ def _failure_id(name: str) -> str:
     return f"workload::failure : {name}"
 
 
-def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
-    """Register a single catalog entry (hit=False) so Antithesis knows this assertion exists."""
+def _catalog(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
+    """Register a catalog entry (hit=False) so Antithesis knows this assertion exists."""
     assert_raw(
-        condition=True,
-        message=message,
-        details={},
-        loc_filename=_LOC_FILE,
-        loc_function="register_assertions",
-        loc_class=_LOC_CLASS,
-        loc_begin_line=0,
-        loc_begin_column=_LOC_COL,
-        hit=False,
-        must_hit=must_hit,
-        assert_type=assert_type,
-        display_type=display_type,
-        assert_id=message,
+        condition=True, message=message, details={},
+        loc_filename="workload/assertions.py", loc_function="register_assertions",
+        loc_class="", loc_begin_line=0, loc_begin_column=0,
+        hit=False, must_hit=must_hit,
+        assert_type=assert_type, display_type=display_type, assert_id=message,
     )
 
 
 def register_assertions() -> None:
-    """Register catalog entries for all known transaction types.
-
-    Call once at app startup before any transactions are submitted.
-    """
+    """Pre-register all assertion catalog entries at startup."""
     from workload.transactions import TX_TYPES
     for name in TX_TYPES:
-        _emit_catalog_entry(_seen_id(name), "reachability", "Reachable", must_hit=True)
-        _emit_catalog_entry(_success_id(name), "sometimes", "Sometimes", must_hit=True)
-        _emit_catalog_entry(_failure_id(name), "sometimes", "Sometimes", must_hit=True)
-    _emit_catalog_entry("workload::always : valid_engine_result", "always", "Always", must_hit=True)
-    _emit_catalog_entry("workload::always : no_internal_rippled_error", "always", "Always", must_hit=True)
-    # Setup phase assertions
-    for setup_key in [
+        _catalog(_seen_id(name), "reachability", "Reachable", must_hit=True)
+        _catalog(_success_id(name), "sometimes", "Sometimes", must_hit=True)
+        _catalog(_failure_id(name), "sometimes", "Sometimes", must_hit=True)
+    _catalog("workload::always : valid_engine_result", "always", "Always", must_hit=True)
+    _catalog("workload::always : no_internal_rippled_error", "always", "Always", must_hit=True)
+    for key in [
         "gateways", "trust_lines", "iou_distribution",
         "mpt_issuances", "mpt_authorizations", "mpt_distribution",
         "vaults", "vault_deposits", "nfts", "nft_offers",
         "credentials", "tickets", "domains",
-        "loan_brokers", "cover_deposits",
-        "loans",
+        "loan_brokers", "cover_deposits", "loans",
     ]:
-        _emit_catalog_entry(f"workload::setup_{setup_key}", "reachability", "Reachable", must_hit=True)
+        _catalog(f"workload::setup_{key}", "reachability", "Reachable", must_hit=True)
 
 
 def tx_submitted(name: str, txn=None) -> None:
-    """Report that a transaction was created and submitted to the network."""
+    """Report that a transaction was submitted to the network."""
     details = {}
     if txn is not None:
         try:
@@ -81,29 +67,11 @@ def tx_submitted(name: str, txn=None) -> None:
         except Exception:
             details = {"raw": str(txn)}
     send_event(f"workload::seen : {name}", details)
-    assert_raw(
-        condition=True,
-        message=_seen_id(name),
-        details={},
-        loc_filename=_LOC_FILE,
-        loc_function="tx_submitted",
-        loc_class=_LOC_CLASS,
-        loc_begin_line=0,
-        loc_begin_column=_LOC_COL,
-        hit=True,
-        must_hit=True,
-        assert_type="reachability",
-        display_type="Reachable",
-        assert_id=_seen_id(name),
-    )
+    reachable(_seen_id(name), {})
 
 
 def tx_result(name: str, result: dict) -> None:
-    """Report a transaction result to Antithesis.
-
-    Emits a sometimes assertion that the transaction succeeded at least once,
-    plus a lifecycle event with full result details.
-    """
+    """Report a validated transaction result."""
     engine_result = (
         result.get("engine_result")
         or result.get("meta", {}).get("TransactionResult")
@@ -117,69 +85,13 @@ def tx_result(name: str, result: dict) -> None:
         "hash": result.get("hash", ""),
     }
     send_event(f"workload::result : {name}", details)
-    # Internal rippled errors — these indicate bugs in transaction processing logic.
-    # Must never occur; if they do, it's a finding worth investigating.
-    _RIPPLED_INTERNAL_ERRORS = ("tefEXCEPTION", "tefINTERNAL", "tefINVARIANT_FAILED", "tefFAILURE")
-    assert_raw(
-        condition=engine_result not in _RIPPLED_INTERNAL_ERRORS,
-        message="workload::always : no_internal_rippled_error",
-        details={"engine_result": engine_result, "tx_type": name, "hash": details.get("hash", "")},
-        loc_filename=_LOC_FILE,
-        loc_function="tx_result",
-        loc_class=_LOC_CLASS,
-        loc_begin_line=0,
-        loc_begin_column=_LOC_COL,
-        hit=True,
-        must_hit=True,
-        assert_type="always",
-        display_type="Always",
-        assert_id="workload::always : no_internal_rippled_error",
-    )
-    # engine_result should always be a valid string
-    assert_raw(
-        condition=engine_result not in (None, "", "unknown"),
-        message="workload::always : valid_engine_result",
-        details={"engine_result": engine_result, "tx_type": name},
-        loc_filename=_LOC_FILE,
-        loc_function="tx_result",
-        loc_class=_LOC_CLASS,
-        loc_begin_line=0,
-        loc_begin_column=_LOC_COL,
-        hit=True,
-        must_hit=True,
-        assert_type="always",
-        display_type="Always",
-        assert_id="workload::always : valid_engine_result",
-    )
-    # tx succeeded at least once
-    assert_raw(
-        condition=engine_result == "tesSUCCESS",
-        message=_success_id(name),
-        details={"engine_result": engine_result},
-        loc_filename=_LOC_FILE,
-        loc_function="tx_result",
-        loc_class=_LOC_CLASS,
-        loc_begin_line=0,
-        loc_begin_column=_LOC_COL,
-        hit=True,
-        must_hit=True,
-        assert_type="sometimes",
-        display_type="Sometimes",
-        assert_id=_success_id(name),
-    )
-    # tx failed at least once (verifies error paths are exercised)
-    assert_raw(
-        condition=engine_result != "tesSUCCESS",
-        message=_failure_id(name),
-        details={"engine_result": engine_result},
-        loc_filename=_LOC_FILE,
-        loc_function="tx_result",
-        loc_class=_LOC_CLASS,
-        loc_begin_line=0,
-        loc_begin_column=_LOC_COL,
-        hit=True,
-        must_hit=True,
-        assert_type="sometimes",
-        display_type="Sometimes",
-        assert_id=_failure_id(name),
-    )
+    always(engine_result not in _RIPPLED_INTERNAL_ERRORS,
+           "workload::always : no_internal_rippled_error",
+           {"engine_result": engine_result, "tx_type": name, "hash": details.get("hash", "")})
+    always(engine_result not in (None, "", "unknown"),
+           "workload::always : valid_engine_result",
+           {"engine_result": engine_result, "tx_type": name})
+    sometimes(engine_result == "tesSUCCESS",
+              _success_id(name), {"engine_result": engine_result})
+    sometimes(engine_result != "tesSUCCESS",
+              _failure_id(name), {"engine_result": engine_result})
