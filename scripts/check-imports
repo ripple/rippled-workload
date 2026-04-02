@@ -19,6 +19,7 @@ from workload.transactions.lending import (
 )
 from workload.assertions import tx_submitted, tx_result, register_assertions
 from workload.submit import submit_tx
+from workload.sequence import SequenceTracker
 from workload.ws_listener import start_ws_listener
 from workload.setup import run_setup
 from workload.params import should_send_faulty, fake_account, fake_id

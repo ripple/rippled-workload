@@ -73,6 +73,10 @@ class Workload:
         )
         self.client = AsyncJsonRpcClient(self.xrpld)
 
+        from workload.sequence import SequenceTracker
+
+        self.seq = SequenceTracker(self.client)
+
         self.wait_for_network(self.xrpld)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
