@@ -5,7 +5,7 @@ including IOU gateways with token distribution and MPT authorization.
 
 Account allocation:
   [0..4]   — MPT issuers
-  [10..14] — Vault creators (also get trust lines + IOU/MPT balances for non-XRP vaults)
+  [10..16] — Vault creators (also get trust lines + IOU/MPT balances for non-XRP vaults)
   [20..24] — NFT minters
   [30..35] — Credential issuer + subjects
   [40..42] — Ticket holders
@@ -27,6 +27,7 @@ from antithesis.assertions import reachable
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrency, IssuedCurrencyAmount
 from xrpl.models.amounts import MPTAmount
+from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import (
     AccountSet,
     AccountSetAsfFlag,
@@ -72,7 +73,7 @@ _GATEWAYS = [
 
 # Accounts that receive IOU/MPT balances
 _HOLDER_RANGE = range(62, 72)  # accounts[62..71]
-_VAULT_RANGE = range(10, 15)  # accounts[10..14] also get balances for non-XRP vaults
+_VAULT_RANGE = range(10, 17)  # accounts[10..16] also get balances for non-XRP vaults
 
 
 def _accounts_list(workload: Workload) -> list[UserAccount]:
@@ -287,9 +288,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             )
     summary["mpt_distribution"] = await _submit_batch("mpt_distribution", mpt_dist_txns, client)
 
-    # ── 7. Vaults: mix of XRP and IOU assets ─────────────────────────
+    # ── 7. Vaults: mix of XRP, IOU, and MPT assets ───────────────────
     vault_txns = []
-    for i in range(min(5, max(0, len(accs) - 10))):
+    for i in range(min(7, max(0, len(accs) - 10))):
         src = accs[10 + i]
         if i < 3:
             # First 3 vaults: XRP
@@ -304,8 +305,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                     src.wallet,
                 )
             )
-        else:
-            # Last 2 vaults: IOU (use first gateway's first currency)
+        elif i < 5:
+            # Next 2 vaults: IOU (use first gateway's first currency)
             gw_idx, currencies = _GATEWAYS[0]
             if gw_idx < len(accs):
                 vault_txns.append(
@@ -322,23 +323,52 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         src.wallet,
                     )
                 )
+        else:
+            # Last 2 vaults: MPT (use first available MPT issuance)
+            if workload.mpt_issuances:
+                mpt = workload.mpt_issuances[i - 5]  # use different MPTs if available
+                if i - 5 >= len(workload.mpt_issuances):
+                    mpt = workload.mpt_issuances[0]
+                vault_txns.append(
+                    (
+                        "VaultCreate",
+                        VaultCreate(
+                            account=src.address,
+                            asset=MPTCurrency(mpt_issuance_id=mpt.mpt_issuance_id),
+                            assets_maximum=_VAULT_ASSETS_MAXIMUM,
+                        ),
+                        src.wallet,
+                    )
+                )
     summary["vaults"] = await _submit_batch("vaults", vault_txns, client)
 
-    # ── 7b. Vault deposits: deposit XRP into first 3 vaults (XRP vaults)
-    # IOU vaults (indices 3,4) need IOU amounts — skip for now
+    # ── 7b. Vault deposits: deposit into all vaults (XRP and IOU)
     await asyncio.sleep(3)  # wait for WS to populate vault state
     deposit_txns = []
-    for vault in workload.vaults[:3]:
+    for vault in workload.vaults:
         if vault.owner not in workload.accounts:
             continue
         owner = workload.accounts[vault.owner]
+        if isinstance(vault.asset, IssuedCurrency):
+            amount = IssuedCurrencyAmount(
+                currency=vault.asset.currency,
+                issuer=vault.asset.issuer,
+                value=params.iou_amount(),
+            )
+        elif isinstance(vault.asset, MPTCurrency):
+            amount = MPTAmount(
+                mpt_issuance_id=vault.asset.mpt_issuance_id,
+                value=params.mpt_amount(),
+            )
+        else:
+            amount = params.vault_deposit_amount()
         deposit_txns.append(
             (
                 "VaultDeposit",
                 VaultDeposit(
                     account=owner.address,
                     vault_id=vault.vault_id,
-                    amount=params.vault_deposit_amount(),
+                    amount=amount,
                 ),
                 owner.wallet,
             )

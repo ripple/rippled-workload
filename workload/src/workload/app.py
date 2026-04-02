@@ -39,6 +39,9 @@ class Workload:
         self.mpt_issuances = []
         self.loan_brokers = []
         self.loans = []
+        self.deleted_vault_ids: list[str] = []
+        self.deleted_broker_ids: list[str] = []
+        self.deleted_loan_ids: list[str] = []
         self.funding_wallet: Wallet = None
         self.failures = []
         self.currency_codes = conf["currencies"]["codes"]

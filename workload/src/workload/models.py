@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from xrpl.models.currencies import IssuedCurrency
+import xrpl.models
+from xrpl.models.currencies import IssuedCurrency, MPTCurrency
 from xrpl.wallet import Wallet
 
 
@@ -82,7 +83,8 @@ class Credential:
 class Vault:
     owner: str
     vault_id: str
-    asset: object = None  # XRP(), IssuedCurrency, or MPTCurrency
+    asset: IssuedCurrency | MPTCurrency | xrpl.models.XRP | None = None
+    balance: int = 0
 
 
 @dataclass
@@ -109,6 +111,7 @@ class LoanBroker:
     owner: str
     loan_broker_id: str
     vault_id: str
+    cover_balance: int = 0
 
 
 @dataclass
@@ -116,3 +119,6 @@ class Loan:
     borrower: str
     loan_id: str
     loan_broker_id: str
+    principal: int = 0
+    is_defaulted: bool = False
+    is_impaired: bool = False

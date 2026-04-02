@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 
 # ── State updater helpers ────────────────────────────────────────────
 # Each handles a validated tesSUCCESS by updating workload tracking lists.
+import xrpl.models
+from xrpl.models import IssuedCurrency
+from xrpl.models.currencies import MPTCurrency
+
 from workload.models import (
     NFT,
     Credential,
@@ -100,16 +104,59 @@ def _on_trust_set(w: Workload, tx: dict, meta: dict) -> None:
         )
 
 
+def _parse_asset(
+    raw: dict,
+) -> IssuedCurrency | MPTCurrency | xrpl.models.XRP:
+    """Parse an Asset field from a transaction JSON into an xrpl-py model."""
+    if "mpt_issuance_id" in raw:
+        return MPTCurrency(mpt_issuance_id=raw["mpt_issuance_id"])
+    if "issuer" in raw:
+        return IssuedCurrency(currency=raw.get("currency", ""), issuer=raw["issuer"])
+    return xrpl.models.XRP()
+
+
 def _on_vault_create(w: Workload, tx: dict, meta: dict) -> None:
     vault_id = _extract_created_id(meta, "Vault")
     if vault_id:
-        w.vaults.append(Vault(owner=tx["Account"], vault_id=vault_id))
+        asset = _parse_asset(tx.get("Asset", {}))
+        w.vaults.append(Vault(owner=tx["Account"], vault_id=vault_id, asset=asset))
 
 
 def _on_vault_delete(w: Workload, tx: dict, meta: dict) -> None:
     vault_id = _extract_deleted_id(meta, "Vault")
     if vault_id:
         w.vaults[:] = [v for v in w.vaults if v.vault_id != vault_id]
+        w.deleted_vault_ids.append(vault_id)
+
+
+def _extract_amount(tx: dict) -> int:
+    """Extract integer amount from a transaction's Amount field (drops or IOU/MPT value)."""
+    amt = tx.get("Amount", "0")
+    if isinstance(amt, str):
+        return int(amt)
+    return int(amt.get("value", "0"))
+
+
+def _find_vault(w: Workload, vault_id: str) -> Vault | None:
+    return next((v for v in w.vaults if v.vault_id == vault_id), None)
+
+
+def _on_vault_deposit(w: Workload, tx: dict, meta: dict) -> None:
+    vault = _find_vault(w, tx.get("VaultID", ""))
+    if vault:
+        vault.balance += _extract_amount(tx)
+
+
+def _on_vault_withdraw(w: Workload, tx: dict, meta: dict) -> None:
+    vault = _find_vault(w, tx.get("VaultID", ""))
+    if vault:
+        vault.balance = max(0, vault.balance - _extract_amount(tx))
+
+
+def _on_vault_clawback(w: Workload, tx: dict, meta: dict) -> None:
+    vault = _find_vault(w, tx.get("VaultID", ""))
+    if vault:
+        vault.balance = max(0, vault.balance - _extract_amount(tx))
 
 
 def _on_nftoken_mint(w: Workload, tx: dict, meta: dict) -> None:
@@ -216,13 +263,40 @@ def _on_loan_broker_delete(w: Workload, tx: dict, meta: dict) -> None:
     broker_id = _extract_deleted_id(meta, "LoanBroker")
     if broker_id:
         w.loan_brokers[:] = [b for b in w.loan_brokers if b.loan_broker_id != broker_id]
+        w.deleted_broker_ids.append(broker_id)
+
+
+def _find_broker(w: Workload, broker_id: str) -> LoanBroker | None:
+    return next((b for b in w.loan_brokers if b.loan_broker_id == broker_id), None)
+
+
+def _find_loan(w: Workload, loan_id: str) -> Loan | None:
+    return next((loan for loan in w.loans if loan.loan_id == loan_id), None)
+
+
+def _on_loan_broker_cover_deposit(w: Workload, tx: dict, meta: dict) -> None:
+    broker = _find_broker(w, tx.get("LoanBrokerID", ""))
+    if broker:
+        broker.cover_balance += _extract_amount(tx)
+
+
+def _on_loan_broker_cover_withdraw(w: Workload, tx: dict, meta: dict) -> None:
+    broker = _find_broker(w, tx.get("LoanBrokerID", ""))
+    if broker:
+        broker.cover_balance = max(0, broker.cover_balance - _extract_amount(tx))
 
 
 def _on_loan_set(w: Workload, tx: dict, meta: dict) -> None:
     loan_id = _extract_created_id(meta, "Loan")
     if loan_id:
+        principal = int(tx.get("PrincipalRequested", "0"))
         w.loans.append(
-            Loan(borrower=tx["Account"], loan_id=loan_id, loan_broker_id=tx.get("LoanBrokerID", ""))
+            Loan(
+                borrower=tx["Account"],
+                loan_id=loan_id,
+                loan_broker_id=tx.get("LoanBrokerID", ""),
+                principal=principal,
+            )
         )
 
 
@@ -230,6 +304,27 @@ def _on_loan_delete(w: Workload, tx: dict, meta: dict) -> None:
     loan_id = _extract_deleted_id(meta, "Loan")
     if loan_id:
         w.loans[:] = [loan for loan in w.loans if loan.loan_id != loan_id]
+        w.deleted_loan_ids.append(loan_id)
+
+
+def _on_loan_manage(w: Workload, tx: dict, meta: dict) -> None:
+    loan = _find_loan(w, tx.get("LoanID", ""))
+    if not loan:
+        return
+    flags = tx.get("Flags", 0)
+    # TF_LOAN_DEFAULT = 0x00010000, TF_LOAN_IMPAIR = 0x00020000, TF_LOAN_UNIMPAIR = 0x00040000
+    if flags & 0x00010000:
+        loan.is_defaulted = True
+    if flags & 0x00020000:
+        loan.is_impaired = True
+    if flags & 0x00040000:
+        loan.is_impaired = False
+
+
+def _on_loan_pay(w: Workload, tx: dict, meta: dict) -> None:
+    loan = _find_loan(w, tx.get("LoanID", ""))
+    if loan:
+        loan.principal = max(0, loan.principal - _extract_amount(tx))
 
 
 # ── Registry ─────────────────────────────────────────────────────────
@@ -381,14 +476,14 @@ REGISTRY = [
         "/vault/deposit/random",
         vault_deposit,
         lambda w: (w.accounts, w.vaults, w.client),
-        None,
+        _on_vault_deposit,
     ),
     (
         "VaultWithdraw",
         "/vault/withdraw/random",
         vault_withdraw,
         lambda w: (w.accounts, w.vaults, w.client),
-        None,
+        _on_vault_withdraw,
     ),
     (
         "VaultSet",
@@ -409,7 +504,7 @@ REGISTRY = [
         "/vault/clawback/random",
         vault_clawback,
         lambda w: (w.accounts, w.vaults, w.client),
-        None,
+        _on_vault_clawback,
     ),
     (
         "PermissionedDomainSet",
@@ -451,14 +546,14 @@ REGISTRY = [
         "/loan/broker/cover/deposit/random",
         loan_broker_cover_deposit,
         lambda w: (w.accounts, w.loan_brokers, w.client),
-        None,
+        _on_loan_broker_cover_deposit,
     ),
     (
         "LoanBrokerCoverWithdraw",
         "/loan/broker/cover/withdraw/random",
         loan_broker_cover_withdraw,
         lambda w: (w.accounts, w.loan_brokers, w.client),
-        None,
+        _on_loan_broker_cover_withdraw,
     ),
     (
         "LoanSet",
@@ -479,14 +574,14 @@ REGISTRY = [
         "/loan/manage/random",
         loan_manage,
         lambda w: (w.accounts, w.loan_brokers, w.loans, w.client),
-        None,
+        _on_loan_manage,
     ),
     (
         "LoanPay",
         "/loan/pay/random",
         loan_pay,
         lambda w: (w.accounts, w.loans, w.client),
-        None,
+        _on_loan_pay,
     ),
 ]
 

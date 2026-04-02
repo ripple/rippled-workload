@@ -1,5 +1,8 @@
 # Coding Rules
 
+## Planning before implementation
+For non-trivial tasks, start with open questions and an outline — don't jump straight to a complete plan or code. Present your questions, get answers, propose an approach, get feedback, then implement. Use Plan Mode for multi-step work.
+
 ## No tech debt
 Clean up dead code immediately in the same change. No unused imports, orphaned CLI flags, stale templates, or dead functions left behind.
 
@@ -13,32 +16,20 @@ One-liner commit messages only, like all existing commits in this repo.
 If a refactor makes the code better, more idiomatic, or reduces maintenance burden — do it. Don't propose half-measures out of reluctance to touch many files.
 
 ## Keep docs in sync with code
-When a code change affects project structure, conventions, submission patterns, assertion registration, setup steps, or CI pipeline — update the relevant `.claude/` docs and `CLAUDE.md` in the same change. Stale docs are worse than no docs.
+When a code change affects project structure, conventions, submission patterns, assertion registration, setup steps, or CI pipeline — update the relevant `.claude/` docs and `CLAUDE.md` in the same change.
 
-## Always run `check-imports` before pushing
-Import errors take 15-20 min to surface in Antithesis CI.
+## Always run checks before pushing
 ```bash
 nix develop --command bash -c "scripts/check-imports && scripts/check-endpoints"
 ```
 
-## Transaction submission
-Use `submit_tx()` from `submit.py` — fire-and-forget via `autofill_and_sign` + `submit`.
-Results observed by WS listener (`ws_listener.py`) which fires `tx_result()` assertions.
-Exception: `LoanSet` uses manual counterparty co-signing in `lending.py`.
+## Python style
+Type annotations required on all functions. Line length 100 chars. Run `ruff check` and `ruff format` before committing:
+```bash
+nix develop --command bash -c "cd workload && ruff check src/workload/ && ruff format --check src/workload/"
+```
 
 ## Test composer scripts
 - All `parallel_driver_*.sh` must use `curl --silent`
 - Setup runs during FastAPI startup (before `setup_complete()`) — no `first_*` scripts needed
 - Never reference a non-existent endpoint
-
-## Modern Python style (enforced by ruff)
-- All functions must have parameter and return type annotations (ANN001, ANN201)
-- Use `from __future__ import annotations` + `TYPE_CHECKING` for forward refs
-- Use modern syntax: `dict`, `list`, `set` (not `Dict`, `List`, `Set`); `X | Y` (not `Union[X, Y]`)
-- Imports sorted by isort (I) with `workload` as first-party
-- No ambiguous variable names, no unused variables, no unnecessary dict()/list() calls
-- Line length 100 chars max (aligned with rippled C++ codebase)
-- Run `ruff check` and `ruff format` before committing:
-```bash
-nix develop --command bash -c "cd workload && ruff check src/workload/ && ruff format --check src/workload/"
-```

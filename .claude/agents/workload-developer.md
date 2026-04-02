@@ -6,11 +6,6 @@ tools: Glob, Grep, Read, Edit, Write, Bash, WebFetch, WebSearch
 
 You are a Python developer working on the Antithesis workload generator for XRP Ledger fuzzing.
 
-Before starting work, read these files to understand the codebase:
-- `CLAUDE.md` — project structure and conventions
-- `.claude/rules/coding.md` — coding constraints
-- `.claude/rules/antithesis.md` — Antithesis SDK, assertions, CI pipeline
-
 Key files you'll work with most:
 - `workload/src/workload/transactions/__init__.py` — REGISTRY (single source of truth for all tx types)
 - `workload/src/workload/params.py` — random parameter generators
@@ -18,7 +13,7 @@ Key files you'll work with most:
 - `workload/src/workload/models.py` — state tracking dataclasses
 
 When auditing a transaction type for error path coverage:
-1. Read the XRPL spec (use WebFetch on `https://xrpl.org/docs/references/protocol/transactions/types/<name>`) for all error codes
+1. Read the XRPL spec for all fields and error codes (see CLAUDE.md for where specs live)
 2. Classify each as `_valid`-reachable (state conflicts a real workload encounters) vs `_faulty`-only (deliberately malformed)
 3. Broaden `_valid` to explore more state space (update existing objects, target others' objects, use stale references)
-4. Implement `_faulty` for errors requiring deliberately invalid fields
+4. Implement `_faulty` for errors requiring deliberately invalid fields — pick ONE random mutation via `choice()`, submit via `submit_tx`

@@ -17,11 +17,10 @@ from xrpl.models.transactions import (
 
 from workload import logging, params
 from workload.models import MPTokenIssuance, TrustLine, UserAccount, Vault
-from workload.randoms import choice, random
+from workload.randoms import choice, randint, random
 from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
-
 
 # ── Create ───────────────────────────────────────────────────────────
 
@@ -96,7 +95,38 @@ async def _vault_create_faulty(
     mpt_issuances: list[MPTokenIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
-    pass  # TODO: fault injection
+    if not accounts:
+        return
+    src = choice(list(accounts.values()))
+    asset = _random_asset(trust_lines, mpt_issuances)
+    mutation = choice(["zero_max", "oversized_data", "xrp_with_issuer"])
+    if mutation == "zero_max":
+        txn = VaultCreate(
+            account=src.address,
+            asset=asset,
+            assets_maximum="0",
+            data=params.vault_data(),
+        )
+    elif mutation == "oversized_data":
+        oversized = bytes(randint(0, 255) for _ in range(513)).hex()
+        txn = VaultCreate(
+            account=src.address,
+            asset=asset,
+            assets_maximum=params.vault_assets_maximum(),
+            data=oversized,
+        )
+    else:  # xrp_with_issuer
+        bad_asset = IssuedCurrency(
+            currency="XRP",
+            issuer=choice(list(accounts.values())).address,
+        )
+        txn = VaultCreate(
+            account=src.address,
+            asset=bad_asset,
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+        )
+    await submit_tx("VaultCreate", txn, client, src.wallet)
 
 
 # ── Deposit ──────────────────────────────────────────────────────────
@@ -130,7 +160,44 @@ async def _vault_deposit_valid(
 async def _vault_deposit_faulty(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if not accounts:
+        return
+    depositor = choice(list(accounts.values()))
+    mutation = choice(["fake_vault", "zero_amount", "mismatched_asset"])
+    if mutation == "fake_vault":
+        if not vaults:
+            return
+        vault = choice(vaults)
+        txn = VaultDeposit(
+            account=depositor.address,
+            vault_id=params.fake_id(),
+            amount=_amount_for_asset(vault.asset),
+        )
+    elif mutation == "zero_amount":
+        if not vaults:
+            return
+        vault = choice(vaults)
+        txn = VaultDeposit(
+            account=depositor.address,
+            vault_id=vault.vault_id,
+            amount="0",
+        )
+    else:  # mismatched_asset
+        if not vaults:
+            return
+        vault = choice(vaults)
+        if isinstance(vault.asset, xrpl.models.XRP):
+            # Vault is XRP, deposit IOU instead
+            amount = IOUAmount(currency="USD", issuer=depositor.address, value=params.iou_amount())
+        else:
+            # Vault is IOU/MPT, deposit XRP drops instead
+            amount = params.vault_deposit_amount()
+        txn = VaultDeposit(
+            account=depositor.address,
+            vault_id=vault.vault_id,
+            amount=amount,
+        )
+    await submit_tx("VaultDeposit", txn, client, depositor.wallet)
 
 
 # ── Withdraw ─────────────────────────────────────────────────────────
@@ -142,6 +209,22 @@ async def vault_withdraw(
     if params.should_send_faulty():
         return await _vault_withdraw_faulty(accounts, vaults, client)
     return await _vault_withdraw_valid(accounts, vaults, client)
+
+
+def _state_aware_withdraw_amount(vault: Vault) -> IOUAmount | MPTAmount | str:
+    """Generate a withdraw amount informed by tracked vault balance."""
+    if vault.balance <= 0:
+        return _amount_for_asset(vault.asset)
+    strategy = choice(["exact", "half", "overdraw", "random"])
+    if strategy == "exact":
+        amount = vault.balance
+    elif strategy == "half":
+        amount = max(1, vault.balance // 2)
+    elif strategy == "overdraw":
+        amount = vault.balance + randint(1, 1_000_000)
+    else:
+        return _amount_for_asset(vault.asset)
+    return str(amount)
 
 
 async def _vault_withdraw_valid(
@@ -157,7 +240,7 @@ async def _vault_withdraw_valid(
     txn = VaultWithdraw(
         account=owner.address,
         vault_id=vault.vault_id,
-        amount=_amount_for_asset(vault.asset),
+        amount=_state_aware_withdraw_amount(vault),
     )
     await submit_tx("VaultWithdraw", txn, client, owner.wallet)
 
@@ -165,7 +248,31 @@ async def _vault_withdraw_valid(
 async def _vault_withdraw_faulty(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if not accounts or not vaults:
+        return
+    vault = choice(vaults)
+    mutation = choice(["fake_vault", "non_owner"])
+    if mutation == "fake_vault":
+        if vault.owner not in accounts:
+            return
+        owner = accounts[vault.owner]
+        txn = VaultWithdraw(
+            account=owner.address,
+            vault_id=params.fake_id(),
+            amount=_amount_for_asset(vault.asset),
+        )
+        await submit_tx("VaultWithdraw", txn, client, owner.wallet)
+    else:  # non_owner
+        non_owners = [a for a in accounts.values() if a.address != vault.owner]
+        if not non_owners:
+            return
+        impostor = choice(non_owners)
+        txn = VaultWithdraw(
+            account=impostor.address,
+            vault_id=vault.vault_id,
+            amount=_amount_for_asset(vault.asset),
+        )
+        await submit_tx("VaultWithdraw", txn, client, impostor.wallet)
 
 
 # ── Set ──────────────────────────────────────────────────────────────
@@ -201,7 +308,33 @@ async def _vault_set_valid(
 async def _vault_set_faulty(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if not accounts or not vaults:
+        return
+    vault = choice(vaults)
+    mutation = choice(["fake_vault", "non_owner"])
+    if mutation == "fake_vault":
+        if vault.owner not in accounts:
+            return
+        owner = accounts[vault.owner]
+        txn = VaultSet(
+            account=owner.address,
+            vault_id=params.fake_id(),
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+        )
+        await submit_tx("VaultSet", txn, client, owner.wallet)
+    else:  # non_owner
+        non_owners = [a for a in accounts.values() if a.address != vault.owner]
+        if not non_owners:
+            return
+        impostor = choice(non_owners)
+        txn = VaultSet(
+            account=impostor.address,
+            vault_id=vault.vault_id,
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+        )
+        await submit_tx("VaultSet", txn, client, impostor.wallet)
 
 
 # ── Delete ───────────────────────────────────────────────────────────
@@ -235,7 +368,29 @@ async def _vault_delete_valid(
 async def _vault_delete_faulty(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if not accounts or not vaults:
+        return
+    vault = choice(vaults)
+    mutation = choice(["fake_vault", "non_owner"])
+    if mutation == "fake_vault":
+        if vault.owner not in accounts:
+            return
+        owner = accounts[vault.owner]
+        txn = VaultDelete(
+            account=owner.address,
+            vault_id=params.fake_id(),
+        )
+        await submit_tx("VaultDelete", txn, client, owner.wallet)
+    else:  # non_owner
+        non_owners = [a for a in accounts.values() if a.address != vault.owner]
+        if not non_owners:
+            return
+        impostor = choice(non_owners)
+        txn = VaultDelete(
+            account=impostor.address,
+            vault_id=vault.vault_id,
+        )
+        await submit_tx("VaultDelete", txn, client, impostor.wallet)
 
 
 # ── Clawback ─────────────────────────────────────────────────────────
@@ -274,4 +429,27 @@ async def _vault_clawback_valid(
 async def _vault_clawback_faulty(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if not accounts or not vaults:
+        return
+    vault = choice(vaults)
+    if vault.owner not in accounts:
+        return
+    owner = accounts[vault.owner]
+    mutation = choice(["fake_vault", "clawback_self"])
+    if mutation == "fake_vault":
+        other_accounts = [a for a in accounts if a != vault.owner]
+        if not other_accounts:
+            return
+        holder = choice(other_accounts)
+        txn = VaultClawback(
+            account=owner.address,
+            vault_id=params.fake_id(),
+            holder=holder,
+        )
+    else:  # clawback_self — owner == holder
+        txn = VaultClawback(
+            account=owner.address,
+            vault_id=vault.vault_id,
+            holder=owner.address,
+        )
+    await submit_tx("VaultClawback", txn, client, owner.wallet)
