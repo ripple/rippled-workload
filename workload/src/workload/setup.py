@@ -136,9 +136,31 @@ async def _submit_batch(
     return created
 
 
+async def _probe_submission(workload: Workload) -> None:
+    """Submit a no-op AccountSet and wait for validation.
+
+    Confirms the node truly accepts transactions, not just reports 'full'.
+    The 3-consecutive sync check in wait_for_network can pass while the node
+    is still converging — this probe catches that gap.
+    """
+    from xrpl.asyncio.transaction import submit_and_wait
+
+    for attempt in range(3):
+        try:
+            probe = AccountSet(account=workload.funding_wallet.address)
+            await submit_and_wait(probe, workload.client, wallet=workload.funding_wallet)
+            log.info("Probe transaction validated — node accepting submissions")
+            return
+        except Exception as exc:
+            log.warning("Probe attempt %d failed: %s", attempt + 1, exc)
+            await _wait_for_sync(workload.client)
+    log.error("All probe attempts failed — proceeding with setup anyway")
+
+
 async def run_setup(workload: Workload) -> dict[str, int]:
     """Submit deterministic setup transactions. State tracking via WS listener."""
     log.info("Setup: starting (%d accounts available)", len(workload.accounts))
+    await _probe_submission(workload)
     accs = _accounts_list(workload)
     client = workload.client
     summary = {}
