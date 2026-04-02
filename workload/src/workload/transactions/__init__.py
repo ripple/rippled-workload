@@ -145,6 +145,7 @@ def _on_vault_deposit(w: Workload, tx: dict, meta: dict) -> None:
     vault = _find_vault(w, tx.get("VaultID", ""))
     if vault:
         vault.balance += _extract_amount(tx)
+        vault.shareholders.add(tx["Account"])
 
 
 def _on_vault_withdraw(w: Workload, tx: dict, meta: dict) -> None:

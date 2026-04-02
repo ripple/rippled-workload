@@ -263,14 +263,12 @@ def _state_aware_cover_withdraw_amount(broker: LoanBroker) -> str:
     """Generate a cover withdraw amount informed by tracked cover balance."""
     if broker.cover_balance <= 0:
         return params.loan_cover_deposit_amount()
-    strategy = choice(["exact", "half", "overdraw", "random"])
+    strategy = choice(["exact", "half", "small"])
     if strategy == "exact":
         return str(broker.cover_balance)
     elif strategy == "half":
         return str(max(1, broker.cover_balance // 2))
-    elif strategy == "overdraw":
-        return str(broker.cover_balance + randint(1, 1_000_000))
-    return params.loan_cover_deposit_amount()
+    return str(max(1, broker.cover_balance // 4))
 
 
 async def _loan_broker_cover_withdraw_valid(
@@ -296,10 +294,29 @@ async def _loan_broker_cover_withdraw_faulty(
 ) -> None:
     if not accounts:
         return
-    acc = choice(list(accounts.values()))
-    mutation = choice(["nonexistent_broker", "excessive_withdrawal"])
+    mutation = choice(["nonexistent_broker", "excessive_withdrawal", "overdraw"])
+
+    if mutation == "overdraw":
+        if not loan_brokers:
+            return
+        broker = choice(loan_brokers)
+        if broker.owner not in accounts:
+            return
+        owner = accounts[broker.owner]
+        if broker.cover_balance > 0:
+            amount = str(broker.cover_balance + randint(1, 1_000_000))
+        else:
+            amount = params.loan_cover_deposit_amount()
+        txn = LoanBrokerCoverWithdraw(
+            account=owner.address,
+            loan_broker_id=broker.loan_broker_id,
+            amount=amount,
+        )
+        await submit_tx("LoanBrokerCoverWithdraw", txn, client, owner.wallet)
+        return
 
     if mutation == "nonexistent_broker":
+        acc = choice(list(accounts.values()))
         txn = LoanBrokerCoverWithdraw(
             account=acc.address,
             loan_broker_id=params.fake_id(),
@@ -445,7 +462,9 @@ async def _loan_delete_valid(
     if not loans:
         log.debug("No loans to delete")
         return
-    loan = choice(loans)
+    # Prefer loans with zero principal — loans with debt return tecHAS_OBLIGATIONS
+    paid_off = [ln for ln in loans if ln.principal <= 0 and ln.borrower in accounts]
+    loan = choice(paid_off) if paid_off else choice(loans)
     if loan.borrower not in accounts:
         return
     borrower = accounts[loan.borrower]

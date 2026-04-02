@@ -69,5 +69,8 @@ Each `_faulty` handler picks ONE random mutation via `choice()`, constructs a de
 ### XRPL specifications
 Transaction format docs are at `xrpl.org/docs/references/protocol/transactions/types/<name>`. Authoritative XLS specifications (especially for newer features like vaults and lending) live in `github.com/XRPLF/XRPL-Standards` under `XLS-NNNN-<name>/`.
 
+### Setup dependency chain
+Gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth → mpt_distribution → vaults → vault_deposits → loan_brokers → cover_deposits → loans. If gateways fail, almost everything downstream cascades. A probe transaction (`submit_and_wait` on a no-op `AccountSet`) runs before setup to confirm the node truly accepts submissions.
+
 ### Randomness
 All randomness goes through `workload.randoms` (backed by `AntithesisRandom`). Parameter generators live in `params.py` — never hardcode values in transaction builders.

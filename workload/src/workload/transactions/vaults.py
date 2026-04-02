@@ -215,15 +215,13 @@ def _state_aware_withdraw_amount(vault: Vault) -> IOUAmount | MPTAmount | str:
     """Generate a withdraw amount informed by tracked vault balance."""
     if vault.balance <= 0:
         return _amount_for_asset(vault.asset)
-    strategy = choice(["exact", "half", "overdraw", "random"])
+    strategy = choice(["exact", "half", "small"])
     if strategy == "exact":
         amount = vault.balance
     elif strategy == "half":
         amount = max(1, vault.balance // 2)
-    elif strategy == "overdraw":
-        amount = vault.balance + randint(1, 1_000_000)
     else:
-        return _amount_for_asset(vault.asset)
+        amount = max(1, vault.balance // 4)
     return str(amount)
 
 
@@ -251,7 +249,22 @@ async def _vault_withdraw_faulty(
     if not accounts or not vaults:
         return
     vault = choice(vaults)
-    mutation = choice(["fake_vault", "non_owner"])
+    mutation = choice(["fake_vault", "non_owner", "overdraw"])
+    if mutation == "overdraw":
+        if vault.owner not in accounts:
+            return
+        owner = accounts[vault.owner]
+        if vault.balance > 0:
+            amount = str(vault.balance + randint(1, 1_000_000))
+        else:
+            amount = _amount_for_asset(vault.asset)
+        txn = VaultWithdraw(
+            account=owner.address,
+            vault_id=vault.vault_id,
+            amount=amount,
+        )
+        await submit_tx("VaultWithdraw", txn, client, owner.wallet)
+        return
     if mutation == "fake_vault":
         if vault.owner not in accounts:
             return
@@ -354,7 +367,9 @@ async def _vault_delete_valid(
     if not vaults:
         log.debug("No vaults to delete")
         return
-    vault = choice(vaults)
+    # Prefer vaults with zero balance — non-empty vaults return tecNO_PERMISSION
+    empty = [v for v in vaults if v.balance <= 0 and v.owner in accounts]
+    vault = choice(empty) if empty else choice(vaults)
     if vault.owner not in accounts:
         return
     owner = accounts[vault.owner]
@@ -404,26 +419,41 @@ async def vault_clawback(
     return await _vault_clawback_valid(accounts, vaults, client)
 
 
+def _get_asset_issuer(vault: Vault) -> str | None:
+    """Return the issuer address for the vault's asset, or None for XRP."""
+    if isinstance(vault.asset, IssuedCurrency):
+        return vault.asset.issuer
+    if isinstance(vault.asset, MPTCurrency):
+        # MPT issuance ID encodes the issuer — but we need the address.
+        # The issuer is stored in the MPTokenIssuance model, but we don't have
+        # that here. For now, return None and let the caller skip.
+        return None
+    return None
+
+
 async def _vault_clawback_valid(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
     if not vaults:
         log.debug("No vaults for clawback")
         return
-    vault = choice(vaults)
-    if vault.owner not in accounts:
+    # VaultClawback must be submitted by the asset issuer, not the vault owner.
+    # Filter to IOU vaults where the issuer is known and shareholders exist.
+    eligible = [v for v in vaults if _get_asset_issuer(v) in accounts and v.shareholders]
+    if not eligible:
+        log.debug("No IOU vaults with known issuer and shareholders for clawback")
         return
-    owner = accounts[vault.owner]
-    other_accounts = [a for a in accounts if a != vault.owner]
-    if not other_accounts:
-        return
-    holder = choice(other_accounts)
+    vault = choice(eligible)
+    issuer_address = _get_asset_issuer(vault)
+    issuer = accounts[issuer_address]
+    # Pick a known shareholder (someone who actually deposited)
+    holder = choice(list(vault.shareholders))
     txn = VaultClawback(
-        account=owner.address,
+        account=issuer.address,
         vault_id=vault.vault_id,
         holder=holder,
     )
-    await submit_tx("VaultClawback", txn, client, owner.wallet)
+    await submit_tx("VaultClawback", txn, client, issuer.wallet)
 
 
 async def _vault_clawback_faulty(

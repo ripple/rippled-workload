@@ -24,3 +24,7 @@ setup_complete() -> [first_*] -> [drivers + anytime_*] -> [eventually_* / finall
 ```
 
 Current state: only `first_*` and `parallel_driver_*` implemented.
+
+## Network topology
+
+The workload submits to a **non-validating tracking node** (`xrpld`), intentionally isolated from Antithesis fault injection. The 6 validators (`val0`–`val4` + `fuzzer`) are subject to faults. Do not change the submission target — submitting to a validator would introduce fault-induced jitter into transaction results.

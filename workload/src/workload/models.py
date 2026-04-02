@@ -85,6 +85,7 @@ class Vault:
     vault_id: str
     asset: IssuedCurrency | MPTCurrency | xrpl.models.XRP | None = None
     balance: int = 0
+    shareholders: set[str] = field(default_factory=set)
 
 
 @dataclass

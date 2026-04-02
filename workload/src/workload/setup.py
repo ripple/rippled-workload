@@ -34,6 +34,7 @@ from xrpl.models.transactions import (
     CredentialCreate,
     LoanBrokerCoverDeposit,
     LoanBrokerSet,
+    LoanPay,
     LoanSet,
     MPTokenAuthorize,
     MPTokenIssuanceCreate,
@@ -168,23 +169,33 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     # All accounts that need trust lines + balances
     holder_indices = list(_HOLDER_RANGE) + list(_VAULT_RANGE)
 
-    # ── 1. Gateway setup: set DefaultRipple ──────────────────────────
-    summary["gateways"] = await _submit_batch(
-        "gateways",
-        [
+    # ── 1. Gateway setup: set DefaultRipple + AllowTrustLineClawback ──
+    gw_txns = []
+    for gw_idx, _ in _GATEWAYS:
+        if gw_idx >= len(accs):
+            continue
+        gw = accs[gw_idx]
+        gw_txns.append(
             (
                 "AccountSet",
                 AccountSet(
-                    account=accs[gw_idx].address,
+                    account=gw.address,
                     set_flag=AccountSetAsfFlag.ASF_DEFAULT_RIPPLE,
                 ),
-                accs[gw_idx].wallet,
+                gw.wallet,
             )
-            for gw_idx, _ in _GATEWAYS
-            if gw_idx < len(accs)
-        ],
-        client,
-    )
+        )
+        gw_txns.append(
+            (
+                "AccountSet",
+                AccountSet(
+                    account=gw.address,
+                    set_flag=AccountSetAsfFlag.ASF_ALLOW_TRUSTLINE_CLAWBACK,
+                ),
+                gw.wallet,
+            )
+        )
+    summary["gateways"] = await _submit_batch("gateways", gw_txns, client)
 
     # ── 2. Trust lines: holders → gateways for each currency ─────────
     trust_txns = []
@@ -397,6 +408,33 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         )
     summary["vault_deposits"] = await _submit_batch("vault_deposits", deposit_txns, client)
 
+    # ── 7c. Non-owner vault deposits: holders deposit into IOU vaults (for clawback)
+    iou_vaults = [v for v in workload.vaults if isinstance(v.asset, IssuedCurrency)]
+    holder_deposit_txns = []
+    for vault in iou_vaults:
+        for holder_idx in list(_HOLDER_RANGE)[:3]:  # first 3 holders
+            if holder_idx >= len(accs):
+                continue
+            holder = accs[holder_idx]
+            holder_deposit_txns.append(
+                (
+                    "VaultDeposit",
+                    VaultDeposit(
+                        account=holder.address,
+                        vault_id=vault.vault_id,
+                        amount=IssuedCurrencyAmount(
+                            currency=vault.asset.currency,
+                            issuer=vault.asset.issuer,
+                            value="1000",
+                        ),
+                    ),
+                    holder.wallet,
+                )
+            )
+    summary["holder_vault_deposits"] = await _submit_batch(
+        "holder_vault_deposits", holder_deposit_txns, client
+    )
+
     # ── 8. NFTs: 5 from accounts[20..24] ─────────────────────────────
     summary["nfts"] = await _submit_batch(
         "nfts",
@@ -505,7 +543,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     # ── 12. Loan brokers: create on existing vaults ─────────────────
     await asyncio.sleep(3)  # ensure vaults are in state
     broker_txns = []
-    for vault in workload.vaults[:3]:  # use first 3 vaults
+    for vault in workload.vaults[:4]:  # 4th broker has no loans (for cover withdraw)
         if vault.owner not in workload.accounts:
             continue
         owner = workload.accounts[vault.owner]
@@ -528,7 +566,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     await asyncio.sleep(3)  # wait for WS to populate broker state
     _COVER_DEPOSIT = "10000000"  # 10 XRP — enough to cover several small loans
     cover_txns = []
-    for broker in workload.loan_brokers[:3]:
+    for broker in workload.loan_brokers[:4]:  # includes 4th broker (no loans)
         if broker.owner not in workload.accounts:
             continue
         owner = workload.accounts[broker.owner]
@@ -601,6 +639,58 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         except Exception as exc:
             log.error("Setup: loan creation failed: %s", exc)
     summary["loans"] = loan_count
+
+    # ── 13b. Zero-interest loan + payoff (for LoanDelete testing) ─────
+    # Create a loan with 0% interest, then pay off the full principal so it can be deleted.
+    await asyncio.sleep(3)
+    if workload.loan_brokers:
+        broker = workload.loan_brokers[0]
+        if broker.owner in workload.accounts:
+            b_idx = borrower_indices[3] if len(borrower_indices) > 3 else None
+            if b_idx is not None and b_idx < len(accs) and accs[b_idx].address != broker.owner:
+                borrower = accs[b_idx]
+                broker_wallet = workload.accounts[broker.owner].wallet
+                try:
+                    txn = LoanSet(
+                        account=borrower.address,
+                        loan_broker_id=broker.loan_broker_id,
+                        counterparty=broker.owner,
+                        principal_requested=_SETUP_PRINCIPAL,
+                        interest_rate=0,
+                        payment_interval=_SETUP_INTERVAL,
+                        payment_total=1,
+                        grace_period=_SETUP_GRACE,
+                    )
+                    signed = await autofill_and_sign(txn, client, borrower.wallet)
+                    result = sign_loan_set_by_counterparty(broker_wallet, signed)
+                    resp = await xrpl_submit(result.tx, client)
+                    engine = resp.result.get("engine_result", "")
+                    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
+                        log.info("Setup: zero-interest loan submitted")
+                        # Wait for WS listener to register the loan
+                        await asyncio.sleep(3)
+                        # Pay off the full principal
+                        if workload.loans:
+                            zero_loan = workload.loans[-1]  # most recently added
+                            summary["loan_payoff"] = await _submit_batch(
+                                "loan_payoff",
+                                [
+                                    (
+                                        "LoanPay",
+                                        LoanPay(
+                                            account=borrower.address,
+                                            loan_id=zero_loan.loan_id,
+                                            amount=_SETUP_PRINCIPAL,
+                                        ),
+                                        borrower.wallet,
+                                    )
+                                ],
+                                client,
+                            )
+                    else:
+                        log.warning("Setup: zero-interest loan failed: %s", engine)
+                except Exception as exc:
+                    log.error("Setup: zero-interest loan failed: %s", exc)
 
     # Fire reachable assertions
     for key, count in summary.items():
