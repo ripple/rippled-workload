@@ -50,10 +50,9 @@ Each entry in `REGISTRY` (`transactions/__init__.py`) is a 5-tuple:
 Called by WS listener on `tesSUCCESS`. Parse created/deleted objects from `meta["AffectedNodes"]` using `_extract_created_id(meta, entry_type)` / `_extract_deleted_id(meta, entry_type)`. Must update **both** global lists (`w.nfts`, `w.vaults`, etc.) and per-account state (`w.accounts[addr].nfts`) to keep them in sync.
 
 ### Handler preconditions
-Return early with `None` when state is empty — never raise exceptions. Non-XRPL exceptions trigger `unreachable()` assertions and fail the test.
+Return early silently when state is empty — never raise, never log. Non-XRPL exceptions trigger `unreachable()` assertions and fail the test.
 ```python
 if not nfts:
-    log.debug("No NFTs to burn")
     return
 ```
 
@@ -61,7 +60,7 @@ if not nfts:
 Always use `submit_tx()` from `submit.py` — it wires `tx_submitted()` assertions automatically. Never call `xrpl_submit` directly. Exception: `LoanSet` uses manual co-signing in `lending.py`.
 
 ### Faulty handlers
-Each `_faulty` handler picks ONE random mutation via `choice()`, constructs a deliberately invalid transaction, and submits via `submit_tx`. Must never raise — precondition checks same as `_valid`. Common mutations: `params.fake_id()` (nonexistent object), non-owner submission, zero/negative amounts, mismatched asset types. Use state-aware amounts when balance tracking is available (e.g., overdraw = `balance + randint(...)`).
+Each `_faulty` handler picks ONE random mutation via `choice()`, constructs a deliberately invalid transaction, and submits via `submit_tx`. Must never raise — precondition checks same as `_valid`. Common mutations: `params.fake_id()` (nonexistent object), non-owner submission, zero/negative amounts, mismatched asset types, overdraw (`balance + randint(...)`). Keep overdraw/state-aware mutations in `_faulty` only — `_valid` handlers must use amounts within tracked balances.
 
 ### LoanSet co-signing
 `LoanSet` requires dual signing (borrower + broker). Uses `autofill_and_sign` → `sign_loan_set_by_counterparty` → `xrpl_submit` directly (not `submit_tx`). Calls `tx_submitted("LoanSet", txn)` manually before submit. See `lending.py:_loan_set_valid`.
@@ -70,7 +69,16 @@ Each `_faulty` handler picks ONE random mutation via `choice()`, constructs a de
 Transaction format docs are at `xrpl.org/docs/references/protocol/transactions/types/<name>`. Authoritative XLS specifications (especially for newer features like vaults and lending) live in `github.com/XRPLF/XRPL-Standards` under `XLS-NNNN-<name>/`.
 
 ### Setup dependency chain
-Gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth → mpt_distribution → vaults → vault_deposits → loan_brokers → cover_deposits → loans. If gateways fail, almost everything downstream cascades. A probe transaction (`submit_and_wait` on a no-op `AccountSet`) runs before setup to confirm the node truly accepts submissions.
+Gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth → mpt_distribution → vaults → vault_deposits → holder_vault_deposits → nfts → nft_offers → credentials → tickets → domains → loan_brokers → cover_deposits → loans → zero_interest_loan_payoff. If gateways fail, almost everything downstream cascades.
+
+### SequenceTracker
+`SequenceTracker` (`sequence.py`) prevents `tefPAST_SEQ` cascades in setup. Lazily fetches each account's sequence from the ledger on first use, then increments in-memory. All `_submit_batch` calls and LoanSet co-signing paths in setup use it. Driver endpoints still use xrpl-py autofill (no tracker needed for one-off calls).
+
+### Structured transaction events
+`tx_submitted()` emits `workload::submitted : {TxType}` and `tx_result()` emits `workload::result : {TxType}` via Antithesis `send_event`. Both include `account`, `sequence`, `tx_type`, and relevant object IDs (`vault_id`, `loan_id`, `nftoken_id`, etc.). Results also include `created_id`/`created_type` and `deleted_id`/`deleted_type` from metadata for object lifecycle tracking.
+
+### Logging policy
+No logs in setup.py or transaction handlers — assertions and structured events cover observability. Only `ws_listener.py` retains warning/error logs for connection issues and state update failures. `sequence.py` has one debug log for tracker initialization.
 
 ### Randomness
 All randomness goes through `workload.randoms` (backed by `AntithesisRandom`). Parameter generators live in `params.py` — never hardcode values in transaction builders.
