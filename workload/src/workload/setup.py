@@ -56,12 +56,10 @@ from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredentia
 from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
-from workload import logging, params
+from workload import params
 from workload.models import UserAccount
 from workload.sequence import SequenceTracker
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
 
 # ── Constants ───────────────────────────────────────────────────────────
 _SETUP_CREDENTIAL_TYPE = b"setup".hex()
@@ -102,7 +100,7 @@ async def _submit_batch(
     if not txns:
         return 0
     created = 0
-    for i, (tx_type, txn, wallet) in enumerate(txns):
+    for tx_type, txn, wallet in txns:
         try:
             seq_num = await seq.next_seq(wallet.address)
             result = await submit_tx(tx_type, txn, client, wallet, seq=seq_num)
@@ -110,9 +108,11 @@ async def _submit_batch(
             if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
                 created += 1
             else:
-                log.warning("Setup %s[%d]: %s", name, i, engine)
-        except Exception as exc:
-            log.error("Setup %s[%d] failed: %s", name, i, exc)
+                # TODO: re-enable as structured log for setup sequence analysis
+                # {"phase": name, "index": i, "engine_result": engine}
+                pass
+        except Exception:
+            pass
     return created
 
 
@@ -141,16 +141,13 @@ async def _submit_loan(
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
     resp = await xrpl_submit(cosigned.tx, workload.client)
     engine = resp.result.get("engine_result", "")
-    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
-        log.info("Setup: loan submitted (broker=%s borrower=%s)", broker_owner, borrower.address)
-        return True
-    log.warning("Setup: loan failed: %s (%s)", engine, resp.result.get("engine_result_message", ""))
-    return False
+    # TODO: re-enable as structured log for loan sequence analysis
+    # {"broker": broker_owner, "borrower": borrower.address, "engine_result": engine}
+    return engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ")
 
 
 async def run_setup(workload: Workload) -> dict[str, int]:
     """Submit deterministic setup transactions. State tracking via WS listener."""
-    log.info("Setup: starting (%d accounts available)", len(workload.accounts))
     accs = _accounts_list(workload)
     client = workload.client
     seq = workload.seq
@@ -254,7 +251,6 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
     await asyncio.sleep(5)  # wait for WS to process MPT issuance results
-    log.info("Setup: MPT issuances in state: %d", len(workload.mpt_issuances))
     mpt_auth_txns = []
     for mpt in workload.mpt_issuances:
         for holder_idx in holder_indices:
@@ -569,8 +565,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 workload, broker_wallet, broker.owner, broker.loan_broker_id, accs[b_idx]
             ):
                 loan_count += 1
-        except Exception as exc:
-            log.error("Setup: loan creation failed: %s", exc)
+        except Exception:
+            pass
     summary["loans"] = loan_count
 
     # ── 13b. Zero-interest loan + payoff (for LoanDelete) ────────────
@@ -612,26 +608,14 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                                 client,
                                 seq,
                             )
-                except Exception as exc:
-                    log.error("Setup: zero-interest loan failed: %s", exc)
+                except Exception:
+                    pass
 
     # ── Done ─────────────────────────────────────────────────────────
     for key, count in summary.items():
         if count:
             reachable(f"workload::setup_{key}", {"count": count})
 
-    log.info("Setup: submitted — %s", summary)
     await asyncio.sleep(5)  # let WS listener process validated results
 
-    log.info(
-        "Setup: state — v=%d nft=%d mpt=%d cred=%d dom=%d tl=%d loan=%d broker=%d",
-        len(workload.vaults),
-        len(workload.nfts),
-        len(workload.mpt_issuances),
-        len(workload.credentials),
-        len(workload.domains),
-        len(workload.trust_lines),
-        len(workload.loans),
-        len(workload.loan_brokers),
-    )
     return summary

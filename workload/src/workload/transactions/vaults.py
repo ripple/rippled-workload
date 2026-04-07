@@ -15,12 +15,10 @@ from xrpl.models.transactions import (
     VaultWithdraw,
 )
 
-from workload import logging, params
+from workload import params
 from workload.models import MPTokenIssuance, TrustLine, UserAccount, Vault
 from workload.randoms import choice, randint, random
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
 
 # ── Create ───────────────────────────────────────────────────────────
 
@@ -144,7 +142,6 @@ async def _vault_deposit_valid(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
     if not vaults:
-        log.debug("No vaults to deposit into")
         return
     vault = choice(vaults)
     depositor_id = choice(list(accounts))
@@ -229,7 +226,6 @@ async def _vault_withdraw_valid(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
     if not vaults:
-        log.debug("No vaults to withdraw from")
         return
     vault = choice(vaults)
     if vault.owner not in accounts:
@@ -303,7 +299,6 @@ async def _vault_set_valid(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
     if not vaults:
-        log.debug("No vaults to modify")
         return
     vault = choice(vaults)
     if vault.owner not in accounts:
@@ -365,7 +360,6 @@ async def _vault_delete_valid(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
     if not vaults:
-        log.debug("No vaults to delete")
         return
     # Prefer vaults with zero balance — non-empty vaults return tecNO_PERMISSION
     empty = [v for v in vaults if v.balance <= 0 and v.owner in accounts]
@@ -435,13 +429,11 @@ async def _vault_clawback_valid(
     accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
 ) -> None:
     if not vaults:
-        log.debug("No vaults for clawback")
         return
     # VaultClawback must be submitted by the asset issuer, not the vault owner.
     # Filter to IOU vaults where the issuer is known and shareholders exist.
     eligible = [v for v in vaults if _get_asset_issuer(v) in accounts and v.shareholders]
     if not eligible:
-        log.debug("No IOU vaults with known issuer and shareholders for clawback")
         return
     vault = choice(eligible)
     issuer_address = _get_asset_issuer(vault)

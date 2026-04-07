@@ -16,6 +16,19 @@ _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
 _LOC_COL = 0
 
+# XRPL fields → normalized event keys. Only object identifiers needed for tracking.
+_OBJECT_ID_FIELDS: dict[str, str] = {
+    "Destination": "destination",
+    "VaultID": "vault_id",
+    "NFTokenID": "nftoken_id",
+    "LoanBrokerID": "loan_broker_id",
+    "LoanID": "loan_id",
+    "MPTokenIssuanceID": "mpt_issuance_id",
+    "Subject": "subject",
+    "Issuer": "issuer",
+    "CredentialType": "credential_type",
+}
+
 
 def _seen_id(name: str) -> str:
     return f"workload::seen : {name}"
@@ -27,6 +40,15 @@ def _success_id(name: str) -> str:
 
 def _failure_id(name: str) -> str:
     return f"workload::failure : {name}"
+
+
+def _extract_object_ids(raw: dict) -> dict[str, str]:
+    """Extract known object ID fields from a transaction dict."""
+    ids: dict[str, str] = {}
+    for xrpl_key, event_key in _OBJECT_ID_FIELDS.items():
+        if xrpl_key in raw:
+            ids[event_key] = str(raw[xrpl_key])
+    return ids
 
 
 def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
@@ -63,7 +85,6 @@ def register_assertions() -> None:
     _emit_catalog_entry(
         "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
     )
-    # Setup phase assertions
     for setup_key in [
         "gateways",
         "trust_lines",
@@ -89,13 +110,16 @@ def register_assertions() -> None:
 
 def tx_submitted(name: str, txn: object = None) -> None:
     """Report that a transaction was created and submitted to the network."""
-    details = {}
+    details: dict[str, str] = {"tx_type": name}
     if txn is not None:
         try:
-            details = txn.to_xrpl()
+            raw = txn.to_xrpl()
+            details["account"] = raw.get("Account", "")
+            details["sequence"] = str(raw.get("Sequence", ""))
+            details.update(_extract_object_ids(raw))
         except Exception:
-            details = {"raw": str(txn)}
-    send_event(f"workload::seen : {name}", details)
+            pass
+    send_event(f"workload::submitted : {name}", details)
     assert_raw(
         condition=True,
         message=_seen_id(name),
@@ -114,29 +138,46 @@ def tx_submitted(name: str, txn: object = None) -> None:
 
 
 def tx_result(name: str, result: dict) -> None:
-    """Report a transaction result to Antithesis.
-
-    Emits a sometimes assertion that the transaction succeeded at least once,
-    plus a lifecycle event with full result details.
-    """
-    engine_result = (
-        result.get("engine_result") or result.get("meta", {}).get("TransactionResult") or "unknown"
-    )
-    details = {
+    """Report a validated transaction result to Antithesis."""
+    tx_json = result.get("tx_json", {})
+    meta = result.get("meta", {})
+    engine_result = result.get("engine_result") or meta.get("TransactionResult") or "unknown"
+    details: dict[str, str] = {
+        "tx_type": name,
         "engine_result": engine_result,
-        "engine_result_message": result.get("engine_result_message", ""),
-        "account": result.get("tx_json", {}).get("Account", ""),
-        "tx_type": result.get("tx_json", {}).get("TransactionType", ""),
+        "account": tx_json.get("Account", ""),
+        "sequence": str(tx_json.get("Sequence", "")),
         "hash": result.get("hash", ""),
     }
+    details.update(_extract_object_ids(tx_json))
+    for node in meta.get("AffectedNodes", []):
+        created = node.get("CreatedNode", {})
+        if created.get("LedgerIndex"):
+            details["created_id"] = created["LedgerIndex"]
+            details["created_type"] = created.get("LedgerEntryType", "")
+            break
+    for node in meta.get("AffectedNodes", []):
+        deleted = node.get("DeletedNode", {})
+        if deleted.get("LedgerIndex"):
+            details["deleted_id"] = deleted["LedgerIndex"]
+            details["deleted_type"] = deleted.get("LedgerEntryType", "")
+            break
     send_event(f"workload::result : {name}", details)
-    # Internal rippled errors — these indicate bugs in transaction processing logic.
-    # Must never occur; if they do, it's a finding worth investigating.
-    _RIPPLED_INTERNAL_ERRORS = ("tefEXCEPTION", "tefINTERNAL", "tefINVARIANT_FAILED", "tefFAILURE")
+
+    _RIPPLED_INTERNAL_ERRORS = (
+        "tefEXCEPTION",
+        "tefINTERNAL",
+        "tefINVARIANT_FAILED",
+        "tefFAILURE",
+    )
     assert_raw(
         condition=engine_result not in _RIPPLED_INTERNAL_ERRORS,
         message="workload::always : no_internal_rippled_error",
-        details={"engine_result": engine_result, "tx_type": name, "hash": details.get("hash", "")},
+        details={
+            "engine_result": engine_result,
+            "tx_type": name,
+            "hash": details.get("hash", ""),
+        },
         loc_filename=_LOC_FILE,
         loc_function="tx_result",
         loc_class=_LOC_CLASS,
@@ -148,7 +189,6 @@ def tx_result(name: str, result: dict) -> None:
         display_type="Always",
         assert_id="workload::always : no_internal_rippled_error",
     )
-    # engine_result should always be a valid string
     assert_raw(
         condition=engine_result not in (None, "", "unknown"),
         message="workload::always : valid_engine_result",
@@ -164,7 +204,6 @@ def tx_result(name: str, result: dict) -> None:
         display_type="Always",
         assert_id="workload::always : valid_engine_result",
     )
-    # tx succeeded at least once
     assert_raw(
         condition=engine_result == "tesSUCCESS",
         message=_success_id(name),
@@ -180,7 +219,6 @@ def tx_result(name: str, result: dict) -> None:
         display_type="Sometimes",
         assert_id=_success_id(name),
     )
-    # tx failed at least once (verifies error paths are exercised)
     assert_raw(
         condition=engine_result != "tesSUCCESS",
         message=_failure_id(name),

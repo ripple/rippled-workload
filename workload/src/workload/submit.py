@@ -41,7 +41,6 @@ async def submit_tx(
     response = await submit(signed, client)
     result = response.result
     tx_submitted(name, txn)
-    preliminary = result.get("engine_result", "")
-    tx_hash = result.get("tx_json", {}).get("hash", "")
-    log.debug("Submitted %s: %s (hash=%s)", name, preliminary, tx_hash[:16])
+    # TODO: re-enable as structured JSON log for tx sequence analysis
+    # {"tx_type": name, "engine_result": preliminary, "hash": tx_hash, "seq": seq}
     return result

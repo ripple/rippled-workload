@@ -63,12 +63,10 @@ async def start_ws_listener(workload: Workload, ws_url: str) -> None:
 
     Runs forever with automatic reconnection. Start as a background task.
     """
-    log.info("WS listener connecting to %s", ws_url)
     while True:
         try:
             async with AsyncWebsocketClient(ws_url) as ws:
                 await ws.send(Subscribe(streams=[StreamParameter.TRANSACTIONS]))
-                log.info("WS listener subscribed to transactions stream")
                 async for msg in ws:
                     if msg.get("type") == "transaction" and msg.get("validated"):
                         _handle_validated_tx(workload, msg)

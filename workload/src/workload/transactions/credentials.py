@@ -9,13 +9,10 @@ from xrpl.models.transactions import (
     CredentialDelete,
 )
 
-from workload import logging, params
+from workload import params
 from workload.models import Credential, UserAccount
 from workload.randoms import choice, sample
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
-
 
 # ── Create ───────────────────────────────────────────────────────────
 
@@ -66,7 +63,6 @@ async def _credential_accept_valid(
 ) -> None:
     unaccepted = [c for c in credentials if c.subject in accounts]
     if not unaccepted:
-        log.debug("No credentials to accept")
         return
     cred = choice(unaccepted)
     subject = accounts[cred.subject]
@@ -99,7 +95,6 @@ async def _credential_delete_valid(
     accounts: dict[str, UserAccount], credentials: list[Credential], client: AsyncJsonRpcClient
 ) -> None:
     if not credentials:
-        log.debug("No credentials to delete")
         return
     cred = choice(credentials)
     if cred.issuer in accounts:

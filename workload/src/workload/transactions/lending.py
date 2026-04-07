@@ -20,14 +20,11 @@ from xrpl.models.transactions import (
 from xrpl.models.transactions.loan_manage import LoanManageFlag
 from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 
-from workload import logging, params
+from workload import params
 from workload.assertions import tx_submitted
 from workload.models import Loan, LoanBroker, UserAccount, Vault
 from workload.randoms import choice, randint
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
-
 
 # ── Loan Broker Set ──────────────────────────────────────────────────
 
@@ -50,7 +47,6 @@ async def _loan_broker_set_valid(
     client: AsyncJsonRpcClient,
 ) -> None:
     if not vaults:
-        log.debug("No vaults for loan_broker_set")
         return
     vault = choice(vaults)
     if vault.owner not in accounts:
@@ -145,7 +141,6 @@ async def _loan_broker_delete_valid(
     accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
 ) -> None:
     if not loan_brokers:
-        log.debug("No loan brokers to delete")
         return
     broker = choice(loan_brokers)
     if broker.owner not in accounts:
@@ -203,7 +198,6 @@ async def _loan_broker_cover_deposit_valid(
     accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
 ) -> None:
     if not loan_brokers:
-        log.debug("No loan brokers for cover deposit")
         return
     broker = choice(loan_brokers)
     if broker.owner not in accounts:
@@ -275,7 +269,6 @@ async def _loan_broker_cover_withdraw_valid(
     accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
 ) -> None:
     if not loan_brokers:
-        log.debug("No loan brokers for cover withdraw")
         return
     broker = choice(loan_brokers)
     if broker.owner not in accounts:
@@ -360,7 +353,6 @@ async def _loan_set_valid(
     client: AsyncJsonRpcClient,
 ) -> None:
     if not loan_brokers:
-        log.debug("No loan brokers for loan_set")
         return
     broker = choice(loan_brokers)
     if broker.owner not in accounts:
@@ -386,9 +378,9 @@ async def _loan_set_valid(
     signed = await autofill_and_sign(txn, client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
     tx_submitted("LoanSet", txn)
-    response = await xrpl_submit(cosigned.tx, client)
-    result = response.result
-    log.debug("Submitted LoanSet: %s", result.get("engine_result", ""))
+    await xrpl_submit(cosigned.tx, client)
+    # TODO: re-enable as structured log for tx sequence analysis
+    # {"tx_type": "LoanSet", "engine_result": response.result.get("engine_result", "")}
 
 
 async def _loan_set_faulty(
@@ -460,7 +452,6 @@ async def _loan_delete_valid(
     accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
 ) -> None:
     if not loans:
-        log.debug("No loans to delete")
         return
     # Prefer loans with zero principal — loans with debt return tecHAS_OBLIGATIONS
     paid_off = [ln for ln in loans if ln.principal <= 0 and ln.borrower in accounts]
@@ -538,7 +529,6 @@ async def _loan_manage_valid(
     client: AsyncJsonRpcClient,
 ) -> None:
     if not loans or not loan_brokers:
-        log.debug("No loans to manage")
         return
     loan = choice(loans)
     broker = next((b for b in loan_brokers if b.loan_broker_id == loan.loan_broker_id), None)
@@ -626,7 +616,6 @@ async def _loan_pay_valid(
     accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
 ) -> None:
     if not loans:
-        log.debug("No loans to pay")
         return
     loan = choice(loans)
     if loan.borrower not in accounts:

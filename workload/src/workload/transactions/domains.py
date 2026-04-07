@@ -7,13 +7,10 @@ from xrpl.models.transactions import (
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 
-from workload import logging, params
+from workload import params
 from workload.models import PermissionedDomain, UserAccount
 from workload.randoms import choice
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
-
 
 # ── Set ──────────────────────────────────────────────────────────────
 
@@ -67,7 +64,6 @@ async def _permissioned_domain_delete_valid(
     accounts: dict[str, UserAccount], domains: list[PermissionedDomain], client: AsyncJsonRpcClient
 ) -> None:
     if not domains:
-        log.debug("No domains to delete")
         return
     domain = choice(domains)
     if domain.owner not in accounts:

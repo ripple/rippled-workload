@@ -4,13 +4,10 @@ import xrpl.models
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import Payment
 
-from workload import logging, params
+from workload import params
 from workload.models import UserAccount
 from workload.randoms import choice
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
-
 
 # ── Create ───────────────────────────────────────────────────────────
 
@@ -53,7 +50,6 @@ async def _ticket_use_valid(accounts: dict[str, UserAccount], client: AsyncJsonR
     # Find an account with tickets
     accounts_with_tickets = [(addr, acc) for addr, acc in accounts.items() if acc.tickets]
     if not accounts_with_tickets:
-        log.debug("No accounts with tickets")
         return
     src_addr, src = choice(accounts_with_tickets)
     ticket_sequence = choice(list(src.tickets))

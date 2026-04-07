@@ -10,13 +10,10 @@ from xrpl.models.transactions import (
 from xrpl.models.transactions.mptoken_issuance_create import MPTokenIssuanceCreateFlag
 from xrpl.models.transactions.mptoken_issuance_set import MPTokenIssuanceSetFlag
 
-from workload import logging, params
+from workload import params
 from workload.models import MPTokenIssuance, UserAccount
 from workload.randoms import choice
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
-
 
 # ── Create ───────────────────────────────────────────────────────────
 
@@ -64,7 +61,6 @@ async def _mpt_authorize_valid(
     client: AsyncJsonRpcClient,
 ) -> None:
     if not mpt_issuances:
-        log.debug("No MPT issuances to authorize")
         return
     mpt = choice(mpt_issuances)
     if mpt.issuer not in accounts:
@@ -109,7 +105,6 @@ async def _mpt_issuance_set_valid(
     client: AsyncJsonRpcClient,
 ) -> None:
     if not mpt_issuances:
-        log.debug("No MPT issuances to set")
         return
     mpt = choice(mpt_issuances)
     if mpt.issuer not in accounts:
@@ -151,7 +146,6 @@ async def _mpt_destroy_valid(
     client: AsyncJsonRpcClient,
 ) -> None:
     if not mpt_issuances:
-        log.debug("No MPT issuances to destroy")
         return
     mpt = choice(mpt_issuances)
     if mpt.issuer not in accounts:
