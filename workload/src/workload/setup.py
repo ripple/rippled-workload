@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 import xrpl.models
 from antithesis.assertions import reachable
+from antithesis.lifecycle import send_event
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction import autofill_and_sign
 from xrpl.asyncio.transaction import submit as xrpl_submit
@@ -108,11 +109,20 @@ async def _submit_batch(
             if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
                 created += 1
             else:
-                # TODO: re-enable as structured log for setup sequence analysis
-                # {"phase": name, "index": i, "engine_result": engine}
-                pass
-        except Exception:
-            pass
+                send_event(f"workload::setup_reject : {name}", {
+                    "phase": name,
+                    "tx_type": tx_type,
+                    "account": wallet.address,
+                    "sequence": seq_num,
+                    "engine_result": engine,
+                })
+        except Exception as e:
+            send_event(f"workload::setup_error : {name}", {
+                "phase": name,
+                "tx_type": tx_type,
+                "account": wallet.address,
+                "error": f"{type(e).__name__}: {e}",
+            })
     return created
 
 
@@ -141,9 +151,17 @@ async def _submit_loan(
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
     resp = await xrpl_submit(cosigned.tx, workload.client)
     engine = resp.result.get("engine_result", "")
-    # TODO: re-enable as structured log for loan sequence analysis
-    # {"broker": broker_owner, "borrower": borrower.address, "engine_result": engine}
-    return engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ")
+    ok = engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ")
+    if not ok:
+        send_event("workload::setup_reject : loan", {
+            "phase": "loan",
+            "tx_type": "LoanSet",
+            "broker": broker_owner,
+            "borrower": borrower.address,
+            "broker_id": broker_id,
+            "engine_result": engine,
+        })
+    return ok
 
 
 async def run_setup(workload: Workload) -> dict[str, int]:

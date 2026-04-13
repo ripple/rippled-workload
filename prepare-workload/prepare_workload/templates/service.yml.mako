@@ -10,9 +10,11 @@
       - ${p}
     % endfor
     healthcheck:
-      test: ["CMD", "xrpld", "--silent", "ping"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:5005 -o /dev/null || exit 1"]
       start_period: 10s
       interval: 10s
+      timeout: 5s
+      retries: 3
     volumes:
     % for v in volumes:
       - ${v}

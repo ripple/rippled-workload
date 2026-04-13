@@ -78,7 +78,7 @@ Gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth →
 `tx_submitted()` emits `workload::submitted : {TxType}` and `tx_result()` emits `workload::result : {TxType}` via Antithesis `send_event`. Both include `account`, `sequence`, `tx_type`, and relevant object IDs (`vault_id`, `loan_id`, `nftoken_id`, etc.). Results also include `created_id`/`created_type` and `deleted_id`/`deleted_type` from metadata for object lifecycle tracking.
 
 ### Logging policy
-No logs in setup.py or transaction handlers — assertions and structured events cover observability. Only `ws_listener.py` retains warning/error logs for connection issues and state update failures. `sequence.py` has one debug log for tracker initialization.
+No logger calls in setup.py or transaction handlers — structured `send_event` calls and assertions cover observability. `setup.py` emits `workload::setup_reject : {phase}` on non-success engine results and `workload::setup_error : {phase}` on exceptions. Only `ws_listener.py` retains warning/error logs for connection issues and state update failures. `sequence.py` has one debug log for tracker initialization.
 
 ### Randomness
 All randomness goes through `workload.randoms` (backed by `AntithesisRandom`). Parameter generators live in `params.py` — never hardcode values in transaction builders.
