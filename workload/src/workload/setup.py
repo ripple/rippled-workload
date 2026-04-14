@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from workload.app import Workload
 
 import xrpl.models
-from antithesis.assertions import reachable
+from antithesis.assertions import reachable, unreachable
 from antithesis.lifecycle import send_event
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction import autofill_and_sign
@@ -109,20 +109,26 @@ async def _submit_batch(
             if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
                 created += 1
             else:
-                send_event(f"workload::setup_reject : {name}", {
+                send_event(
+                    f"workload::setup_reject : {name}",
+                    {
+                        "phase": name,
+                        "tx_type": tx_type,
+                        "account": wallet.address,
+                        "sequence": seq_num,
+                        "engine_result": engine,
+                    },
+                )
+        except Exception as e:
+            send_event(
+                f"workload::setup_error : {name}",
+                {
                     "phase": name,
                     "tx_type": tx_type,
                     "account": wallet.address,
-                    "sequence": seq_num,
-                    "engine_result": engine,
-                })
-        except Exception as e:
-            send_event(f"workload::setup_error : {name}", {
-                "phase": name,
-                "tx_type": tx_type,
-                "account": wallet.address,
-                "error": f"{type(e).__name__}: {e}",
-            })
+                    "error": f"{type(e).__name__}: {e}",
+                },
+            )
     return created
 
 
@@ -153,19 +159,77 @@ async def _submit_loan(
     engine = resp.result.get("engine_result", "")
     ok = engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ")
     if not ok:
-        send_event("workload::setup_reject : loan", {
-            "phase": "loan",
-            "tx_type": "LoanSet",
-            "broker": broker_owner,
-            "borrower": borrower.address,
-            "broker_id": broker_id,
-            "engine_result": engine,
-        })
+        send_event(
+            "workload::setup_reject : loan",
+            {
+                "phase": "loan",
+                "tx_type": "LoanSet",
+                "broker": broker_owner,
+                "borrower": borrower.address,
+                "broker_id": broker_id,
+                "engine_result": engine,
+            },
+        )
     return ok
+
+
+async def _probe_node(workload: Workload) -> None:
+    """Submit a no-op AccountSet to confirm the node accepts transactions.
+
+    Retries with backoff until accepted. The sync checks in wait_for_network
+    verify the node reports 'full', but that doesn't guarantee it will accept
+    transaction submissions — autofill and submit have stricter sync requirements.
+    """
+    max_wait = 300
+    start = asyncio.get_event_loop().time()
+    attempt = 0
+    delay = 2.0
+    while True:
+        attempt += 1
+        try:
+            probe = AccountSet(account=workload.funding_wallet.address)
+            signed = await autofill_and_sign(probe, workload.client, workload.funding_wallet)
+            resp = await xrpl_submit(signed, workload.client)
+            engine = resp.result.get("engine_result", "")
+            if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
+                send_event(
+                    "workload::setup_probe_ok",
+                    {
+                        "attempt": attempt,
+                        "engine_result": engine,
+                        "elapsed_s": int(asyncio.get_event_loop().time() - start),
+                    },
+                )
+                return
+            send_event(
+                "workload::setup_probe_reject",
+                {
+                    "attempt": attempt,
+                    "engine_result": engine,
+                },
+            )
+        except Exception as e:
+            send_event(
+                "workload::setup_probe_retry",
+                {
+                    "attempt": attempt,
+                    "error": f"{type(e).__name__}: {e}",
+                },
+            )
+        elapsed = asyncio.get_event_loop().time() - start
+        if elapsed >= max_wait:
+            unreachable(
+                "workload::setup_probe_timeout",
+                {"attempts": attempt, "elapsed_s": int(elapsed)},
+            )
+            raise RuntimeError(f"Probe failed after {attempt} attempts ({int(elapsed)}s)")
+        await asyncio.sleep(min(delay, max_wait - elapsed))
+        delay = min(delay * 1.5, 10)
 
 
 async def run_setup(workload: Workload) -> dict[str, int]:
     """Submit deterministic setup transactions. State tracking via WS listener."""
+    await _probe_node(workload)
     accs = _accounts_list(workload)
     client = workload.client
     seq = workload.seq
