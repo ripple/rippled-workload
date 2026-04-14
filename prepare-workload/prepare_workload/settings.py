@@ -44,12 +44,12 @@ def _coerce_like(example, s: str):
     if isinstance(example, int):
         try:
             return int(s)
-        except:
+        except (ValueError, TypeError):
             return s
     if isinstance(example, float):
         try:
             return float(s)
-        except:
+        except (ValueError, TypeError):
             return s
     return s
 
@@ -60,7 +60,7 @@ def _parse_env(defaults: dict) -> dict:
     for k, v in os.environ.items():
         if not k.startswith(_PREFIX):
             continue
-        key = k[len(_PREFIX):]  # e.g. NETWORK__NUM_VALIDATORS
+        key = k[len(_PREFIX) :]  # e.g. NETWORK__NUM_VALIDATORS
         parts = [p.lower() for p in key.split("__") if p]
         # find example type from defaults, if any
         ex = defaults
@@ -148,7 +148,6 @@ def get_settings(**overrides):
         node_config_file=cfg["node_config_file"],
         compose_template=compose_tmpl,
         unl_server=unl_server,
-
         network=SimpleNamespace(**cfg["network"]),
         node_config=SimpleNamespace(**cfg["node_config"]),
         compose_config=SimpleNamespace(**cfg["compose_config"]),

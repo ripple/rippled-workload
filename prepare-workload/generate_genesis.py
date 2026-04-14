@@ -37,48 +37,51 @@ def parse_features_macro(macro_path: Path) -> list[str]:
 
     Excludes retired amendments and comment examples.
     """
-    text = "\n".join(
-        line for line in macro_path.read_text().splitlines()
-        if not line.lstrip().startswith("//")
-    )
+    text = "\n".join(line for line in macro_path.read_text().splitlines() if not line.lstrip().startswith("//"))
     amendments = []
 
-    for m in re.finditer(
-        r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text
-    ):
+    for m in re.finditer(r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text):
         amendments.append(m.group(1))
 
-    for m in re.finditer(
-        r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text
-    ):
+    for m in re.finditer(r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text):
         amendments.append("fix" + m.group(1))
 
     return sorted(amendments)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Inject amendments into a pre-generated genesis ledger"
-    )
+    parser = argparse.ArgumentParser(description="Inject amendments into a pre-generated genesis ledger")
     parser.add_argument(
-        "--features-macro", required=True, type=Path,
+        "--features-macro",
+        required=True,
+        type=Path,
         help="Path to rippled features.macro file",
     )
     parser.add_argument(
-        "--genesis", type=Path, default=Path("genesis/genesis_ledger.json"),
+        "--genesis",
+        type=Path,
+        default=Path("genesis/genesis_ledger.json"),
         help="Path to pre-generated genesis ledger JSON",
     )
     parser.add_argument(
-        "--accounts", type=Path, default=Path("genesis/accounts.json"),
+        "--accounts",
+        type=Path,
+        default=Path("genesis/accounts.json"),
         help="Path to pre-generated accounts JSON",
     )
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("testnet"),
+        "--output-dir",
+        type=Path,
+        default=Path("testnet"),
         help="Output directory for prepared files",
     )
     args = parser.parse_args()
 
-    for path, name in [(args.features_macro, "features.macro"), (args.genesis, "genesis ledger"), (args.accounts, "accounts")]:
+    for path, name in [
+        (args.features_macro, "features.macro"),
+        (args.genesis, "genesis ledger"),
+        (args.accounts, "accounts"),
+    ]:
         if not path.exists():
             sys.exit(f"{name} not found: {path}")
 
@@ -106,7 +109,9 @@ def main():
     shutil.copy(args.accounts, accounts_out)
 
     accts = sum(1 for s in ledger["ledger"]["accountState"] if s.get("LedgerEntryType") == "AccountRoot")
-    print(f"Output: {ledger_out} ({accts} accounts, {len(amendment_hashes)} amendments, {len(ledger['ledger']['accountState'])} SLEs)")
+    print(
+        f"Output: {ledger_out} ({accts} accounts, {len(amendment_hashes)} amendments, {len(ledger['ledger']['accountState'])} SLEs)"
+    )
     print(f"Output: {accounts_out}")
 
 

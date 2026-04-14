@@ -8,6 +8,7 @@ port = 80
 
 
 class Server(BaseHTTPRequestHandler):
+    """HTTP handler that serves the UNL JSON on every GET request."""
 
     def do_GET(self):
         json_to_pass = json.dumps(unl_json)

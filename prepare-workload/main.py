@@ -54,7 +54,9 @@ def write_fuzzer_config(settings, num_validators, validator_public_keys, isolate
     fuzzer_config_file.write_text(fuzzer_config)
 
     # Write isolated validator xrpld.cfg
-    isolated_validator_config_dir = settings.network_dir_path / settings.config_dir / f"{settings.fuzzer.container_name}-xrpld"
+    isolated_validator_config_dir = (
+        settings.network_dir_path / settings.config_dir / f"{settings.fuzzer.container_name}-xrpld"
+    )
     isolated_validator_config_dir.mkdir(parents=True, exist_ok=True)
     isolated_validator_config_template = settings.template_dir_path / "isolated_validator_xrpld.cfg.mako"
     isolated_validator_config_file = isolated_validator_config_dir / "xrpld.cfg"
@@ -91,7 +93,7 @@ def write_config(node_data, settings):
     is_validator = node_data["is_validator"]
 
     # Format peer addresses for ips_fixed
-    default_port = settings.node_config.ports['peer']
+    default_port = settings.node_config.ports["peer"]
     ips_fixed = [format_peer_address(p, default_port) for p in node_data["peers"]]
 
     node_config_data = {
@@ -123,18 +125,24 @@ def write_compose(node_config, settings):
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="PROG")
-    parser.add_argument("-t", "--testnet-dir",
-                        type=Path,
-                        help="Output dir for network config.",
-                        )
-    parser.add_argument("-n", "--network",
-                        type=Path,
-                        help="Path to network spec file.",
-                        )
-    parser.add_argument("-v", "--num-validators",
-                        type=int,
-                        help="Number of validators to create.",
-                        )
+    parser.add_argument(
+        "-t",
+        "--testnet-dir",
+        type=Path,
+        help="Output dir for network config.",
+    )
+    parser.add_argument(
+        "-n",
+        "--network",
+        type=Path,
+        help="Path to network spec file.",
+    )
+    parser.add_argument(
+        "-v",
+        "--num-validators",
+        type=int,
+        help="Number of validators to create.",
+    )
     return parser.parse_args()
 
 

@@ -6,7 +6,40 @@ tools: Glob, Grep, Read, Bash, WebFetch, WebSearch
 
 You analyze Antithesis experiment results for the XRP Ledger workload.
 
-Before starting, read `.claude/rules/antithesis.md` for assertion naming conventions and expected patterns.
+## Assertion naming in triage reports
+
+- `workload::seen : TxType` — transaction submitted at least once
+- `workload::success : TxType` — at least one tesSUCCESS
+- `workload::failure : TxType` — at least one non-tesSUCCESS
+- `workload::always : valid_engine_result` — engine_result always a valid string
+- `workload::always : no_internal_rippled_error` — tefEXCEPTION/tefINTERNAL/tefINVARIANT_FAILED never occur
+- `workload::setup_*` — per-step reachability (gateways, trust_lines, iou_distribution, mpt_*, vaults, nfts, credentials, tickets, domains, loan_brokers, cover_deposits, loans)
+- `workload::endpoint_exception` (unreachable) — should never fire
+
+## Genesis ledger
+
+- `genesis/genesis_ledger.json` — committed base with 100 pre-funded SECP256K1 accounts, amendments empty
+- `genesis/accounts.json` — account seeds for wallet derivation
+- CI injects amendment hashes from `features.macro` (SHA-512Half of name, pure Python, no xrpld binary)
+- All validators + xrpld must start from same ledger or consensus breaks
+- `wait_for_network` requires 3 consecutive sync checks before calling `setup_complete()`
+
+## CI pipeline (ripple/rippled-antithesis)
+
+1. Checkout workload + rippled (sparse, only `features.macro`)
+2. Build xrpld Docker image
+3. Generate network config: validator keys, compose files → `testnet/`
+4. Inject amendments into committed genesis → copy to `testnet/volumes/*/`
+5. Build sidecar, workload, config images → push → launch experiment
+
+Config image mounts:
+- xrpld: `testnet/volumes/val0/` → `/opt/xrpld/etc/` (cfg + genesis)
+- Workload: `/accounts.json`, `/genesis_ledger.json` from config image root
+
+## Two repos
+
+- `ripple/rippled-antithesis` — CI workflow (main branch)
+- `ripple/rippled-workload` — workload code (main branch)
 
 ## Analyzing events logs
 

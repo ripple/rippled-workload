@@ -19,6 +19,8 @@
             packages = [
               pkgs.python313
               pkgs.uv
+              pkgs.ruff
+              pkgs.mypy
             ];
 
             shellHook = ''

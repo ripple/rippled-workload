@@ -10,6 +10,8 @@ from pathlib import Path
 
 
 class Network(IntEnum):
+    """XRPL network identifier (mainnet, testnet, devnet)."""
+
     MAIN = 0
     TEST = 1
     DEV = 2
@@ -36,6 +38,7 @@ network_rpc_url = {
 
 DEFAULT_NETWORK = Network.DEV
 DEFAULT_AMENDMENT_LIST = "amendment_list_dev_20251118.json"
+
 
 @dataclass(slots=True)
 class Amendment:
@@ -65,7 +68,7 @@ class Amendment:
     obsolete: bool = False
 
     def __str__(self):
-        return f"{self.name} {("Enabled" if self.enabled else "Disabled")}"
+        return f"{self.name} {('Enabled' if self.enabled else 'Disabled')}"
 
 
 def parse_features_macro(macro_path: Path) -> list[str]:
@@ -82,20 +85,13 @@ def parse_features_macro(macro_path: Path) -> list[str]:
     Returns a sorted list of amendment name strings.
     """
     # Strip C/C++ line comments to avoid matching examples in comments
-    text = "\n".join(
-        line for line in macro_path.read_text().splitlines()
-        if not line.lstrip().startswith("//")
-    )
+    text = "\n".join(line for line in macro_path.read_text().splitlines() if not line.lstrip().startswith("//"))
     amendments = []
 
-    for m in re.finditer(
-        r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::(yes|no)\s*,", text
-    ):
+    for m in re.finditer(r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::(yes|no)\s*,", text):
         amendments.append(m.group(1))
 
-    for m in re.finditer(
-        r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::(yes|no)\s*,", text
-    ):
+    for m in re.finditer(r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::(yes|no)\s*,", text):
         amendments.append("fix" + m.group(1))
 
     return sorted(amendments)
@@ -114,7 +110,7 @@ def _get_amendments_from_file(amendments_file: Path | None = None) -> list[Amend
     features_file = Path(amendments_file) if amendments_file is not None else DEFAULT_AMENDMENT_LIST
     try:
         return json.loads(features_file.resolve().read_text())
-    except Exception as e:
+    except Exception:
         pass  # probably file not found...
 
 
@@ -136,6 +132,7 @@ def _get_amendments_from_url(url: str, timeout: int = 3) -> list[Amendment]:
         raise SystemExit(f"Response had no key: {e}")
     return amend
 
+
 def _get_amendments_from_net(network: Network) -> tuple[str, list[Amendment]]:
     """Get the amendments enabled on the `network` via `xrpld`'s `feature` command."""
     # BUG: xrpld `feature` is _not_ reliable right now!
@@ -149,8 +146,9 @@ def _get_amendments_from_net(network: Network) -> tuple[str, list[Amendment]]:
 
     raise RuntimeError(f"failed to fetch amendments for {network}")
 
+
 def get_amendments(source: Path | str | Network) -> tuple[str, list[Amendment]]:
-    prefix="https://xrpl.org/resources/known-amendments#"
+    prefix = "https://xrpl.org/resources/known-amendments#"
     if isinstance(source, Path):
         a = _get_amendments_from_file(source)
     elif isinstance(source, str):
@@ -158,21 +156,21 @@ def get_amendments(source: Path | str | Network) -> tuple[str, list[Amendment]]:
         for i in a.items():
             print(i)
         import sys
+
         sys.exit(0)
     else:
         source, a = _get_amendments_from_net(source)
 
-    return str(source), [Amendment(
-                index=am_hash,
-                name=(name := info.get("name", am_hash)),
-                link=prefix + name.lower(),
-                enabled=bool(info.get("enabled", False)),
-                obsolete=bool(info.get("obsolete", False)),
-                ) for am_hash, info in a.items()
-            ]
-
-def get_disabled_amendments(net: Network) -> list[Amendment]:
-    a = get_amendments(net)
+    return str(source), [
+        Amendment(
+            index=am_hash,
+            name=(name := info.get("name", am_hash)),
+            link=prefix + name.lower(),
+            enabled=bool(info.get("enabled", False)),
+            obsolete=bool(info.get("obsolete", False)),
+        )
+        for am_hash, info in a.items()
+    ]
 
 
 def get_enabled_amendment_hashes(source: Path | Network) -> list[str]:
@@ -194,15 +192,17 @@ def print_amendments(amendments: list[Amendment]) -> None:
         print(f"{a.name[:31]:31}  {a.index:8}  {status:9}  {a.link}")
     print()
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("network", nargs="?", default="devnet", help="Network to use (default: devnet)")
     group.add_argument("-u", "--url", help="xrpld node to query for enabled amendments")
-    parser.add_argument("-d", "--disabled", action='store_true')
-    parser.add_argument("-p", "--plain", action='store_true')
-    parser.add_argument("-n", "--names-only", action='store_true')
+    parser.add_argument("-d", "--disabled", action="store_true")
+    parser.add_argument("-p", "--plain", action="store_true")
+    parser.add_argument("-n", "--names-only", action="store_true")
     # parser.add_argument("-j", "--json", action='store_true')
     # parser.add_argument('--supported', action='store_true')
     args = parser.parse_args()

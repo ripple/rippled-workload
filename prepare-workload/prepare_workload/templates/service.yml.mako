@@ -10,9 +10,11 @@
       - ${p}
     % endfor
     healthcheck:
-      test: ["CMD", "xrpld", "--silent", "ping"]
+      test: ["CMD-SHELL", "curl -sf -X POST http://localhost:5005 -H 'Content-Type: application/json' -d '{\"method\":\"ping\"}' -o /dev/null || exit 1"]
       start_period: 10s
       interval: 10s
+      timeout: 5s
+      retries: 3
     volumes:
     % for v in volumes:
       - ${v}
