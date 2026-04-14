@@ -91,6 +91,22 @@ def _accounts_list(workload: Workload) -> list[UserAccount]:
     return list(workload.accounts.values())
 
 
+async def _wait_for_state(
+    items: list, expected: int, label: str, timeout: float = 15, poll: float = 1
+) -> int:
+    """Wait for WS listener to populate a list. Returns actual count. Non-blocking."""
+    elapsed = 0.0
+    while len(items) < expected and elapsed < timeout:
+        await asyncio.sleep(poll)
+        elapsed += poll
+    if len(items) < expected:
+        send_event(
+            f"workload::setup_state_partial : {label}",
+            {"expected": expected, "got": len(items), "timeout_s": timeout},
+        )
+    return len(items)
+
+
 async def _submit_batch(
     name: str,
     txns: list[tuple[str, object, Wallet]],
@@ -432,7 +448,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     summary["vaults"] = await _submit_batch("vaults", vault_txns, client, seq)
 
     # ── 7b. Vault deposits: owners deposit into their vaults ─────────
-    await asyncio.sleep(3)
+    await _wait_for_state(workload.vaults, summary["vaults"], "vaults")
     deposit_txns = []
     for vault in workload.vaults:
         if vault.owner not in workload.accounts:
@@ -504,7 +520,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 8b. NFT offers ───────────────────────────────────────────────
-    await asyncio.sleep(3)
+    await _wait_for_state(workload.nfts, summary["nfts"], "nfts")
     nft_offer_txns = []
     for nft in workload.nfts:
         if nft.owner not in workload.accounts:
@@ -612,19 +628,33 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     summary["loan_brokers"] = await _submit_batch("loan_brokers", broker_txns, client, seq)
 
     # ── 12b. Broker cover deposits ───────────────────────────────────
-    await asyncio.sleep(3)
+    await _wait_for_state(workload.loan_brokers, summary["loan_brokers"], "loan_brokers")
     cover_txns = []
+    vault_by_id = {v.vault_id: v for v in workload.vaults}
     for broker in workload.loan_brokers[:4]:
         if broker.owner not in workload.accounts:
             continue
         owner = workload.accounts[broker.owner]
+        vault = vault_by_id.get(broker.vault_id)
+        if vault and isinstance(vault.asset, IssuedCurrency):
+            amount = IssuedCurrencyAmount(
+                currency=vault.asset.currency,
+                issuer=vault.asset.issuer,
+                value=_IOU_DISTRIBUTION_AMOUNT,
+            )
+        elif vault and isinstance(vault.asset, MPTCurrency):
+            amount = MPTAmount(
+                mpt_issuance_id=vault.asset.mpt_issuance_id, value=_MPT_DISTRIBUTION_AMOUNT
+            )
+        else:
+            amount = _COVER_DEPOSIT
         cover_txns.append(
             (
                 "LoanBrokerCoverDeposit",
                 LoanBrokerCoverDeposit(
                     account=owner.address,
                     loan_broker_id=broker.loan_broker_id,
-                    amount=_COVER_DEPOSIT,
+                    amount=amount,
                 ),
                 owner.wallet,
             )
@@ -671,7 +701,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         payment_total=1,
                     )
                     if ok:
-                        await asyncio.sleep(3)
+                        await _wait_for_state(
+                            workload.loans, summary["loans"] + 1, "zero_interest_loan"
+                        )
                         if workload.loans:
                             zero_loan = workload.loans[-1]
                             summary["loan_payoff"] = await _submit_batch(
