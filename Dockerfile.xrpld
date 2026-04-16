@@ -33,6 +33,9 @@ RUN <<EOF
     rm -rf ${SOURCE_DIR}/.git
 EOF
 
+# Force-enable all amendments for Antithesis testing
+RUN sed -i 's/Supported::no/Supported::yes/g' ${SOURCE_DIR}/include/xrpl/protocol/detail/features.macro
+
 # Clone fuzzer
 RUN <<EOF
     set -ex

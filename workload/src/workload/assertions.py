@@ -85,6 +85,9 @@ def register_assertions() -> None:
     _emit_catalog_entry(
         "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
     )
+    _emit_catalog_entry(
+        "workload::always : no_temDISABLED", "always", "Always", must_hit=True
+    )
     for setup_key in [
         "gateways",
         "trust_lines",
@@ -203,6 +206,25 @@ def tx_result(name: str, result: dict) -> None:
         assert_type="always",
         display_type="Always",
         assert_id="workload::always : valid_engine_result",
+    )
+    assert_raw(
+        condition=engine_result != "temDISABLED",
+        message="workload::always : no_temDISABLED",
+        details={
+            "engine_result": engine_result,
+            "tx_type": name,
+            "hash": details.get("hash", ""),
+        },
+        loc_filename=_LOC_FILE,
+        loc_function="tx_result",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=True,
+        must_hit=True,
+        assert_type="always",
+        display_type="Always",
+        assert_id="workload::always : no_temDISABLED",
     )
     assert_raw(
         condition=engine_result == "tesSUCCESS",
