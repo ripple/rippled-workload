@@ -23,6 +23,6 @@ from workload.sequence import SequenceTracker
 from workload.ws_listener import start_ws_listener
 from workload.setup import run_setup
 from workload.params import should_send_faulty, fake_account, fake_id
-from workload.models import UserAccount, Credential, Vault, PermissionedDomain, MPTokenIssuance, LoanBroker, Loan
+from workload.models import UserAccount, Credential, Vault, PermissionedDomain, MPTokenIssuance, LoanBroker, Loan, Delegate
 print('All imports OK')
 "

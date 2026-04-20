@@ -27,6 +27,7 @@ from xrpl.models.currencies import MPTCurrency
 from workload.models import (
     NFT,
     Credential,
+    Delegate,
     Loan,
     LoanBroker,
     MPTokenIssuance,
@@ -328,6 +329,25 @@ def _on_loan_pay(w: Workload, tx: dict, meta: dict) -> None:
         loan.principal = max(0, loan.principal - _extract_amount(tx))
 
 
+def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
+    source = tx.get("Account", "")
+    delegate_addr = tx.get("Authorize", "")
+    perms_raw = tx.get("Permissions", [])
+    permissions = []
+    for p in perms_raw:
+        pv = p.get("Permission", {}).get("PermissionValue", "")
+        if pv:
+            permissions.append(pv)
+    if not permissions:
+        return
+    # Replace existing delegation from same source to same delegate
+    w.delegates[:] = [
+        d for d in w.delegates
+        if not (d.source == source and d.delegate_address == delegate_addr)
+    ]
+    w.delegates.append(Delegate(source=source, delegate_address=delegate_addr, permissions=permissions))
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 # (name, path, handler, args_fn, state_updater_or_None)
 
@@ -526,7 +546,7 @@ REGISTRY = [
         "/delegate/set/random",
         delegate_set,
         lambda w: (w.accounts, w.client),
-        None,
+        _on_delegate_set,
     ),
     (
         "LoanBrokerSet",

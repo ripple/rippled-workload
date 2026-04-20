@@ -37,6 +37,7 @@ class Workload:
         self.vaults = []
         self.domains = []
         self.mpt_issuances = []
+        self.delegates = []
         self.loan_brokers = []
         self.loans = []
         self.deleted_vault_ids: list[str] = []
@@ -78,6 +79,10 @@ class Workload:
         self.seq = SequenceTracker(self.client)
 
         self.wait_for_network(self.xrpld)
+
+        # Wire delegation state so submit_tx can transparently delegate.
+        from workload.submit import configure as configure_submit
+        configure_submit(self.delegates, self.accounts)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
         reachable("workload::started", {})

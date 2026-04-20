@@ -66,6 +66,14 @@ class UserAccount(Account):
 
 
 @dataclass
+class Delegate:
+    """A delegation relationship: source granted delegate_address permission."""
+    source: str
+    delegate_address: str
+    permissions: list[str]  # TransactionType values e.g. ["Payment", "TrustSet"]
+
+
+@dataclass
 class Amm:
     account: str
     assets: list[IssuedCurrency]
