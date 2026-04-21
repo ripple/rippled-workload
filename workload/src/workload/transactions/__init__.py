@@ -333,10 +333,14 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
     source = tx.get("Account", "")
     delegate_addr = tx.get("Authorize", "")
     perms_raw = tx.get("Permissions", [])
+    # Only keep permission values that are transaction type names;
+    # GranularPermission values (e.g. "TrustlineAuthorize") will never
+    # match a tx_type in maybe_delegate, so filter them out.
+    tx_type_names = set(TX_TYPES)
     permissions = []
     for p in perms_raw:
         pv = p.get("Permission", {}).get("PermissionValue", "")
-        if pv:
+        if pv and pv in tx_type_names:
             permissions.append(pv)
     if not permissions:
         return
