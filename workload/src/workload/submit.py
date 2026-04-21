@@ -15,6 +15,21 @@ from workload.assertions import tx_submitted
 
 log = logging.getLogger(__name__)
 
+# ── Delegation state (set once via configure()) ──────────────────────
+_delegates: list = []
+_accounts: dict = {}
+
+
+def configure(delegates: list, accounts: dict) -> None:
+    """Store references to workload delegation state.
+
+    Called once during ``Workload.__init__`` so that ``submit_tx`` can
+    transparently apply delegation without any handler changes.
+    """
+    global _delegates, _accounts
+    _delegates = delegates
+    _accounts = accounts
+
 
 async def submit_tx(
     name: str,
@@ -31,12 +46,27 @@ async def submit_tx(
     If ``seq`` is provided, it is stamped onto the transaction before
     autofill so that xrpl-py skips the RPC sequence fetch.
 
+    When delegation state is configured (via ``configure``), there is a
+    10% chance that a matching delegate will sign on behalf of the
+    source account for delegable transaction types.
+
     Raises XRPLRequestFailureException on RPC-level failures (connection
     refused, malformed request, etc.) — let it propagate to the endpoint
     handler's XRPLException catch.
     """
     if seq is not None:
         txn = txn.__replace__(sequence=seq)
+
+    # Possibly delegate: lazy import to avoid circular dependency
+    if _delegates:
+        from workload.transactions.delegation import maybe_delegate
+        delegate_addr, delegate_wallet = maybe_delegate(
+            name, txn.account, _delegates, _accounts,
+        )
+        if delegate_addr is not None:
+            txn = txn.__replace__(delegate=delegate_addr)
+            wallet = delegate_wallet
+
     signed = await autofill_and_sign(txn, client, wallet)
     response = await submit(signed, client)
     result = response.result

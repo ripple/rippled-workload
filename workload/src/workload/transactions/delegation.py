@@ -95,3 +95,45 @@ async def _delegate_set_faulty(
             permissions=permissions,
         )
         await submit_tx("DelegateSet", txn, client, impostor.wallet)
+
+
+
+# ── Delegation helper for submit_tx ──────────────────────────────────
+
+# Names of non-delegable transaction types for fast lookup.
+_NON_DELEGABLE_NAMES: set[str] = {t.value for t in NON_DELEGABLE_TRANSACTIONS}
+
+
+def maybe_delegate(
+    tx_type: str,
+    src_address: str,
+    delegates: list,
+    accounts: dict[str, UserAccount],
+) -> tuple[str | None, object | None]:
+    """Possibly pick a delegate to submit *tx_type* on behalf of *src_address*.
+
+    Returns ``(delegate_address, delegate_wallet)`` when delegation should
+    happen, or ``(None, None)`` otherwise.
+
+    Called from ``submit_tx`` — no handler changes required.
+    """
+    from workload.randoms import random as _random
+
+    if tx_type in _NON_DELEGABLE_NAMES:
+        return None, None
+    if not delegates:
+        return None, None
+    if _random() >= 0.10:
+        return None, None
+
+    candidates = [
+        d for d in delegates
+        if d.source == src_address
+        and tx_type in d.permissions
+        and d.delegate_address in accounts
+    ]
+    if not candidates:
+        return None, None
+    d = choice(candidates)
+    acct = accounts[d.delegate_address]
+    return acct.address, acct.wallet
