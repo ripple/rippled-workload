@@ -22,6 +22,7 @@ from workload.randoms import choice, randint, random, sample
 from workload.submit import submit_tx
 
 
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -111,8 +112,8 @@ async def _amm_create_faulty(
         return
     src = choice(list(accounts.values()))
     mutation = choice([
-        "non_existent_asset", "same_asset_both", "fee_out_of_range",
-        "zero_amount", "negative_trading_fee",
+        "non_existent_asset", "same_asset_both",
+        "zero_amount", "duplicate_amm", "unfunded_create",
     ])
 
     if mutation == "non_existent_asset":
@@ -139,23 +140,6 @@ async def _amm_create_faulty(
             trading_fee=params.amm_trading_fee(),
         )
 
-    elif mutation == "fee_out_of_range":
-        pair = _pick_asset_pair(trust_lines)
-        if not pair:
-            return
-        asset1, asset2 = pair
-        if isinstance(asset1, xrpl.models.XRP):
-            amount1 = params.amm_xrp_amount()
-        else:
-            amount1 = IOUAmount(currency=asset1.currency, issuer=asset1.issuer, value=params.amm_deposit_amount())
-        amount2 = IOUAmount(currency=asset2.currency, issuer=asset2.issuer, value=params.amm_deposit_amount())
-        txn = AMMCreate(
-            account=src.address,
-            amount=amount1,
-            amount2=amount2,
-            trading_fee=randint(1001, 65535),
-        )
-
     elif mutation == "zero_amount":
         fake = _fake_iou()
         amount2 = IOUAmount(currency=fake.currency, issuer=fake.issuer, value="0")
@@ -166,14 +150,38 @@ async def _amm_create_faulty(
             trading_fee=params.amm_trading_fee(),
         )
 
-    else:  # negative_trading_fee
-        fake = _fake_iou()
-        amount2 = IOUAmount(currency=fake.currency, issuer=fake.issuer, value=params.amm_deposit_amount())
+    elif mutation == "duplicate_amm":
+        # Try to create an AMM for an asset pair that already exists (tecDUPLICATE)
+        if not amms:
+            return
+        amm = choice(amms)
+        if len(amm.assets) < 2:
+            return
+        a1, a2 = amm.assets[0], amm.assets[1]
+        if isinstance(a1, xrpl.models.XRP):
+            amount1 = params.amm_xrp_amount()
+        else:
+            amount1 = IOUAmount(currency=a1.currency, issuer=a1.issuer, value=params.amm_deposit_amount())
+        if isinstance(a2, xrpl.models.XRP):
+            amount2 = params.amm_xrp_amount()
+        else:
+            amount2 = IOUAmount(currency=a2.currency, issuer=a2.issuer, value=params.amm_deposit_amount())
         txn = AMMCreate(
             account=src.address,
-            amount=params.amm_xrp_amount(),
+            amount=amount1,
             amount2=amount2,
-            trading_fee=-1,
+            trading_fee=params.amm_trading_fee(),
+        )
+
+    else:  # unfunded_create
+        # Create with assets the account doesn't hold (tecUNFUNDED_AMM)
+        fake = _fake_iou()
+        amount2 = IOUAmount(currency=fake.currency, issuer=fake.issuer, value=str(randint(1_000_000, 999_999_999)))
+        txn = AMMCreate(
+            account=src.address,
+            amount=str(randint(10_000_000_000, 99_000_000_000)),  # more XRP than account has
+            amount2=amount2,
+            trading_fee=params.amm_trading_fee(),
         )
 
     await submit_tx("AMMCreate", txn, client, src.wallet)
@@ -301,7 +309,7 @@ async def _amm_deposit_faulty(
         asset = amm.assets[0] if amm.assets else None
         if not asset:
             return
-        amount = IOUAmount(currency=asset.currency, issuer=asset.issuer, value="0")
+        amount = _iou_amount(asset, "0")
         txn = AMMDeposit(
             account=src.address,
             asset=amm.assets[0],
@@ -346,7 +354,9 @@ async def _amm_deposit_faulty(
         amm = choice(amms)
         if len(amm.assets) < 2:
             return
-        amount = _iou_amount(amm.assets[0], "-1")
+        # Use IOU asset to avoid XRP codec rejection of negative drops
+        asset = amm.assets[1] if isinstance(amm.assets[0], xrpl.models.XRP) else amm.assets[0]
+        amount = IOUAmount(currency=asset.currency, issuer=asset.issuer, value="-1")
         txn = AMMDeposit(
             account=src.address,
             asset=amm.assets[0],
@@ -486,7 +496,7 @@ async def _amm_withdraw_faulty(
         asset = amm.assets[0] if amm.assets else None
         if not asset:
             return
-        amount = IOUAmount(currency=asset.currency, issuer=asset.issuer, value="0")
+        amount = _iou_amount(asset, "0")
         txn = AMMWithdraw(
             account=src.address,
             asset=amm.assets[0],
@@ -499,18 +509,19 @@ async def _amm_withdraw_faulty(
         if not amms:
             return
         amm = choice(amms)
-        asset = amm.assets[0] if amm.assets else None
-        if not asset:
+        if len(amm.assets) < 2:
             return
+        # Use IOU asset to avoid XRP issuer issue
+        asset = amm.assets[1] if isinstance(amm.assets[0], xrpl.models.XRP) else amm.assets[0]
         amount = IOUAmount(
             currency=asset.currency,
             issuer=asset.issuer,
-            value=str(10**18),
+            value=str(10**15),  # within IOU precision but far exceeds pool balance
         )
         txn = AMMWithdraw(
             account=src.address,
             asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+            asset2=amm.assets[1],
             amount=amount,
             flags=AMMWithdrawFlag.TF_SINGLE_ASSET,
         )
@@ -537,7 +548,9 @@ async def _amm_withdraw_faulty(
         amm = choice(amms)
         if len(amm.assets) < 2:
             return
-        amount = _iou_amount(amm.assets[0], "-1")
+        # Use IOU asset to avoid XRP codec rejection of negative drops
+        asset = amm.assets[1] if isinstance(amm.assets[0], xrpl.models.XRP) else amm.assets[0]
+        amount = IOUAmount(currency=asset.currency, issuer=asset.issuer, value="-1")
         txn = AMMWithdraw(
             account=src.address,
             asset=amm.assets[0],
@@ -588,7 +601,7 @@ async def _amm_vote_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice(["non_existent_amm", "fee_out_of_range", "negative_fee"])
+    mutation = choice(["non_existent_amm", "non_lp_holder_vote", "swapped_assets"])
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
@@ -599,7 +612,8 @@ async def _amm_vote_faulty(
             trading_fee=params.amm_vote_fee(),
         )
 
-    elif mutation == "fee_out_of_range":
+    elif mutation == "non_lp_holder_vote":
+        # Vote on a real AMM without holding LP tokens (tecAMM_FAILED)
         if not amms:
             return
         amm = choice(amms)
@@ -607,18 +621,21 @@ async def _amm_vote_faulty(
             account=src.address,
             asset=amm.assets[0],
             asset2=amm.assets[1] if len(amm.assets) > 1 else None,
-            trading_fee=randint(1001, 65535),
+            trading_fee=params.amm_vote_fee(),
         )
 
-    else:  # negative_fee
+    else:  # swapped_assets
+        # Vote with asset1/asset2 swapped (tecAMM_INVALID_TOKENS)
         if not amms:
             return
         amm = choice(amms)
+        if len(amm.assets) < 2:
+            return
         txn = AMMVote(
             account=src.address,
-            asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
-            trading_fee=-1,
+            asset=amm.assets[1],
+            asset2=amm.assets[0],
+            trading_fee=params.amm_vote_fee(),
         )
 
     await submit_tx("AMMVote", txn, client, src.wallet)
@@ -685,7 +702,7 @@ async def _amm_bid_faulty(
     src = choice(list(accounts.values()))
     mutation = choice([
         "non_existent_amm", "zero_bid",
-        "bid_min_exceeds_max", "too_many_auth_accounts", "fake_auth_accounts",
+        "bid_min_exceeds_max", "fake_auth_accounts", "non_lp_holder_bid",
     ])
 
     if mutation == "non_existent_amm":
@@ -728,25 +745,7 @@ async def _amm_bid_faulty(
             bid_min=bid_min, bid_max=bid_max,
         )
 
-    elif mutation == "too_many_auth_accounts":
-        if not amms:
-            return
-        amm = choice(amms)
-        if not amm.lp_token or len(amm.assets) < 2:
-            return
-        lp = amm.lp_token[0]
-        acct_list = list(accounts.values())
-        num_auth = randint(5, min(8, len(acct_list)))
-        auth_accounts = [AuthAccount(account=a.address) for a in sample(acct_list, num_auth)]
-        bid_amt = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_bid_min())
-        txn = AMMBid(
-            account=src.address,
-            asset=amm.assets[0], asset2=amm.assets[1],
-            bid_min=bid_amt,
-            auth_accounts=auth_accounts,
-        )
-
-    else:  # fake_auth_accounts
+    elif mutation == "fake_auth_accounts":
         if not amms:
             return
         amm = choice(amms)
@@ -760,6 +759,21 @@ async def _amm_bid_faulty(
             asset=amm.assets[0], asset2=amm.assets[1],
             bid_min=bid_amt,
             auth_accounts=fake_auths,
+        )
+
+    else:  # non_lp_holder_bid
+        # Bid on a real AMM without holding LP tokens (tecAMM_INVALID_TOKENS)
+        if not amms:
+            return
+        amm = choice(amms)
+        if not amm.lp_token or len(amm.assets) < 2:
+            return
+        lp = amm.lp_token[0]
+        bid_amt = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_bid_min())
+        txn = AMMBid(
+            account=src.address,
+            asset=amm.assets[0], asset2=amm.assets[1],
+            bid_min=bid_amt,
         )
 
     await submit_tx("AMMBid", txn, client, src.wallet)

@@ -131,3 +131,10 @@ class Loan:
     principal: int = 0
     is_defaulted: bool = False
     is_impaired: bool = False
+
+
+@dataclass
+class Delegate:
+    source: str
+    delegate_address: str
+    permissions: list[str] = field(default_factory=list)

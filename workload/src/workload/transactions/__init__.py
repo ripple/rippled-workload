@@ -65,6 +65,7 @@ from workload.transactions.lending import (
     loan_set,
 )
 from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
+from workload.transactions.offers import offer_cancel, offer_create
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -394,6 +395,22 @@ def _on_amm_delete(w: Workload, tx: dict, meta: dict) -> None:
         )]
 
 
+def _on_offer_create(w: Workload, tx: dict, meta: dict) -> None:
+    offer_id = _extract_created_id(meta, "Offer")
+    if offer_id:
+        w.offers.append({
+            "account": tx.get("Account", ""),
+            "sequence": tx.get("Sequence", 0),
+            "offer_id": offer_id,
+        })
+
+
+def _on_offer_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Offer")
+    if deleted_id:
+        w.offers[:] = [o for o in w.offers if o.get("offer_id") != deleted_id]
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 # (name, path, handler, args_fn, state_updater_or_None)
 
@@ -635,6 +652,20 @@ REGISTRY = [
         amm_delete,
         lambda w: (w.accounts, w.amms, w.client),
         _on_amm_delete,
+    ),
+    (
+        "OfferCreate",
+        "/offer/create/random",
+        offer_create,
+        lambda w: (w.accounts, w.amms, w.offers, w.trust_lines, w.client),
+        _on_offer_create,
+    ),
+    (
+        "OfferCancel",
+        "/offer/cancel/random",
+        offer_cancel,
+        lambda w: (w.accounts, w.offers, w.client),
+        _on_offer_cancel,
     ),
     (
         "LoanBrokerSet",
