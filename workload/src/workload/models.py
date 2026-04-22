@@ -74,7 +74,7 @@ class Delegate:
 
 
 @dataclass
-class Amm:
+class AMM:
     account: str
     assets: list[IssuedCurrency]
     lp_token: list[IssuedCurrency]

@@ -26,6 +26,7 @@ from xrpl.models.currencies import MPTCurrency
 
 from workload.models import (
     NFT,
+    AMM,
     Credential,
     Delegate,
     Loan,
@@ -37,6 +38,14 @@ from workload.models import (
     Vault,
 )
 from workload.transactions.account_set import account_set_random
+from workload.transactions.amm import (
+    amm_bid,
+    amm_create,
+    amm_delete,
+    amm_deposit,
+    amm_vote,
+    amm_withdraw,
+)
 from workload.transactions.batch import batch_random
 from workload.transactions.credentials import (
     credential_accept,
@@ -56,6 +65,7 @@ from workload.transactions.lending import (
     loan_set,
 )
 from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
+from workload.transactions.offers import offer_cancel, offer_create
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -352,6 +362,55 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
     w.delegates.append(Delegate(source=source, delegate_address=delegate_addr, permissions=permissions))
 
 
+def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
+    amm_id = _extract_created_id(meta, "AMM")
+    if amm_id:
+        # Parse both assets from the AMMCreate transaction
+        asset1_raw = tx.get("Amount", {})
+        asset2_raw = tx.get("Amount2", {})
+        assets = []
+        for raw in [asset1_raw, asset2_raw]:
+            if isinstance(raw, dict) and "currency" in raw:
+                assets.append(IssuedCurrency(currency=raw["currency"], issuer=raw.get("issuer", "")))
+            elif isinstance(raw, str):
+                assets.append(xrpl.models.XRP())
+        # Extract LP token from created AMM node
+        lp_token = []
+        for node in meta.get("AffectedNodes", []):
+            created = node.get("CreatedNode", {})
+            if created.get("LedgerEntryType") == "AMM":
+                lp_raw = created.get("NewFields", {}).get("LPTokenBalance", {})
+                if lp_raw and "currency" in lp_raw:
+                    lp_token.append(
+                        IssuedCurrency(currency=lp_raw["currency"], issuer=lp_raw.get("issuer", ""))
+                    )
+        w.amms.append(AMM(account=tx["Account"], assets=assets, lp_token=lp_token))
+
+
+def _on_amm_delete(w: Workload, tx: dict, meta: dict) -> None:
+    amm_id = _extract_deleted_id(meta, "AMM")
+    if amm_id:
+        w.amms[:] = [a for a in w.amms if not (
+            _extract_deleted_id(meta, "AMM") and a.account == tx.get("Account", "")
+        )]
+
+
+def _on_offer_create(w: Workload, tx: dict, meta: dict) -> None:
+    offer_id = _extract_created_id(meta, "Offer")
+    if offer_id:
+        w.offers.append({
+            "account": tx.get("Account", ""),
+            "sequence": tx.get("Sequence", 0),
+            "offer_id": offer_id,
+        })
+
+
+def _on_offer_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Offer")
+    if deleted_id:
+        w.offers[:] = [o for o in w.offers if o.get("offer_id") != deleted_id]
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 # (name, path, handler, args_fn, state_updater_or_None)
 
@@ -551,6 +610,62 @@ REGISTRY = [
         delegate_set,
         lambda w: (w.accounts, w.client),
         _on_delegate_set,
+    ),
+    (
+        "AMMCreate",
+        "/amm/create/random",
+        amm_create,
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
+        _on_amm_create,
+    ),
+    (
+        "AMMDeposit",
+        "/amm/deposit/random",
+        amm_deposit,
+        lambda w: (w.accounts, w.amms, w.client),
+        None,
+    ),
+    (
+        "AMMWithdraw",
+        "/amm/withdraw/random",
+        amm_withdraw,
+        lambda w: (w.accounts, w.amms, w.client),
+        None,
+    ),
+    (
+        "AMMVote",
+        "/amm/vote/random",
+        amm_vote,
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
+        None,
+    ),
+    (
+        "AMMBid",
+        "/amm/bid/random",
+        amm_bid,
+        lambda w: (w.accounts, w.amms, w.client),
+        None,
+    ),
+    (
+        "AMMDelete",
+        "/amm/delete/random",
+        amm_delete,
+        lambda w: (w.accounts, w.amms, w.client),
+        _on_amm_delete,
+    ),
+    (
+        "OfferCreate",
+        "/offer/create/random",
+        offer_create,
+        lambda w: (w.accounts, w.amms, w.offers, w.trust_lines, w.client),
+        _on_offer_create,
+    ),
+    (
+        "OfferCancel",
+        "/offer/cancel/random",
+        offer_cancel,
+        lambda w: (w.accounts, w.offers, w.client),
+        _on_offer_cancel,
     ),
     (
         "LoanBrokerSet",
