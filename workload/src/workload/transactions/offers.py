@@ -18,9 +18,6 @@ from workload.randoms import choice, randint, random
 from workload.submit import submit_tx
 from workload import params
 
-
-
-
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
@@ -141,7 +138,6 @@ async def _offer_create_valid(
         return
     taker_gets, taker_pays = pair
     flag = _random_flag()
-
 
     txn = OfferCreate(
         account=src.address,
