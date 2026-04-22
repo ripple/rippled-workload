@@ -17,6 +17,7 @@ from workload.models import AMM, TrustLine, UserAccount
 from workload.randoms import choice, randint, random
 from workload.submit import submit_tx
 from workload import params
+from workload.transactions.amm import _find_account_with_trust_lines
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -73,35 +74,9 @@ def _find_account_for_amm(
     trust_lines: list[TrustLine],
     amm: AMM,
 ) -> UserAccount | None:
-    """Find an account that has trust lines for the AMM's IOU assets.
-
-    For XRP/IOU pools the account just needs the IOU trust line.
-    For IOU/IOU pools the account needs both trust lines.
-    """
-    needed_ious: list[IssuedCurrency] = []
-    for asset in amm.assets:
-        if not isinstance(asset, xrpl.models.XRP):
-            needed_ious.append(asset)
-
-    if not needed_ious:
-        # XRP/XRP pool (unusual) — any account works
-        return choice(list(accounts.values()))
-
-    # Build set of accounts that have all needed trust lines
-    tl_by_account: dict[str, set[tuple[str, str]]] = {}
-    for tl in trust_lines:
-        key = (tl.currency, tl.account_b)  # (currency, issuer)
-        tl_by_account.setdefault(tl.account_a, set()).add(key)
-
-    eligible = []
-    for addr, acct in accounts.items():
-        acct_tls = tl_by_account.get(addr, set())
-        if all((iou.currency, iou.issuer) in acct_tls for iou in needed_ious):
-            eligible.append(acct)
-
-    if not eligible:
-        return None
-    return choice(eligible)
+    """Find an account that has trust lines for the AMM's IOU assets."""
+    needed_ious = [a for a in amm.assets if not isinstance(a, xrpl.models.XRP)]
+    return _find_account_with_trust_lines(accounts, trust_lines, needed_ious)
 
 
 # ── OfferCreate ─────────────────────────────────────────────────────
@@ -138,7 +113,6 @@ async def _offer_create_valid(
         return
     taker_gets, taker_pays = pair
     flag = _random_flag()
-
     txn = OfferCreate(
         account=src.address,
         taker_gets=taker_gets,

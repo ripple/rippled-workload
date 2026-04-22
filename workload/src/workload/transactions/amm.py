@@ -21,7 +21,37 @@ from workload.models import AMM, TrustLine, UserAccount
 from workload.randoms import choice, randint, random, sample
 from workload.submit import submit_tx
 
+
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _find_account_with_trust_lines(
+    accounts: dict[str, UserAccount],
+    trust_lines: list[TrustLine],
+    needed_ious: list[IssuedCurrency],
+) -> UserAccount | None:
+    """Find an account that has trust lines for all needed IOUs.
+
+    Accounts with trust lines received IOU distributions during setup,
+    so having the trust line implies having balance.
+    Returns None if no eligible account exists.
+    """
+    if not needed_ious:
+        return choice(list(accounts.values()))
+
+    tl_by_account: dict[str, set[tuple[str, str]]] = {}
+    for tl in trust_lines:
+        tl_by_account.setdefault(tl.account_a, set()).add((tl.currency, tl.account_b))
+
+    eligible = []
+    for addr, acct in accounts.items():
+        acct_tls = tl_by_account.get(addr, set())
+        if all((iou.currency, iou.issuer) in acct_tls for iou in needed_ious):
+            eligible.append(acct)
+
+    if not eligible:
+        return None
+    return choice(eligible)
 
 
 def _pick_asset_pair(
@@ -85,7 +115,11 @@ async def _amm_create_valid(
     if not pair:
         return
     asset1, asset2 = pair
-    src = choice(list(accounts.values()))
+    # Find account that holds the needed IOUs
+    needed = [a for a in [asset1, asset2] if not isinstance(a, xrpl.models.XRP)]
+    src = _find_account_with_trust_lines(accounts, trust_lines, needed)
+    if not src:
+        return
     if isinstance(asset1, xrpl.models.XRP):
         amount1 = params.amm_xrp_amount()
     else:
@@ -566,22 +600,28 @@ async def _amm_withdraw_faulty(
 async def amm_vote(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
+    trust_lines: list[TrustLine],
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
         return await _amm_vote_faulty(accounts, amms, client)
-    return await _amm_vote_valid(accounts, amms, client)
+    return await _amm_vote_valid(accounts, amms, trust_lines, client)
 
 
 async def _amm_vote_valid(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
+    trust_lines: list[TrustLine],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts or not amms:
         return
     amm = choice(amms)
-    src = choice(list(accounts.values()))
+    # Pick account that holds the AMM's IOU assets (likely LP token holder)
+    needed = [a for a in amm.assets if not isinstance(a, xrpl.models.XRP)]
+    src = _find_account_with_trust_lines(accounts, trust_lines, needed)
+    if not src:
+        return
     txn = AMMVote(
         account=src.address,
         asset=amm.assets[0],

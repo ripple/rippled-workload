@@ -172,8 +172,8 @@ def amm_trading_fee() -> int:
 
 
 def amm_deposit_amount() -> str:
-    """AMM deposit amount for IOU tokens."""
-    return str(randint(100, 100_000))
+    """AMM deposit amount for IOU tokens (within typical 10k balance)."""
+    return str(randint(100, 5_000))
 
 
 def amm_withdraw_amount() -> str:

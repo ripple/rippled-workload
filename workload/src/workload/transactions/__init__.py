@@ -636,7 +636,7 @@ REGISTRY = [
         "AMMVote",
         "/amm/vote/random",
         amm_vote,
-        lambda w: (w.accounts, w.amms, w.client),
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
         None,
     ),
     (
