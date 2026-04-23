@@ -278,3 +278,40 @@ def check_cash_amount(send_max: str) -> str:
     """Cash amount ≤ send_max."""
     max_val = int(send_max)
     return str(randint(1, max_val))
+
+
+# ── Payment Channels ────────────────────────────────────────────────
+
+
+def channel_amount() -> str:
+    """Payment channel amount in drops (1-100 XRP)."""
+    return str(randint(1_000_000, 100_000_000))
+
+
+def channel_settle_delay() -> int:
+    """Settle delay in seconds (60-3600)."""
+    return randint(60, 3600)
+
+
+def channel_fund_amount() -> str:
+    """Additional XRP to add to a channel in drops (0.1-10 XRP)."""
+    return str(randint(100_000, 10_000_000))
+
+
+def channel_claim_balance(channel_amount: str) -> str:
+    """Claim balance ≤ channel amount."""
+    max_val = int(channel_amount)
+    return str(randint(1, max_val))
+
+
+# ── Clawback ────────────────────────────────────────────────────────
+
+
+def clawback_iou_amount() -> str:
+    """IOU clawback value (1-1000, within typical 10k holder balance)."""
+    return str(randint(1, 1_000))
+
+
+def clawback_mpt_amount() -> str:
+    """MPT clawback value (1-1000, within typical 10k holder balance)."""
+    return str(randint(1, 1_000))

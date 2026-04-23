@@ -34,6 +34,7 @@ from workload.models import (
     LoanBroker,
     MPTokenIssuance,
     NFTOffer,
+    PaymentChannel,
     PermissionedDomain,
     TrustLine,
     Vault,
@@ -45,9 +46,18 @@ from workload.transactions.credentials import (
     credential_create,
     credential_delete,
 )
+from workload.transactions.account_delete import account_delete
 from workload.transactions.checks import check_cancel, check_cash, check_create
+from workload.transactions.clawback import clawback
 from workload.transactions.delegation import delegate_set
 from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
+from workload.transactions.payment_channels import (
+    channel_claim,
+    channel_create,
+    channel_fund,
+)
+from workload.transactions.set_regular_key import set_regular_key
+from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.domains import permissioned_domain_delete, permissioned_domain_set
 from workload.transactions.lending import (
     loan_broker_cover_deposit,
@@ -331,6 +341,45 @@ def _on_loan_pay(w: Workload, tx: dict, meta: dict) -> None:
     loan = _find_loan(w, tx.get("LoanID", ""))
     if loan:
         loan.principal = max(0, loan.principal - _extract_amount(tx))
+
+
+def _on_account_delete(w: Workload, tx: dict, meta: dict) -> None:
+    deleted = tx.get("Account", "")
+    if deleted and deleted in w.accounts:
+        del w.accounts[deleted]
+
+
+def _on_channel_create(w: Workload, tx: dict, meta: dict) -> None:
+    channel_id = _extract_created_id(meta, "PayChannel")
+    if not channel_id:
+        return
+    tx_hash = tx.get("hash", "")
+    # Update placeholder channel_id with real ledger ID
+    for ch in w.payment_channels:
+        if ch.channel_id == tx_hash:
+            ch.channel_id = channel_id
+            return
+    w.payment_channels.append(PaymentChannel(
+        channel_id=channel_id,
+        source=tx.get("Account", ""),
+        destination=tx.get("Destination", ""),
+        amount=str(tx.get("Amount", "0")),
+        settle_delay=tx.get("SettleDelay", 0),
+    ))
+
+
+def _on_channel_fund(w: Workload, tx: dict, meta: dict) -> None:
+    # Fund doesn't create/delete — just adds XRP to existing channel
+    pass
+
+
+def _on_channel_claim(w: Workload, tx: dict, meta: dict) -> None:
+    # If the channel was closed by this claim, remove it
+    deleted_id = _extract_deleted_id(meta, "PayChannel")
+    if deleted_id:
+        w.payment_channels[:] = [
+            ch for ch in w.payment_channels if ch.channel_id != deleted_id
+        ]
 
 
 def _on_check_create(w: Workload, tx: dict, meta: dict) -> None:
@@ -641,6 +690,27 @@ REGISTRY = [
         _on_check_create,
     ),
     (
+        "PaymentChannelCreate",
+        "/channel/create/random",
+        channel_create,
+        lambda w: (w.accounts, w.payment_channels, w.client),
+        _on_channel_create,
+    ),
+    (
+        "PaymentChannelFund",
+        "/channel/fund/random",
+        channel_fund,
+        lambda w: (w.accounts, w.payment_channels, w.client),
+        _on_channel_fund,
+    ),
+    (
+        "PaymentChannelClaim",
+        "/channel/claim/random",
+        channel_claim,
+        lambda w: (w.accounts, w.payment_channels, w.client),
+        _on_channel_claim,
+    ),
+    (
         "CheckCash",
         "/check/cash/random",
         check_cash,
@@ -653,6 +723,34 @@ REGISTRY = [
         check_cancel,
         lambda w: (w.accounts, w.checks, w.client),
         _on_check_cancel,
+    ),
+    (
+        "Clawback",
+        "/clawback/random",
+        clawback,
+        lambda w: (w.accounts, w.trust_lines, w.mpt_issuances, w.client),
+        None,
+    ),
+    (
+        "SetRegularKey",
+        "/set_regular_key/random",
+        set_regular_key,
+        lambda w: (w.accounts, w.client),
+        None,
+    ),
+    (
+        "SignerListSet",
+        "/signer_list_set/random",
+        signer_list_set,
+        lambda w: (w.accounts, w.client),
+        None,
+    ),
+    (
+        "AccountDelete",
+        "/account_delete/random",
+        account_delete,
+        lambda w: (w.accounts, w.client),
+        _on_account_delete,
     ),
     (
         "EscrowCreate",

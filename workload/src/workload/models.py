@@ -153,3 +153,13 @@ class Check:
     creator: str
     destination: str
     send_max: str  # drops for XRP
+
+
+@dataclass
+class PaymentChannel:
+    """An active payment channel on the ledger."""
+    channel_id: str
+    source: str
+    destination: str
+    amount: str  # total XRP drops allocated
+    settle_delay: int

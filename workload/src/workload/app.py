@@ -42,6 +42,7 @@ class Workload:
         self.loans = []
         self.escrows = []
         self.checks = []
+        self.payment_channels = []
         self.deleted_vault_ids: list[str] = []
         self.deleted_broker_ids: list[str] = []
         self.deleted_loan_ids: list[str] = []
