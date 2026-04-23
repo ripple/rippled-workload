@@ -28,6 +28,7 @@ from workload.models import (
     NFT,
     Credential,
     Delegate,
+    Escrow,
     Loan,
     LoanBroker,
     MPTokenIssuance,
@@ -44,6 +45,7 @@ from workload.transactions.credentials import (
     credential_delete,
 )
 from workload.transactions.delegation import delegate_set
+from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
 from workload.transactions.domains import permissioned_domain_delete, permissioned_domain_set
 from workload.transactions.lending import (
     loan_broker_cover_deposit,
@@ -329,6 +331,52 @@ def _on_loan_pay(w: Workload, tx: dict, meta: dict) -> None:
         loan.principal = max(0, loan.principal - _extract_amount(tx))
 
 
+def _on_escrow_create(w: Workload, tx: dict, meta: dict) -> None:
+    """Confirm escrow creation — match by owner+sequence and keep fulfillment."""
+    escrow_id = _extract_created_id(meta, "Escrow")
+    if not escrow_id:
+        return
+    owner = tx.get("Account", "")
+    seq = tx.get("Sequence", 0)
+    # The Escrow was already appended optimistically by escrow_create handler
+    # with sequence = tx sequence. Just confirm it exists.
+    for e in w.escrows:
+        if e.owner == owner and e.sequence == seq:
+            return
+    # If not found (edge case), add without fulfillment
+    w.escrows.append(Escrow(
+        owner=owner,
+        destination=tx.get("Destination", ""),
+        sequence=seq,
+        condition=tx.get("Condition"),
+        fulfillment=None,
+        finish_after=tx.get("FinishAfter"),
+        cancel_after=tx.get("CancelAfter"),
+    ))
+
+
+def _on_escrow_finish(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Escrow")
+    if deleted_id:
+        owner = tx.get("Owner", "")
+        seq = tx.get("OfferSequence", 0)
+        w.escrows[:] = [
+            e for e in w.escrows
+            if not (e.owner == owner and e.sequence == seq)
+        ]
+
+
+def _on_escrow_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Escrow")
+    if deleted_id:
+        owner = tx.get("Owner", "")
+        seq = tx.get("OfferSequence", 0)
+        w.escrows[:] = [
+            e for e in w.escrows
+            if not (e.owner == owner and e.sequence == seq)
+        ]
+
+
 def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
     source = tx.get("Account", "")
     delegate_addr = tx.get("Authorize", "")
@@ -551,6 +599,27 @@ REGISTRY = [
         delegate_set,
         lambda w: (w.accounts, w.client),
         _on_delegate_set,
+    ),
+    (
+        "EscrowCreate",
+        "/escrow/create/random",
+        escrow_create,
+        lambda w: (w.accounts, w.escrows, w.client),
+        _on_escrow_create,
+    ),
+    (
+        "EscrowFinish",
+        "/escrow/finish/random",
+        escrow_finish,
+        lambda w: (w.accounts, w.escrows, w.client),
+        _on_escrow_finish,
+    ),
+    (
+        "EscrowCancel",
+        "/escrow/cancel/random",
+        escrow_cancel,
+        lambda w: (w.accounts, w.escrows, w.client),
+        _on_escrow_cancel,
     ),
     (
         "LoanBrokerSet",

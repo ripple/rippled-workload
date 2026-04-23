@@ -131,3 +131,15 @@ class Loan:
     principal: int = 0
     is_defaulted: bool = False
     is_impaired: bool = False
+
+
+@dataclass
+class Escrow:
+    """An active escrow on the ledger."""
+    owner: str
+    destination: str
+    sequence: int
+    condition: str | None = None
+    fulfillment: str | None = None
+    finish_after: int | None = None
+    cancel_after: int | None = None

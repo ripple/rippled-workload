@@ -10,6 +10,7 @@ from workload.transactions.credentials import credential_create, credential_acce
 from workload.transactions.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
 from workload.transactions.domains import permissioned_domain_set, permissioned_domain_delete
 from workload.transactions.delegation import delegate_set
+from workload.transactions.escrow import escrow_create, escrow_finish, escrow_cancel
 from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
 from workload.transactions.nft import nftoken_mint, nftoken_modify
 from workload.transactions.lending import (

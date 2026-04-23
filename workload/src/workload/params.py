@@ -224,3 +224,43 @@ def loan_cover_deposit_amount() -> str:
 def loan_pay_amount() -> str:
     """Loan payment amount in drops."""
     return str(randint(10_000, 5_000_000))
+
+
+
+# ── Escrow ──────────────────────────────────────────────────────────
+RIPPLE_EPOCH_OFFSET = 946_684_800
+
+
+def escrow_amount() -> str:
+    """Escrow amount in drops (0.1-50 XRP)."""
+    return str(randint(100_000, 50_000_000))
+
+
+def _ripple_now() -> int:
+    import time
+    return int(time.time()) - RIPPLE_EPOCH_OFFSET
+
+
+def escrow_finish_after() -> int:
+    """Ripple timestamp a short time in the future (1-120s)."""
+    return _ripple_now() + randint(1, 120)
+
+
+def escrow_cancel_after(finish_after: int) -> int:
+    """Ripple timestamp after finish_after (3-600s later)."""
+    return finish_after + randint(3, 600)
+
+
+def escrow_condition_pair() -> tuple[str, str]:
+    """Generate a PREIMAGE-SHA-256 crypto-condition (condition, fulfillment) pair.
+
+    Returns (condition_hex, fulfillment_hex) where both are uppercased hex strings.
+    """
+    import hashlib
+    preimage = bytes(randint(0, 255) for _ in range(32))
+    # Fulfillment: DER-encoded PREIMAGE-SHA-256
+    fulfillment_bytes = bytes([0xA0, len(preimage) + 2, 0x80, len(preimage)]) + preimage
+    # Condition: type 0 (preimage), SHA-256 fingerprint, max fulfillment length
+    fingerprint = hashlib.sha256(preimage).digest()
+    condition_bytes = bytes([0xA0, 0x25, 0x80, 0x20]) + fingerprint + bytes([0x81, 0x01, len(preimage)])
+    return condition_bytes.hex().upper(), fulfillment_bytes.hex().upper()
