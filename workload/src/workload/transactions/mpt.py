@@ -12,7 +12,9 @@ from xrpl.models.transactions.mptoken_issuance_set import MPTokenIssuanceSetFlag
 
 from workload import params
 from workload.models import MPTokenIssuance, UserAccount
-from workload.randoms import choice
+from workload.randoms import choice, random
+
+
 from workload.submit import submit_tx
 
 # ── Create ───────────────────────────────────────────────────────────
@@ -33,11 +35,16 @@ async def _mpt_create_valid(
 ) -> None:
     src_address = choice(list(accounts))
     src = accounts[src_address]
+    flags = MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK
+    if random() < 0.30:
+        flags |= MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH
+    if random() < 0.30:
+        flags |= MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
     txn = MPTokenIssuanceCreate(
         account=src.address,
         maximum_amount=params.mpt_maximum_amount(),
         mptoken_metadata=params.mpt_metadata(),
-        flags=MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK,
+        flags=flags,
     )
     await submit_tx("MPTokenIssuanceCreate", txn, client, src.wallet)
 
@@ -65,17 +72,31 @@ async def _mpt_authorize_valid(
     mpt = choice(mpt_issuances)
     if mpt.issuer not in accounts:
         return
-    issuer = accounts[mpt.issuer]
+
     other_accounts = [a for a in accounts if a != mpt.issuer]
     if not other_accounts:
         return
-    holder_id = choice(other_accounts)
-    txn = MPTokenAuthorize(
-        account=issuer.address,
-        mptoken_issuance_id=mpt.mpt_issuance_id,
-        holder=holder_id,
-    )
-    await submit_tx("MPTokenAuthorize", txn, client, issuer.wallet)
+
+    mode = choice(["holder_optin", "issuer_auth"])
+
+    if mode == "holder_optin":
+        # Holder self-authorization (opt-in) — works for any MPT
+        holder = accounts[choice(other_accounts)]
+        txn = MPTokenAuthorize(
+            account=holder.address,
+            mptoken_issuance_id=mpt.mpt_issuance_id,
+        )
+        await submit_tx("MPTokenAuthorize", txn, client, holder.wallet)
+    else:
+        # Issuer authorizes a holder — only works with TF_MPT_REQUIRE_AUTH
+        issuer = accounts[mpt.issuer]
+        holder_id = choice(other_accounts)
+        txn = MPTokenAuthorize(
+            account=issuer.address,
+            mptoken_issuance_id=mpt.mpt_issuance_id,
+            holder=holder_id,
+        )
+        await submit_tx("MPTokenAuthorize", txn, client, issuer.wallet)
 
 
 async def _mpt_authorize_faulty(

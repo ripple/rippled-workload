@@ -48,6 +48,10 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     }
     tx_result(tx_type, result)
 
+    # A Payment with TicketSequence is a TicketUse — emit both tx types
+    if tx_type == "Payment" and tx.get("TicketSequence") is not None:
+        tx_result("TicketUse", result)
+
     # Update state on success
     if engine_result == "tesSUCCESS":
         updater = STATE_UPDATERS.get(tx_type)

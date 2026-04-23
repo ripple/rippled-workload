@@ -9,7 +9,14 @@ from workload.app import main
 from workload.transactions.credentials import credential_create, credential_accept, credential_delete
 from workload.transactions.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
 from workload.transactions.domains import permissioned_domain_set, permissioned_domain_delete
+from workload.transactions.account_delete import account_delete
+from workload.transactions.checks import check_create, check_cash, check_cancel
+from workload.transactions.clawback import clawback
 from workload.transactions.delegation import delegate_set
+from workload.transactions.escrow import escrow_create, escrow_finish, escrow_cancel
+from workload.transactions.payment_channels import channel_create, channel_fund, channel_claim
+from workload.transactions.set_regular_key import set_regular_key
+from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
 from workload.transactions.nft import nftoken_mint, nftoken_modify
 from workload.transactions.lending import (
