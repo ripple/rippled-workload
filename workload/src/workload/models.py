@@ -143,3 +143,13 @@ class Escrow:
     fulfillment: str | None = None
     finish_after: int | None = None
     cancel_after: int | None = None
+
+
+
+@dataclass
+class Check:
+    """An active check on the ledger."""
+    check_id: str
+    creator: str
+    destination: str
+    send_max: str  # drops for XRP

@@ -9,6 +9,7 @@ from workload.app import main
 from workload.transactions.credentials import credential_create, credential_accept, credential_delete
 from workload.transactions.vaults import vault_create, vault_deposit, vault_withdraw, vault_set, vault_delete, vault_clawback
 from workload.transactions.domains import permissioned_domain_set, permissioned_domain_delete
+from workload.transactions.checks import check_create, check_cash, check_cancel
 from workload.transactions.delegation import delegate_set
 from workload.transactions.escrow import escrow_create, escrow_finish, escrow_cancel
 from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy

@@ -264,3 +264,17 @@ def escrow_condition_pair() -> tuple[str, str]:
     fingerprint = hashlib.sha256(preimage).digest()
     condition_bytes = bytes([0xA0, 0x25, 0x80, 0x20]) + fingerprint + bytes([0x81, 0x01, len(preimage)])
     return condition_bytes.hex().upper(), fulfillment_bytes.hex().upper()
+
+
+# ── Checks ──────────────────────────────────────────────────────────
+
+
+def check_send_max() -> str:
+    """Check send_max in drops (1-100 XRP)."""
+    return str(randint(1_000_000, 100_000_000))
+
+
+def check_cash_amount(send_max: str) -> str:
+    """Cash amount ≤ send_max."""
+    max_val = int(send_max)
+    return str(randint(1, max_val))

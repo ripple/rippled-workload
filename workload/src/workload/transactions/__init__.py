@@ -26,6 +26,7 @@ from xrpl.models.currencies import MPTCurrency
 
 from workload.models import (
     NFT,
+    Check,
     Credential,
     Delegate,
     Escrow,
@@ -44,6 +45,7 @@ from workload.transactions.credentials import (
     credential_create,
     credential_delete,
 )
+from workload.transactions.checks import check_cancel, check_cash, check_create
 from workload.transactions.delegation import delegate_set
 from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
 from workload.transactions.domains import permissioned_domain_delete, permissioned_domain_set
@@ -331,6 +333,37 @@ def _on_loan_pay(w: Workload, tx: dict, meta: dict) -> None:
         loan.principal = max(0, loan.principal - _extract_amount(tx))
 
 
+def _on_check_create(w: Workload, tx: dict, meta: dict) -> None:
+    check_id = _extract_created_id(meta, "Check")
+    if not check_id:
+        return
+    tx_hash = tx.get("hash", "")
+    # Update the placeholder check_id (tx hash) with real ledger check_id
+    for c in w.checks:
+        if c.check_id == tx_hash:
+            c.check_id = check_id
+            return
+    # If not found optimistically, add it
+    w.checks.append(Check(
+        check_id=check_id,
+        creator=tx.get("Account", ""),
+        destination=tx.get("Destination", ""),
+        send_max=str(tx.get("SendMax", "0")),
+    ))
+
+
+def _on_check_cash(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Check")
+    if deleted_id:
+        w.checks[:] = [c for c in w.checks if c.check_id != deleted_id]
+
+
+def _on_check_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Check")
+    if deleted_id:
+        w.checks[:] = [c for c in w.checks if c.check_id != deleted_id]
+
+
 def _on_escrow_create(w: Workload, tx: dict, meta: dict) -> None:
     """Confirm escrow creation — match by owner+sequence and keep fulfillment."""
     escrow_id = _extract_created_id(meta, "Escrow")
@@ -599,6 +632,27 @@ REGISTRY = [
         delegate_set,
         lambda w: (w.accounts, w.client),
         _on_delegate_set,
+    ),
+    (
+        "CheckCreate",
+        "/check/create/random",
+        check_create,
+        lambda w: (w.accounts, w.checks, w.client),
+        _on_check_create,
+    ),
+    (
+        "CheckCash",
+        "/check/cash/random",
+        check_cash,
+        lambda w: (w.accounts, w.checks, w.client),
+        _on_check_cash,
+    ),
+    (
+        "CheckCancel",
+        "/check/cancel/random",
+        check_cancel,
+        lambda w: (w.accounts, w.checks, w.client),
+        _on_check_cancel,
     ),
     (
         "EscrowCreate",
