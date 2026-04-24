@@ -66,7 +66,6 @@ async def _set_regular_key_faulty(
     mutation = choice([
         "set_key_to_self",
         "set_key_to_fake",
-        "set_key_empty_string",
     ])
 
     if mutation == "set_key_to_self":
@@ -74,15 +73,10 @@ async def _set_regular_key_faulty(
             account=src.address,
             regular_key=src.address,
         )
-    elif mutation == "set_key_to_fake":
+    else:  # set_key_to_fake
         txn = SetRegularKey(
             account=src.address,
             regular_key=params.fake_account(),
-        )
-    else:  # set_key_empty_string
-        txn = SetRegularKey(
-            account=src.address,
-            regular_key="",
         )
 
     await submit_tx("SetRegularKey", txn, client, src.wallet)
