@@ -2,7 +2,6 @@
     image: python:3
     container_name: ${name}
     hostname: ${name}
-    init: true
     ports:
       - 80:3001
     entrypoint: ["python3", "/app.py"]
