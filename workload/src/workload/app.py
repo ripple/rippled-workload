@@ -40,6 +40,7 @@ class Workload:
         self.delegates = []
         self.loan_brokers = []
         self.loans = []
+        self.offers: list[dict] = []
         self.deleted_vault_ids: list[str] = []
         self.deleted_broker_ids: list[str] = []
         self.deleted_loan_ids: list[str] = []
