@@ -2,6 +2,7 @@
     image: ${image}
     container_name: ${container_name}
     hostname: ${hostname}
+    init: true
     entrypoint: ["/bin/bash", "/opt/fuzzer/fuzzer-entrypoint.sh"]
     environment:
       - NUM_REAL_PEERS=${num_real_peers}

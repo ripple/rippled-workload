@@ -2,6 +2,7 @@
     image: ${image}
     container_name: ${container_name}
     hostname: ${hostname}
+    init: true
     % if command:
     command: ${command}
     % endif
