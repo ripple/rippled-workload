@@ -17,6 +17,7 @@ from xrpl.wallet import Wallet
 
 from workload import logger
 from workload.assertions import register_assertions
+from workload.transactions.tickets import check_ticket_coverage
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
@@ -89,6 +90,7 @@ class Workload:
         always(True, "workload::sdk_works", {"message": "SDK canary assertion"})
 
         register_assertions()
+        check_ticket_coverage()
 
         logger.info("Workload initialized after %ss", int(time.time() - self.start_time))
 
@@ -167,7 +169,7 @@ def create_app(workload: Workload) -> FastAPI:
     async def lifespan(app: FastAPI):
         from workload.setup import run_setup
 
-        asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
+        workload._ws_task = asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
         await asyncio.sleep(1)  # let WS listener connect before setup submits
 
         try:
