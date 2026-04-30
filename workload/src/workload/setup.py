@@ -331,13 +331,17 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     summary["iou_distribution"] = await _submit_batch("iou_distribution", iou_txns, client, seq)
 
     # ── 4. MPT issuances: 5 from accounts[0..4] ─────────────────────
+    _mpt_flags = (
+        MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK
+        | MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
+    )
     summary["mpt_issuances"] = await _submit_batch(
         "mpt",
         [
             (
                 "MPTokenIssuanceCreate",
                 MPTokenIssuanceCreate(
-                    account=accs[i].address, flags=MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK
+                    account=accs[i].address, flags=_mpt_flags
                 ),
                 accs[i].wallet,
             )
@@ -348,7 +352,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
-    await asyncio.sleep(5)  # wait for WS to process MPT issuance results
+    await _wait_for_state(workload.mpt_issuances, summary["mpt_issuances"], "mpt_issuances")
     mpt_auth_txns = []
     for mpt in workload.mpt_issuances:
         for holder_idx in holder_indices:

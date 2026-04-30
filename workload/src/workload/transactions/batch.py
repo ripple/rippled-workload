@@ -139,4 +139,26 @@ async def _batch_random_valid(accounts: dict[str, UserAccount], client: AsyncJso
 async def _batch_random_faulty(
     accounts: dict[str, UserAccount], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if len(accounts) < 2:
+        return
+    src_address, dst = sample(list(accounts), 2)
+    sequence = await get_next_valid_seq_number(src_address, client)
+    src = accounts[src_address]
+
+    # Mix valid + overdraw inner payments in ALL_OR_NOTHING → batch fails
+    inner_txns = [
+        Payment(
+            amount=("1000000" if idx < 2 else "10000000000000"),
+            destination=dst,
+            **{**_INNER_COMMON, "account": src.address, "sequence": sequence + idx + 1},
+        )
+        for idx in range(4)
+    ]
+
+    batch_txn = Batch(
+        account=src.address,
+        flags=BatchFlag.TF_ALL_OR_NOTHING,
+        raw_transactions=inner_txns,
+        sequence=sequence,
+    )
+    await submit_tx("Batch", batch_txn, client, src.wallet)

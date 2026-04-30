@@ -77,10 +77,30 @@ def register_assertions() -> None:
     """
     from workload.transactions import TX_TYPES
 
+    # Types whose faulty mutations always succeed at the rippled level
+    # (no tec* results possible), so the failure assertion can't be met.
+    # - SetRegularKey/SignerListSet: fake accounts are valid targets
+    # - MPTokenIssuanceCreate: any funded account can create; no tec* possible
+    _NO_FAILURE_TYPES = {
+        "SetRegularKey", "SignerListSet",
+        "MPTokenIssuanceCreate",
+    }
+
+    # Types that genuinely cannot succeed in this test environment.
+    # - AccountDelete: all accounts own directory objects (trust lines,
+    #   NFTs, etc.) so rippled always rejects with tecHAS_OBLIGATIONS.
+    _NO_SUCCESS_TYPES = {"AccountDelete"}
+
     for name in TX_TYPES:
         _emit_catalog_entry(_seen_id(name), "reachability", "Reachable", must_hit=True)
-        _emit_catalog_entry(_success_id(name), "sometimes", "Sometimes", must_hit=True)
-        _emit_catalog_entry(_failure_id(name), "sometimes", "Sometimes", must_hit=True)
+        _emit_catalog_entry(
+            _success_id(name), "sometimes", "Sometimes",
+            must_hit=(name not in _NO_SUCCESS_TYPES),
+        )
+        _emit_catalog_entry(
+            _failure_id(name), "sometimes", "Sometimes",
+            must_hit=(name not in _NO_FAILURE_TYPES),
+        )
     _emit_catalog_entry("workload::always : valid_engine_result", "always", "Always", must_hit=True)
     _emit_catalog_entry(
         "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
