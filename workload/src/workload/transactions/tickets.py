@@ -9,6 +9,7 @@ from xrpl.models.transactions import (
     AccountSet,
     CheckCreate,
     CredentialCreate,
+    DIDSet,
     EscrowCreate,
     MPTokenIssuanceCreate,
     NFTokenMint,
@@ -99,6 +100,7 @@ _TICKET_BUILDERS: dict[str, _TicketBuilder] = {
         signer_entries=[SignerEntry(account=dst, signer_weight=1)],
         **c,
     ),
+    "DIDSet": lambda dst, c: DIDSet(uri=params.did_hex_field(), **c),
 }
 
 # Types explicitly excluded from ticket use.  Reasons:
@@ -164,6 +166,8 @@ _TICKET_EXCLUDED: set[str] = {
     # Clawback requires the source to be an authorised issuer.
     "Clawback",
     "AccountDelete",
+    # objects — needs an existing DID on the account
+    "DIDDelete",
 }
 
 

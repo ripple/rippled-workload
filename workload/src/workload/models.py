@@ -75,6 +75,13 @@ class Delegate:
 
 
 @dataclass
+class DID:
+    """A DID ledger entry attached to an account (XLS-72)."""
+
+    account: str
+
+
+@dataclass
 class AMM:
     account: str
     assets: list[IssuedCurrency]

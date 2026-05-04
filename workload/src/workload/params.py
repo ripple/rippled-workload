@@ -359,3 +359,24 @@ def clawback_iou_amount() -> str:
 def clawback_mpt_amount() -> str:
     """MPT clawback value (1-1000, within typical 10k holder balance)."""
     return str(randint(1, 1_000))
+
+
+# ── DID ───────────────────────────────────────────────────────────────
+
+_HEX_CHARS = "0123456789ABCDEF"
+
+
+def did_hex_field() -> str:
+    """Random even-length hex string, max 256 hex chars (128 bytes).
+
+    Used for DID ``uri``, ``data``, and ``did_document`` fields.
+    """
+    r = random()
+    if r < 0.80:
+        n = randint(1, 32)
+    elif r < 0.95:
+        n = randint(33, 100)
+    else:
+        n = randint(101, 128)  # near the 256-hex-char / 128-byte limit
+    # n is number of BYTES; each byte = 2 hex chars → always even length
+    return "".join(choice(_HEX_CHARS) for _ in range(n * 2))
