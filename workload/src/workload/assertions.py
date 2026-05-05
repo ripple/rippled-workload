@@ -16,6 +16,17 @@ _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
 _LOC_COL = 0
 
+# Engine results that indicate a rippled internal error (exception caught,
+# invariant violated, etc.). Surfaced from BOTH the immediate /submit response
+# and the validated WS stream — though tef* never reaches validation, so the
+# submit-time check is what actually catches these in practice.
+_RIPPLED_INTERNAL_ERRORS = (
+    "tefEXCEPTION",
+    "tefINTERNAL",
+    "tefINVARIANT_FAILED",
+    "tefFAILURE",
+)
+
 # XRPL fields → normalized event keys. Only object identifiers needed for tracking.
 _OBJECT_ID_FIELDS: dict[str, str] = {
     "Destination": "destination",
@@ -86,8 +97,9 @@ def register_assertions() -> None:
         "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
     )
     _emit_catalog_entry(
-        "workload::always : no_temDISABLED", "always", "Always", must_hit=True
+        "workload::always : no_internal_rippled_error_submit", "always", "Always", must_hit=True
     )
+    _emit_catalog_entry("workload::always : no_temDISABLED", "always", "Always", must_hit=True)
     for setup_key in [
         "gateways",
         "trust_lines",
@@ -111,8 +123,46 @@ def register_assertions() -> None:
         )
 
 
-def tx_submitted(name: str, txn: object = None) -> None:
-    """Report that a transaction was created and submitted to the network."""
+def assert_no_internal_error_submit(name: str, result: dict) -> None:
+    """Fire the no_internal_rippled_error_submit always-assertion for a submit result.
+
+    Use from any path that submits directly via xrpl-py (bypassing ``submit_tx``)
+    — e.g. setup-phase LoanSet co-signing and the node probe. Submit-time is
+    where tef* internal errors must be caught: they never enter a closed ledger
+    and so never reach the validated WS stream that ``tx_result`` consumes.
+    """
+    engine_result = result.get("engine_result", "") or ""
+    if not engine_result:
+        return
+    tx_hash = result.get("tx_json", {}).get("hash", "") or result.get("hash", "")
+    assert_raw(
+        condition=engine_result not in _RIPPLED_INTERNAL_ERRORS,
+        message="workload::always : no_internal_rippled_error_submit",
+        details={
+            "engine_result": engine_result,
+            "tx_type": name,
+            "hash": tx_hash,
+        },
+        loc_filename=_LOC_FILE,
+        loc_function="assert_no_internal_error_submit",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=True,
+        must_hit=True,
+        assert_type="always",
+        display_type="Always",
+        assert_id="workload::always : no_internal_rippled_error_submit",
+    )
+
+
+def tx_submitted(name: str, txn: object = None, result: dict | None = None) -> None:
+    """Report that a transaction was submitted to the network.
+
+    ``result`` is the immediate /submit response dict. Passing it here
+    surfaces ``engine_result`` in the event details and triggers the
+    submit-time tef* internal-error always-assertion.
+    """
     details: dict[str, str] = {"tx_type": name}
     if txn is not None:
         try:
@@ -122,6 +172,16 @@ def tx_submitted(name: str, txn: object = None) -> None:
             details.update(_extract_object_ids(raw))
         except Exception:
             pass
+    if result is not None:
+        engine_result = result.get("engine_result", "") or ""
+        engine_result_message = result.get("engine_result_message", "") or ""
+        tx_hash = result.get("tx_json", {}).get("hash", "") or result.get("hash", "")
+        if engine_result:
+            details["engine_result"] = engine_result
+        if engine_result_message:
+            details["engine_result_message"] = engine_result_message
+        if tx_hash:
+            details["hash"] = tx_hash
     send_event(f"workload::submitted : {name}", details)
     assert_raw(
         condition=True,
@@ -138,6 +198,8 @@ def tx_submitted(name: str, txn: object = None) -> None:
         display_type="Reachable",
         assert_id=_seen_id(name),
     )
+    if result is not None:
+        assert_no_internal_error_submit(name, result)
 
 
 def tx_result(name: str, result: dict) -> None:
@@ -167,12 +229,6 @@ def tx_result(name: str, result: dict) -> None:
             break
     send_event(f"workload::result : {name}", details)
 
-    _RIPPLED_INTERNAL_ERRORS = (
-        "tefEXCEPTION",
-        "tefINTERNAL",
-        "tefINVARIANT_FAILED",
-        "tefFAILURE",
-    )
     assert_raw(
         condition=engine_result not in _RIPPLED_INTERNAL_ERRORS,
         message="workload::always : no_internal_rippled_error",

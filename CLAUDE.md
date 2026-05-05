@@ -63,7 +63,7 @@ Always use `submit_tx()` from `submit.py` — it wires `tx_submitted()` assertio
 Each `_faulty` handler picks ONE random mutation via `choice()`, constructs a deliberately invalid transaction, and submits via `submit_tx`. Must never raise — precondition checks same as `_valid`. Common mutations: `params.fake_id()` (nonexistent object), non-owner submission, zero/negative amounts, mismatched asset types, overdraw (`balance + randint(...)`). Keep overdraw/state-aware mutations in `_faulty` only — `_valid` handlers must use amounts within tracked balances.
 
 ### LoanSet co-signing
-`LoanSet` requires dual signing (borrower + broker). Uses `autofill_and_sign` → `sign_loan_set_by_counterparty` → `xrpl_submit` directly (not `submit_tx`). Calls `tx_submitted("LoanSet", txn)` manually before submit. See `lending.py:_loan_set_valid`.
+`LoanSet` requires dual signing (borrower + broker). Uses `autofill_and_sign` → `sign_loan_set_by_counterparty` → `xrpl_submit` directly (not `submit_tx`). Calls `tx_submitted("LoanSet", txn, response.result)` after submit so the submit-time tef* internal-error assertion fires on the engine result. See `lending.py:_loan_set_valid`. Setup-phase paths that submit directly (`setup.py` LoanSet co-sign and `_probe_node`) call `assert_no_internal_error_submit(name, resp.result)` instead — they emit their own `setup_*` events rather than the runtime `submitted` event.
 
 ### XRPL specifications
 Transaction format docs are at `xrpl.org/docs/references/protocol/transactions/types/<name>`. Authoritative XLS specifications (especially for newer features like vaults and lending) live in `github.com/XRPLF/XRPL-Standards` under `XLS-NNNN-<name>/`.
