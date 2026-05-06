@@ -25,8 +25,8 @@ from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
 
 from workload.models import (
-    NFT,
     AMM,
+    NFT,
     Credential,
     Delegate,
     Loan,
@@ -65,7 +65,6 @@ from workload.transactions.lending import (
     loan_set,
 )
 from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
-from workload.transactions.offers import offer_cancel, offer_create
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -74,6 +73,7 @@ from workload.transactions.nft import (
     nftoken_mint,
     nftoken_modify,
 )
+from workload.transactions.offers import offer_cancel, offer_create
 from workload.transactions.payments import payment_random
 from workload.transactions.tickets import ticket_create, ticket_use
 from workload.transactions.trustlines import trustline_create
@@ -356,10 +356,15 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
         return
     # Replace existing delegation from same source to same delegate
     w.delegates[:] = [
-        d for d in w.delegates
-        if not (d.source == source and d.delegate_address == delegate_addr)
+        d for d in w.delegates if not (d.source == source and d.delegate_address == delegate_addr)
     ]
-    w.delegates.append(Delegate(source=source, delegate_address=delegate_addr, permissions=permissions))
+    w.delegates.append(
+        Delegate(
+            source=source,
+            delegate_address=delegate_addr,
+            permissions=permissions,
+        )
+    )
 
 
 def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
@@ -371,7 +376,12 @@ def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
         assets = []
         for raw in [asset1_raw, asset2_raw]:
             if isinstance(raw, dict) and "currency" in raw:
-                assets.append(IssuedCurrency(currency=raw["currency"], issuer=raw.get("issuer", "")))
+                assets.append(
+                    IssuedCurrency(
+                        currency=raw["currency"],
+                        issuer=raw.get("issuer", ""),
+                    )
+                )
             elif isinstance(raw, str):
                 assets.append(xrpl.models.XRP())
         # Extract LP token from created AMM node
@@ -390,22 +400,31 @@ def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
 def _on_amm_delete(w: Workload, tx: dict, meta: dict) -> None:
     amm_id = _extract_deleted_id(meta, "AMM")
     if amm_id:
-        w.amms[:] = [a for a in w.amms if not (
-            _extract_deleted_id(meta, "AMM") and a.account == tx.get("Account", "")
-        )]
+        # Match by asset pair — the deleter can be anyone, not just the creator.
+        tx_assets = {_parse_asset(tx.get("Asset", {})), _parse_asset(tx.get("Asset2", {}))}
+        w.amms[:] = [a for a in w.amms if set(a.assets) != tx_assets]
 
 
 def _on_offer_create(w: Workload, tx: dict, meta: dict) -> None:
     offer_id = _extract_created_id(meta, "Offer")
     if offer_id:
-        w.offers.append({
-            "account": tx.get("Account", ""),
-            "sequence": tx.get("Sequence", 0),
-            "offer_id": offer_id,
-        })
+        w.offers.append(
+            {
+                "account": tx.get("Account", ""),
+                "sequence": tx.get("Sequence", 0),
+                "offer_id": offer_id,
+            }
+        )
 
 
 def _on_offer_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    """Remove an explicitly cancelled offer from state.
+
+    NOTE: offers also disappear via fill and expiry, which don't trigger
+    this handler. Stale entries will accumulate in w.offers — the cancel-valid
+    path may pick already-gone offers and get tecNO_OFFER. This is acceptable
+    for fuzzing purposes (exercises error paths).
+    """
     deleted_id = _extract_deleted_id(meta, "Offer")
     if deleted_id:
         w.offers[:] = [o for o in w.offers if o.get("offer_id") != deleted_id]
@@ -657,7 +676,7 @@ REGISTRY = [
         "OfferCreate",
         "/offer/create/random",
         offer_create,
-        lambda w: (w.accounts, w.amms, w.offers, w.trust_lines, w.client),
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
         _on_offer_create,
     ),
     (

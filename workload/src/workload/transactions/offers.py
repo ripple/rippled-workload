@@ -5,18 +5,17 @@ Creates DEX offers that trade through AMM pools, and cancels existing offers.
 
 from __future__ import annotations
 
+import xrpl.models
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.currencies import IssuedCurrency
-from xrpl.models.transactions import OfferCreate, OfferCancel
+from xrpl.models.transactions import OfferCancel, OfferCreate
 from xrpl.models.transactions.offer_create import OfferCreateFlag
 
-import xrpl.models
-
-from workload.models import AMM, TrustLine, UserAccount
-from workload.randoms import choice, randint, random
-from workload.submit import submit_tx
 from workload import params
+from workload.models import AMM, TrustLine, UserAccount
+from workload.randoms import choice, randint, random, sample
+from workload.submit import submit_tx
 from workload.transactions.amm import _find_account_with_trust_lines
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -27,10 +26,25 @@ def _fake_iou() -> IssuedCurrency:
 
 
 def _random_flag() -> int:
-    """Pick a random OfferCreate flag or no flag."""
-    flags = [0, OfferCreateFlag.TF_PASSIVE, OfferCreateFlag.TF_SELL,
-             OfferCreateFlag.TF_IMMEDIATE_OR_CANCEL, OfferCreateFlag.TF_FILL_OR_KILL]
-    return choice(flags)
+    """Pick a random combination of OfferCreate flags (or no flags).
+
+    XRPL allows combining flags like tfPassive | tfSell. We sample a random
+    subset and OR them together.
+    """
+    all_flags = [
+        OfferCreateFlag.TF_PASSIVE,
+        OfferCreateFlag.TF_SELL,
+        OfferCreateFlag.TF_IMMEDIATE_OR_CANCEL,
+        OfferCreateFlag.TF_FILL_OR_KILL,
+    ]
+    count = choice(range(len(all_flags) + 1))  # 0..4 flags
+    if count == 0:
+        return 0
+    picked = sample(all_flags, count)
+    result = 0
+    for f in picked:
+        result |= f
+    return result
 
 
 def _iou_amount(asset: IssuedCurrency, value: str) -> IOUAmount:
@@ -85,7 +99,6 @@ def _find_account_for_amm(
 async def offer_create(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
-    offers: list[dict],
     trust_lines: list[TrustLine],
     client: AsyncJsonRpcClient,
 ) -> None:
@@ -128,12 +141,19 @@ async def _offer_create_faulty(
     trust_lines: list[TrustLine],
     client: AsyncJsonRpcClient,
 ) -> None:
+    if not accounts:
+        return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "non_existent_asset", "same_asset_both", "zero_amount",
-        "negative_iou_amount", "crossed_offer",
-    ])
+    mutation = choice(
+        [
+            "non_existent_asset",
+            "same_asset_both",
+            "zero_amount",
+            "negative_iou_amount",
+            "crossed_offer",
+        ]
+    )
     if mutation == "non_existent_asset":
         # Offer with a fake IOU nobody has issued
         fake = _fake_iou()
@@ -240,11 +260,16 @@ async def _offer_cancel_faulty(
     accounts: dict[str, UserAccount],
     client: AsyncJsonRpcClient,
 ) -> None:
+    if not accounts:
+        return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "non_existent_sequence", "cancel_others_offer",
-    ])
+    mutation = choice(
+        [
+            "non_existent_sequence",
+            "cancel_others_offer",
+        ]
+    )
 
     if mutation == "non_existent_sequence":
         # Cancel an offer that doesn't exist
@@ -254,7 +279,10 @@ async def _offer_cancel_faulty(
         )
 
     else:  # cancel_others_offer
-        # Try to cancel someone else's offer (wrong account)
+        # Submit from src but use a sequence that likely belongs to another
+        # account. Since OfferCancel only cancels the submitter's own offers,
+        # this effectively becomes a non-existent sequence for src — exercising
+        # the "wrong owner" path from the submitter's perspective.
         txn = OfferCancel(
             account=src.address,
             offer_sequence=randint(1, 100),

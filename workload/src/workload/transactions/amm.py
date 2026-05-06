@@ -21,7 +21,6 @@ from workload.models import AMM, TrustLine, UserAccount
 from workload.randoms import choice, randint, random, sample
 from workload.submit import submit_tx
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -123,8 +122,16 @@ async def _amm_create_valid(
     if isinstance(asset1, xrpl.models.XRP):
         amount1 = params.amm_xrp_amount()
     else:
-        amount1 = IOUAmount(currency=asset1.currency, issuer=asset1.issuer, value=params.amm_deposit_amount())
-    amount2 = IOUAmount(currency=asset2.currency, issuer=asset2.issuer, value=params.amm_deposit_amount())
+        amount1 = IOUAmount(
+            currency=asset1.currency,
+            issuer=asset1.issuer,
+            value=params.amm_deposit_amount(),
+        )
+    amount2 = IOUAmount(
+        currency=asset2.currency,
+        issuer=asset2.issuer,
+        value=params.amm_deposit_amount(),
+    )
     txn = AMMCreate(
         account=src.address,
         amount=amount1,
@@ -143,15 +150,24 @@ async def _amm_create_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice([
-        "non_existent_asset", "same_asset_both",
-        "zero_amount", "duplicate_amm", "unfunded_create",
-    ])
+    mutation = choice(
+        [
+            "non_existent_asset",
+            "same_asset_both",
+            "zero_amount",
+            "duplicate_amm",
+            "unfunded_create",
+        ]
+    )
 
     if mutation == "non_existent_asset":
         amount1 = params.amm_xrp_amount()
         fake = _fake_iou()
-        amount2 = IOUAmount(currency=fake.currency, issuer=fake.issuer, value=params.amm_deposit_amount())
+        amount2 = IOUAmount(
+            currency=fake.currency,
+            issuer=fake.issuer,
+            value=params.amm_deposit_amount(),
+        )
         txn = AMMCreate(
             account=src.address,
             amount=amount1,
@@ -164,7 +180,11 @@ async def _amm_create_faulty(
             return
         tl = choice(trust_lines)
         iou = IssuedCurrency(currency=tl.currency, issuer=tl.account_b)
-        amount = IOUAmount(currency=iou.currency, issuer=iou.issuer, value=params.amm_deposit_amount())
+        amount = IOUAmount(
+            currency=iou.currency,
+            issuer=iou.issuer,
+            value=params.amm_deposit_amount(),
+        )
         txn = AMMCreate(
             account=src.address,
             amount=amount,
@@ -193,11 +213,19 @@ async def _amm_create_faulty(
         if isinstance(a1, xrpl.models.XRP):
             amount1 = params.amm_xrp_amount()
         else:
-            amount1 = IOUAmount(currency=a1.currency, issuer=a1.issuer, value=params.amm_deposit_amount())
+            amount1 = IOUAmount(
+                currency=a1.currency,
+                issuer=a1.issuer,
+                value=params.amm_deposit_amount(),
+            )
         if isinstance(a2, xrpl.models.XRP):
             amount2 = params.amm_xrp_amount()
         else:
-            amount2 = IOUAmount(currency=a2.currency, issuer=a2.issuer, value=params.amm_deposit_amount())
+            amount2 = IOUAmount(
+                currency=a2.currency,
+                issuer=a2.issuer,
+                value=params.amm_deposit_amount(),
+            )
         txn = AMMCreate(
             account=src.address,
             amount=amount1,
@@ -208,7 +236,11 @@ async def _amm_create_faulty(
     else:  # unfunded_create
         # Create with assets the account doesn't hold (tecUNFUNDED_AMM)
         fake = _fake_iou()
-        amount2 = IOUAmount(currency=fake.currency, issuer=fake.issuer, value=str(randint(1_000_000, 999_999_999)))
+        amount2 = IOUAmount(
+            currency=fake.currency,
+            issuer=fake.issuer,
+            value=str(randint(1_000_000, 999_999_999)),
+        )
         txn = AMMCreate(
             account=src.address,
             amount=str(randint(10_000_000_000, 99_000_000_000)),  # more XRP than account has
@@ -244,35 +276,55 @@ async def _amm_deposit_valid(
     if len(amm.assets) < 2:
         return
     asset1, asset2 = amm.assets[0], amm.assets[1]
-    mode = choice([
-        "single_asset", "two_asset", "lp_token",
-        "one_asset_lp_token", "limit_lp_token", "two_asset_if_empty",
-    ])
+    mode = choice(
+        [
+            "single_asset",
+            "two_asset",
+            "lp_token",
+            "one_asset_lp_token",
+            "limit_lp_token",
+            "two_asset_if_empty",
+        ]
+    )
 
     if mode == "single_asset":
         a = choice([asset1, asset2])
         amount = _iou_amount(a, params.amm_deposit_amount())
         txn = AMMDeposit(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amount, flags=AMMDepositFlag.TF_SINGLE_ASSET,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amount,
+            flags=AMMDepositFlag.TF_SINGLE_ASSET,
         )
 
     elif mode == "two_asset":
         amt1 = _iou_amount(asset1, params.amm_deposit_amount())
         amt2 = _iou_amount(asset2, params.amm_deposit_amount())
         txn = AMMDeposit(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amt1, amount2=amt2, flags=AMMDepositFlag.TF_TWO_ASSET,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amt1,
+            amount2=amt2,
+            flags=AMMDepositFlag.TF_TWO_ASSET,
         )
 
     elif mode == "lp_token":
         if not amm.lp_token:
             return
         lp = amm.lp_token[0]
-        lp_out = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_lp_token_amount())
+        lp_out = IOUAmount(
+            currency=lp.currency,
+            issuer=lp.issuer,
+            value=params.amm_lp_token_amount(),
+        )
         txn = AMMDeposit(
-            account=src.address, asset=asset1, asset2=asset2,
-            lp_token_out=lp_out, flags=AMMDepositFlag.TF_LP_TOKEN,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            lp_token_out=lp_out,
+            flags=AMMDepositFlag.TF_LP_TOKEN,
         )
 
     elif mode == "one_asset_lp_token":
@@ -281,10 +333,17 @@ async def _amm_deposit_valid(
         lp = amm.lp_token[0]
         a = choice([asset1, asset2])
         amount = _iou_amount(a, params.amm_deposit_amount())
-        lp_out = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_lp_token_amount())
+        lp_out = IOUAmount(
+            currency=lp.currency,
+            issuer=lp.issuer,
+            value=params.amm_lp_token_amount(),
+        )
         txn = AMMDeposit(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amount, lp_token_out=lp_out,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amount,
+            lp_token_out=lp_out,
             flags=AMMDepositFlag.TF_ONE_ASSET_LP_TOKEN,
         )
 
@@ -293,8 +352,11 @@ async def _amm_deposit_valid(
         amount = _iou_amount(a, params.amm_deposit_amount())
         e_price = _iou_amount(a, str(randint(1, 1000)))
         txn = AMMDeposit(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amount, e_price=e_price,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amount,
+            e_price=e_price,
             flags=AMMDepositFlag.TF_LIMIT_LP_TOKEN,
         )
 
@@ -302,8 +364,11 @@ async def _amm_deposit_valid(
         amt1 = _iou_amount(asset1, params.amm_deposit_amount())
         amt2 = _iou_amount(asset2, params.amm_deposit_amount())
         txn = AMMDeposit(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amt1, amount2=amt2,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amt1,
+            amount2=amt2,
             flags=AMMDepositFlag.TF_TWO_ASSET_IF_EMPTY,
         )
 
@@ -318,14 +383,23 @@ async def _amm_deposit_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice([
-        "non_existent_amm", "zero_deposit", "wrong_asset",
-        "mismatched_flag_fields", "negative_amount",
-    ])
+    mutation = choice(
+        [
+            "non_existent_amm",
+            "zero_deposit",
+            "wrong_asset",
+            "mismatched_flag_fields",
+            "negative_amount",
+        ]
+    )
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
-        amount = IOUAmount(currency=fake.currency, issuer=fake.issuer, value=params.amm_deposit_amount())
+        amount = IOUAmount(
+            currency=fake.currency,
+            issuer=fake.issuer,
+            value=params.amm_deposit_amount(),
+        )
         txn = AMMDeposit(
             account=src.address,
             asset=xrpl.models.XRP(),
@@ -355,7 +429,11 @@ async def _amm_deposit_faulty(
             return
         amm = choice(amms)
         fake = _fake_iou()
-        amount = IOUAmount(currency=fake.currency, issuer=fake.issuer, value=params.amm_deposit_amount())
+        amount = IOUAmount(
+            currency=fake.currency,
+            issuer=fake.issuer,
+            value=params.amm_deposit_amount(),
+        )
         txn = AMMDeposit(
             account=src.address,
             asset=amm.assets[0],
@@ -425,33 +503,51 @@ async def _amm_withdraw_valid(
     if len(amm.assets) < 2:
         return
     asset1, asset2 = amm.assets[0], amm.assets[1]
-    mode = choice([
-        "single_asset", "lp_token", "withdraw_all",
-        "one_asset_withdraw_all", "two_asset",
-        "one_asset_lp_token", "limit_lp_token",
-    ])
+    mode = choice(
+        [
+            "single_asset",
+            "lp_token",
+            "withdraw_all",
+            "one_asset_withdraw_all",
+            "two_asset",
+            "one_asset_lp_token",
+            "limit_lp_token",
+        ]
+    )
 
     if mode == "single_asset":
         a = choice([asset1, asset2])
         amount = _iou_amount(a, params.amm_withdraw_amount())
         txn = AMMWithdraw(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amount, flags=AMMWithdrawFlag.TF_SINGLE_ASSET,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amount,
+            flags=AMMWithdrawFlag.TF_SINGLE_ASSET,
         )
 
     elif mode == "lp_token":
         if not amm.lp_token:
             return
         lp = amm.lp_token[0]
-        lp_in = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_lp_token_amount())
+        lp_in = IOUAmount(
+            currency=lp.currency,
+            issuer=lp.issuer,
+            value=params.amm_lp_token_amount(),
+        )
         txn = AMMWithdraw(
-            account=src.address, asset=asset1, asset2=asset2,
-            lp_token_in=lp_in, flags=AMMWithdrawFlag.TF_LP_TOKEN,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            lp_token_in=lp_in,
+            flags=AMMWithdrawFlag.TF_LP_TOKEN,
         )
 
     elif mode == "withdraw_all":
         txn = AMMWithdraw(
-            account=src.address, asset=asset1, asset2=asset2,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
             flags=AMMWithdrawFlag.TF_WITHDRAW_ALL,
         )
 
@@ -459,16 +555,23 @@ async def _amm_withdraw_valid(
         a = choice([asset1, asset2])
         amount = _iou_amount(a, params.amm_withdraw_amount())
         txn = AMMWithdraw(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amount, flags=AMMWithdrawFlag.TF_ONE_ASSET_WITHDRAW_ALL,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amount,
+            flags=AMMWithdrawFlag.TF_ONE_ASSET_WITHDRAW_ALL,
         )
 
     elif mode == "two_asset":
         amt1 = _iou_amount(asset1, params.amm_withdraw_amount())
         amt2 = _iou_amount(asset2, params.amm_withdraw_amount())
         txn = AMMWithdraw(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amt1, amount2=amt2, flags=AMMWithdrawFlag.TF_TWO_ASSET,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amt1,
+            amount2=amt2,
+            flags=AMMWithdrawFlag.TF_TWO_ASSET,
         )
 
     elif mode == "one_asset_lp_token":
@@ -477,10 +580,17 @@ async def _amm_withdraw_valid(
         lp = amm.lp_token[0]
         a = choice([asset1, asset2])
         amount = _iou_amount(a, params.amm_withdraw_amount())
-        lp_in = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_lp_token_amount())
+        lp_in = IOUAmount(
+            currency=lp.currency,
+            issuer=lp.issuer,
+            value=params.amm_lp_token_amount(),
+        )
         txn = AMMWithdraw(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amount, lp_token_in=lp_in,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amount,
+            lp_token_in=lp_in,
             flags=AMMWithdrawFlag.TF_ONE_ASSET_LP_TOKEN,
         )
 
@@ -489,8 +599,11 @@ async def _amm_withdraw_valid(
         amount = _iou_amount(a, params.amm_withdraw_amount())
         e_price = _iou_amount(a, str(randint(1, 1000)))
         txn = AMMWithdraw(
-            account=src.address, asset=asset1, asset2=asset2,
-            amount=amount, e_price=e_price,
+            account=src.address,
+            asset=asset1,
+            asset2=asset2,
+            amount=amount,
+            e_price=e_price,
             flags=AMMWithdrawFlag.TF_LIMIT_LP_TOKEN,
         )
 
@@ -505,14 +618,23 @@ async def _amm_withdraw_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice([
-        "non_existent_amm", "zero_withdrawal", "overdraw",
-        "mismatched_flag_fields", "negative_amount",
-    ])
+    mutation = choice(
+        [
+            "non_existent_amm",
+            "zero_withdrawal",
+            "overdraw",
+            "mismatched_flag_fields",
+            "negative_amount",
+        ]
+    )
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
-        amount = IOUAmount(currency=fake.currency, issuer=fake.issuer, value=params.amm_withdraw_amount())
+        amount = IOUAmount(
+            currency=fake.currency,
+            issuer=fake.issuer,
+            value=params.amm_withdraw_amount(),
+        )
         txn = AMMWithdraw(
             account=src.address,
             asset=xrpl.models.XRP(),
@@ -711,8 +833,10 @@ async def _amm_bid_valid(
         bid_max = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_bid_max())
         txn = AMMBid(
             account=src.address,
-            asset=amm.assets[0], asset2=amm.assets[1],
-            bid_min=bid_min, bid_max=bid_max,
+            asset=amm.assets[0],
+            asset2=amm.assets[1],
+            bid_min=bid_min,
+            bid_max=bid_max,
         )
 
     else:  # bid_with_auth_accounts
@@ -722,7 +846,8 @@ async def _amm_bid_valid(
         bid_min = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_bid_min())
         txn = AMMBid(
             account=src.address,
-            asset=amm.assets[0], asset2=amm.assets[1],
+            asset=amm.assets[0],
+            asset2=amm.assets[1],
             bid_min=bid_min,
             auth_accounts=auth_accounts,
         )
@@ -738,10 +863,15 @@ async def _amm_bid_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice([
-        "non_existent_amm", "zero_bid",
-        "bid_min_exceeds_max", "fake_auth_accounts", "non_lp_holder_bid",
-    ])
+    mutation = choice(
+        [
+            "non_existent_amm",
+            "zero_bid",
+            "bid_min_exceeds_max",
+            "fake_auth_accounts",
+            "non_lp_holder_bid",
+        ]
+    )
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
@@ -779,8 +909,10 @@ async def _amm_bid_faulty(
         bid_max = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_bid_min())
         txn = AMMBid(
             account=src.address,
-            asset=amm.assets[0], asset2=amm.assets[1],
-            bid_min=bid_min, bid_max=bid_max,
+            asset=amm.assets[0],
+            asset2=amm.assets[1],
+            bid_min=bid_min,
+            bid_max=bid_max,
         )
 
     elif mutation == "fake_auth_accounts":
@@ -794,7 +926,8 @@ async def _amm_bid_faulty(
         bid_amt = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_bid_min())
         txn = AMMBid(
             account=src.address,
-            asset=amm.assets[0], asset2=amm.assets[1],
+            asset=amm.assets[0],
+            asset2=amm.assets[1],
             bid_min=bid_amt,
             auth_accounts=fake_auths,
         )
@@ -810,7 +943,8 @@ async def _amm_bid_faulty(
         bid_amt = IOUAmount(currency=lp.currency, issuer=lp.issuer, value=params.amm_bid_min())
         txn = AMMBid(
             account=src.address,
-            asset=amm.assets[0], asset2=amm.assets[1],
+            asset=amm.assets[0],
+            asset2=amm.assets[1],
             bid_min=bid_amt,
         )
 

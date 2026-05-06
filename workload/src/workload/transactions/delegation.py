@@ -3,8 +3,8 @@
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import DelegateSet
 from xrpl.models.transactions.delegate_set import (
-    GranularPermission,
     NON_DELEGABLE_TRANSACTIONS,
+    GranularPermission,
     Permission,
 )
 from xrpl.models.transactions.types import TransactionType
@@ -51,11 +51,13 @@ async def _delegate_set_faulty(
 ) -> None:
     if not accounts:
         return
-    mutation = choice([
-        "non_existent_authorize",
-        "empty_permissions",
-        "non_owner_submission",
-    ])
+    mutation = choice(
+        [
+            "non_existent_authorize",
+            "empty_permissions",
+            "non_owner_submission",
+        ]
+    )
     if mutation == "non_existent_authorize":
         src = choice(list(accounts.values()))
         all_perms = list(GranularPermission)
@@ -97,7 +99,6 @@ async def _delegate_set_faulty(
         await submit_tx("DelegateSet", txn, client, impostor.wallet)
 
 
-
 # ── Delegation helper for submit_tx ──────────────────────────────────
 
 # Names of non-delegable transaction types for fast lookup.
@@ -127,10 +128,9 @@ def maybe_delegate(
         return None, None
 
     candidates = [
-        d for d in delegates
-        if d.source == src_address
-        and tx_type in d.permissions
-        and d.delegate_address in accounts
+        d
+        for d in delegates
+        if d.source == src_address and tx_type in d.permissions and d.delegate_address in accounts
     ]
     if not candidates:
         return None, None

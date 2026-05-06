@@ -83,6 +83,7 @@ class Workload:
 
         # Wire delegation state so submit_tx can transparently delegate.
         from workload.submit import configure as configure_submit
+
         configure_submit(self.delegates, self.accounts)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
