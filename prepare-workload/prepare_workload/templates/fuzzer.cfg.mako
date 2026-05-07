@@ -34,10 +34,8 @@ ${seed}
 
 # Master seed of isolated rippled validator. Used to re-sign mutated
 # proposals. Switch to signing_seed if a manifest is ever added.
-% if validation_seed is not UNDEFINED:
 [validation_seed]
 ${validation_seed}
-% endif
 
 # Protocol feature negotiation flags.
 # These control which features the fuzzer advertises in its handshake
