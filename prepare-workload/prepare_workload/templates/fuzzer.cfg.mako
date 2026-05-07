@@ -32,6 +32,11 @@ ${node_seed}
 ${seed}
 % endfor
 
+# Master seed of isolated rippled validator. Used to re-sign mutated
+# proposals. Switch to signing_seed if a manifest is ever added.
+[validation_seed]
+${validation_seed}
+
 # Protocol feature negotiation flags.
 # These control which features the fuzzer advertises in its handshake
 # (X-Protocol-Ctl header), which determines what message types peers

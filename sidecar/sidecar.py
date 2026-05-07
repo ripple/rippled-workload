@@ -10,6 +10,12 @@ from antithesis import assertions, lifecycle
 # Opcodes
 OP_LEDGER = "ledger"
 
+# Ripple-epoch (2000-01-01 UTC) seconds offset from Unix epoch.
+RIPPLE_EPOCH_OFFSET = 946684800
+
+# Max acceptable |network close_time - sidecar wall clock|.
+MAX_TIME_SKEW_SECS = 60
+
 
 def to_url(ip: str) -> str:
     """Convert a server name to a URL to request against."""
@@ -177,6 +183,45 @@ if __name__ == "__main__":
             assertions.always(
                 num_stalled < len(servers), "ALL validators are never stalled", to_log
             )
+
+            now_unix = int(time.time())
+            for v, thr in threads.items():
+                r = thr._return
+                if r.get("status") != "success":
+                    continue
+                ct = r.get("ledger", {}).get("close_time")
+                if ct is None:
+                    continue
+                ct_unix = int(ct) + RIPPLE_EPOCH_OFFSET
+                skew = abs(ct_unix - now_unix)
+                evt = {"validator": v, "close_time": ct, "skew_secs": skew}
+                if skew > MAX_TIME_SKEW_SECS:
+                    lifecycle.send_event("validator_time_skew", evt)
+                assertions.always(
+                    skew <= MAX_TIME_SKEW_SECS,
+                    "Validator close_time tracks wall clock",
+                    evt,
+                )
+
+            # Validators on the same ledger_index must agree on its hash.
+            by_index = {}
+            for v, thr in threads.items():
+                r = thr._return
+                if r.get("status") != "success":
+                    continue
+                idx = r.get("ledger_index")
+                h = r.get("ledger_hash")
+                if idx is None or h is None:
+                    continue
+                by_index.setdefault(idx, {})[v] = h
+            for idx, hashes in by_index.items():
+                unique = set(hashes.values())
+                evt = {"index": idx, "hashes": hashes}
+                assertions.always(
+                    len(unique) <= 1,
+                    "Validators agree on ledger hash for a given index",
+                    evt,
+                )
 
         print(f"Done with healthcheck pass {update_num}")
 
