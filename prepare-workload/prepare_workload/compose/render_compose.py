@@ -6,6 +6,7 @@ from operator import itemgetter
 service_template = "service.yml.mako"
 compose_template = "compose.yml.mako"
 fuzzer_service_template = "fuzzer_service.yml.mako"
+sidecar_service_template = "sidecar_service.yml.mako"
 
 container_config_path = "/opt/xrpld/etc"
 
@@ -60,6 +61,11 @@ def render_fuzzer(fuzzer_data):
     return fuzzer_template.render(**fuzzer_data)
 
 
+def render_sidecar(sidecar_data):
+    sidecar_template = Template(filename=str(sidecar_data["template"]))
+    return sidecar_template.render(**sidecar_data)
+
+
 def render_compose_data(node_config, settings):
     service_template_file_path = settings.template_dir_path / service_template
     compose_template_file_path = settings.template_dir_path / compose_template
@@ -94,17 +100,29 @@ def render_compose_data(node_config, settings):
         data = {**p_data, **s_data}
         peer_data.append(template.render(**render_peer(idx, data)))
 
+    validator_names = [v["name"] for v in sorted(node_config["validators"], key=itemgetter("name"))]
+    sidecar_data = {
+        "template": settings.template_dir_path / sidecar_service_template,
+        "service_name": "sidecar",
+        "container_name": "sidecar",
+        "hostname": "sidecar",
+        "entrypoint": '["python", "/app/sidecar.py", "-t", "3", "-v", '
+        + ", ".join(f'"{n}"' for n in validator_names)
+        + "]",
+        "network_name": settings.compose_config.network_name,
+    }
+
     compose_data = {
         "validators": validator_data,
         "peers": peer_data,
         "use_unl": settings.network.use_unl,
         "use_fuzzer": settings.fuzzer.enabled,
         "network_name": settings.compose_config.network_name,
+        "sidecar_service": render_sidecar(sidecar_data),
     }
 
     # Add fuzzer service if enabled
     if settings.fuzzer.enabled:
-        validator_names = [v["name"] for v in sorted(node_config["validators"], key=itemgetter("name"))]
         num_validators = len(validator_names)
         fuzzer_data = {
             "template": fuzzer_template_path,

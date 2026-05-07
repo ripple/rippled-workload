@@ -11,6 +11,7 @@ ${fuzzer_service}
 % if use_unl:
 ${unl_service}
 % endif
+${sidecar_service}
 networks:
   ${network_name}:
     name: ${network_name}
