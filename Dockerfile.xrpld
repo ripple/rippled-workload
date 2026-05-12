@@ -34,7 +34,7 @@ RUN <<EOF
 EOF
 
 # Force-enable all amendments for Antithesis testing
-RUN sed -i 's/Supported::no/Supported::yes/g' ${SOURCE_DIR}/include/xrpl/protocol/detail/features.macro
+RUN sed -i 's/Supported::[Nn]o/Supported::Yes/g' ${SOURCE_DIR}/include/xrpl/protocol/detail/features.macro
 
 # Clone fuzzer
 RUN <<EOF
