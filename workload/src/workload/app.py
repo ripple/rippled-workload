@@ -173,7 +173,11 @@ def create_app(workload: Workload) -> FastAPI:
     import contextlib
     from contextlib import asynccontextmanager
 
+    from fastapi import Response
+
     from workload.ws_listener import start_ws_listener
+
+    ready = {"value": False}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -193,6 +197,7 @@ def create_app(workload: Workload) -> FastAPI:
             )
 
         lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
+        ready["value"] = True
         yield  # app runs here, shutdown after yield
 
         ws_task.cancel()
@@ -200,6 +205,10 @@ def create_app(workload: Workload) -> FastAPI:
             await ws_task
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.get("/ready")
+    def _ready() -> Response:
+        return Response(status_code=200 if ready["value"] else 503)
 
     global get_workload
 
