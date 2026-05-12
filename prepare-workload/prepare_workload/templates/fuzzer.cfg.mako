@@ -37,6 +37,11 @@ ${seed}
 [validation_seed]
 ${validation_seed}
 
+# Workload /ready endpoint. Fuzzer probes this before arming mutators
+# so faults do not fire during workload setup.
+[workload_ready_url]
+http://workload:8000/ready
+
 # Protocol feature negotiation flags.
 # These control which features the fuzzer advertises in its handshake
 # (X-Protocol-Ctl header), which determines what message types peers
