@@ -41,7 +41,13 @@ class Workload:
         self.delegates = []
         self.loan_brokers = []
         self.loans = []
+        self.escrows = []
+        self.checks = []
+        self.payment_channels = []
         self.offers: list[dict] = []
+        # Addresses used by setup (gateways, vault creators, etc.) — never delete these.
+        # Populated by run_setup().
+        self.protected_accounts: set[str] = set()
         self.deleted_vault_ids: list[str] = []
         self.deleted_broker_ids: list[str] = []
         self.deleted_loan_ids: list[str] = []

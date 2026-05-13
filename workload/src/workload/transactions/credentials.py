@@ -44,7 +44,19 @@ async def _credential_create_valid(
 async def _credential_create_faulty(
     accounts: dict[str, UserAccount], credentials: list[Credential], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if not credentials:
+        return
+    # Re-create an existing credential → tecDUPLICATE from rippled
+    cred = choice(credentials)
+    if cred.issuer not in accounts:
+        return
+    issuer = accounts[cred.issuer]
+    txn = CredentialCreate(
+        account=issuer.address,
+        subject=cred.subject,
+        credential_type=cred.credential_type,
+    )
+    await submit_tx("CredentialCreate", txn, client, issuer.wallet)
 
 
 # ── Accept ───────────────────────────────────────────────────────────

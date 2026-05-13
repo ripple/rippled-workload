@@ -27,16 +27,20 @@ from xrpl.models.currencies import MPTCurrency
 from workload.models import (
     AMM,
     NFT,
+    Check,
     Credential,
     Delegate,
+    Escrow,
     Loan,
     LoanBroker,
     MPTokenIssuance,
     NFTOffer,
+    PaymentChannel,
     PermissionedDomain,
     TrustLine,
     Vault,
 )
+from workload.transactions.account_delete import account_delete
 from workload.transactions.account_set import account_set_random
 from workload.transactions.amm import (
     amm_bid,
@@ -47,6 +51,8 @@ from workload.transactions.amm import (
     amm_withdraw,
 )
 from workload.transactions.batch import batch_random
+from workload.transactions.checks import check_cancel, check_cash, check_create
+from workload.transactions.clawback import clawback
 from workload.transactions.credentials import (
     credential_accept,
     credential_create,
@@ -54,6 +60,7 @@ from workload.transactions.credentials import (
 )
 from workload.transactions.delegation import delegate_set
 from workload.transactions.domains import permissioned_domain_delete, permissioned_domain_set
+from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
 from workload.transactions.lending import (
     loan_broker_cover_deposit,
     loan_broker_cover_withdraw,
@@ -74,7 +81,14 @@ from workload.transactions.nft import (
     nftoken_modify,
 )
 from workload.transactions.offers import offer_cancel, offer_create
+from workload.transactions.payment_channels import (
+    channel_claim,
+    channel_create,
+    channel_fund,
+)
 from workload.transactions.payments import payment_random
+from workload.transactions.set_regular_key import set_regular_key
+from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.tickets import ticket_create, ticket_use
 from workload.transactions.trustlines import trustline_create
 from workload.transactions.vaults import (
@@ -337,6 +351,120 @@ def _on_loan_pay(w: Workload, tx: dict, meta: dict) -> None:
     loan = _find_loan(w, tx.get("LoanID", ""))
     if loan:
         loan.principal = max(0, loan.principal - _extract_amount(tx))
+
+
+def _on_account_delete(w: Workload, tx: dict, meta: dict) -> None:
+    deleted = tx.get("Account", "")
+    if deleted and deleted in w.accounts:
+        del w.accounts[deleted]
+
+
+def _on_channel_create(w: Workload, tx: dict, meta: dict) -> None:
+    channel_id = _extract_created_id(meta, "PayChannel")
+    if not channel_id:
+        return
+    tx_hash = tx.get("hash", "")
+    # Update placeholder channel_id with real ledger ID
+    for ch in w.payment_channels:
+        if ch.channel_id == tx_hash:
+            ch.channel_id = channel_id
+            return
+    w.payment_channels.append(
+        PaymentChannel(
+            channel_id=channel_id,
+            source=tx.get("Account", ""),
+            destination=tx.get("Destination", ""),
+            amount=str(tx.get("Amount", "0")),
+            settle_delay=tx.get("SettleDelay", 0),
+        )
+    )
+
+
+def _on_channel_fund(w: Workload, tx: dict, meta: dict) -> None:
+    # Fund doesn't create/delete — just adds XRP to existing channel
+    pass
+
+
+def _on_channel_claim(w: Workload, tx: dict, meta: dict) -> None:
+    # If the channel was closed by this claim, remove it
+    deleted_id = _extract_deleted_id(meta, "PayChannel")
+    if deleted_id:
+        w.payment_channels[:] = [ch for ch in w.payment_channels if ch.channel_id != deleted_id]
+
+
+def _on_check_create(w: Workload, tx: dict, meta: dict) -> None:
+    check_id = _extract_created_id(meta, "Check")
+    if not check_id:
+        return
+    tx_hash = tx.get("hash", "")
+    # Update the placeholder check_id (tx hash) with real ledger check_id
+    for c in w.checks:
+        if c.check_id == tx_hash:
+            c.check_id = check_id
+            return
+    # If not found optimistically, add it
+    w.checks.append(
+        Check(
+            check_id=check_id,
+            creator=tx.get("Account", ""),
+            destination=tx.get("Destination", ""),
+            send_max=str(tx.get("SendMax", "0")),
+        )
+    )
+
+
+def _on_check_cash(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Check")
+    if deleted_id:
+        w.checks[:] = [c for c in w.checks if c.check_id != deleted_id]
+
+
+def _on_check_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Check")
+    if deleted_id:
+        w.checks[:] = [c for c in w.checks if c.check_id != deleted_id]
+
+
+def _on_escrow_create(w: Workload, tx: dict, meta: dict) -> None:
+    """Confirm escrow creation — match by owner+sequence and keep fulfillment."""
+    escrow_id = _extract_created_id(meta, "Escrow")
+    if not escrow_id:
+        return
+    owner = tx.get("Account", "")
+    seq = tx.get("Sequence", 0)
+    # The Escrow was already appended optimistically by escrow_create handler
+    # with sequence = tx sequence. Just confirm it exists.
+    for e in w.escrows:
+        if e.owner == owner and e.sequence == seq:
+            return
+    # If not found (edge case), add without fulfillment
+    w.escrows.append(
+        Escrow(
+            owner=owner,
+            destination=tx.get("Destination", ""),
+            sequence=seq,
+            condition=tx.get("Condition"),
+            fulfillment=None,
+            finish_after=tx.get("FinishAfter"),
+            cancel_after=tx.get("CancelAfter"),
+        )
+    )
+
+
+def _on_escrow_finish(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Escrow")
+    if deleted_id:
+        owner = tx.get("Owner", "")
+        seq = tx.get("OfferSequence", 0)
+        w.escrows[:] = [e for e in w.escrows if not (e.owner == owner and e.sequence == seq)]
+
+
+def _on_escrow_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    deleted_id = _extract_deleted_id(meta, "Escrow")
+    if deleted_id:
+        owner = tx.get("Owner", "")
+        seq = tx.get("OfferSequence", 0)
+        w.escrows[:] = [e for e in w.escrows if not (e.owner == owner and e.sequence == seq)]
 
 
 def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
@@ -685,6 +813,97 @@ REGISTRY = [
         offer_cancel,
         lambda w: (w.accounts, w.offers, w.client),
         _on_offer_cancel,
+    ),
+    (
+        "CheckCreate",
+        "/check/create/random",
+        check_create,
+        lambda w: (w.accounts, w.checks, w.client),
+        _on_check_create,
+    ),
+    (
+        "PaymentChannelCreate",
+        "/channel/create/random",
+        channel_create,
+        lambda w: (w.accounts, w.payment_channels, w.client),
+        _on_channel_create,
+    ),
+    (
+        "PaymentChannelFund",
+        "/channel/fund/random",
+        channel_fund,
+        lambda w: (w.accounts, w.payment_channels, w.client),
+        _on_channel_fund,
+    ),
+    (
+        "PaymentChannelClaim",
+        "/channel/claim/random",
+        channel_claim,
+        lambda w: (w.accounts, w.payment_channels, w.client),
+        _on_channel_claim,
+    ),
+    (
+        "CheckCash",
+        "/check/cash/random",
+        check_cash,
+        lambda w: (w.accounts, w.checks, w.client),
+        _on_check_cash,
+    ),
+    (
+        "CheckCancel",
+        "/check/cancel/random",
+        check_cancel,
+        lambda w: (w.accounts, w.checks, w.client),
+        _on_check_cancel,
+    ),
+    (
+        "Clawback",
+        "/clawback/random",
+        clawback,
+        lambda w: (w.accounts, w.trust_lines, w.mpt_issuances, w.client),
+        None,
+    ),
+    (
+        "SetRegularKey",
+        "/set_regular_key/random",
+        set_regular_key,
+        lambda w: (w.accounts, w.client),
+        None,
+    ),
+    (
+        "SignerListSet",
+        "/signer_list_set/random",
+        signer_list_set,
+        lambda w: (w.accounts, w.client),
+        None,
+    ),
+    (
+        "AccountDelete",
+        "/account_delete/random",
+        account_delete,
+        lambda w: (w.accounts, w.protected_accounts, w.client),
+        _on_account_delete,
+    ),
+    (
+        "EscrowCreate",
+        "/escrow/create/random",
+        escrow_create,
+        lambda w: (w.accounts, w.escrows, w.client),
+        _on_escrow_create,
+    ),
+    (
+        "EscrowFinish",
+        "/escrow/finish/random",
+        escrow_finish,
+        lambda w: (w.accounts, w.escrows, w.client),
+        _on_escrow_finish,
+    ),
+    (
+        "EscrowCancel",
+        "/escrow/cancel/random",
+        escrow_cancel,
+        lambda w: (w.accounts, w.escrows, w.client),
+        _on_escrow_cancel,
     ),
     (
         "LoanBrokerSet",

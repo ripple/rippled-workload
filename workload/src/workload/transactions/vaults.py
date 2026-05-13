@@ -444,6 +444,7 @@ async def _vault_clawback_valid(
         account=issuer.address,
         vault_id=vault.vault_id,
         holder=holder,
+        amount=_amount_for_asset(vault.asset),
     )
     await submit_tx("VaultClawback", txn, client, issuer.wallet)
 
@@ -467,11 +468,13 @@ async def _vault_clawback_faulty(
             account=owner.address,
             vault_id=params.fake_id(),
             holder=holder,
+            amount=_amount_for_asset(vault.asset),
         )
     else:  # clawback_self — owner == holder
         txn = VaultClawback(
             account=owner.address,
             vault_id=vault.vault_id,
             holder=owner.address,
+            amount=_amount_for_asset(vault.asset),
         )
     await submit_tx("VaultClawback", txn, client, owner.wallet)

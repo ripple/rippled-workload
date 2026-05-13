@@ -259,6 +259,21 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     holder_indices = list(_HOLDER_RANGE) + list(_VAULT_RANGE)
 
+    # Record addresses used by setup so AccountDelete won't target them.
+    # Indices: gateways (60-61), MPT issuers (0-4), vault creators (10-16),
+    # NFT minters (20-24), credential issuer + subjects (30-35), ticket
+    # holders (40-42), domain creators (50-52), IOU/MPT holders (62-71).
+    _setup_indices: set[int] = (
+        set(range(5))
+        | set(range(10, 17))
+        | set(range(20, 25))
+        | set(range(30, 36))
+        | set(range(40, 43))
+        | set(range(50, 53))
+        | set(range(60, 72))
+    )
+    workload.protected_accounts.update(accs[i].address for i in _setup_indices if i < len(accs))
+
     # ── 1. Gateway setup: DefaultRipple + AllowTrustLineClawback ─────
     gw_txns = []
     for gw_idx, _ in _GATEWAYS:
@@ -337,14 +352,15 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     summary["iou_distribution"] = await _submit_batch("iou_distribution", iou_txns, client, seq)
 
     # ── 4. MPT issuances: 5 from accounts[0..4] ─────────────────────
+    _mpt_flags = (
+        MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK | MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
+    )
     summary["mpt_issuances"] = await _submit_batch(
         "mpt",
         [
             (
                 "MPTokenIssuanceCreate",
-                MPTokenIssuanceCreate(
-                    account=accs[i].address, flags=MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK
-                ),
+                MPTokenIssuanceCreate(account=accs[i].address, flags=_mpt_flags),
                 accs[i].wallet,
             )
             for i in range(min(5, len(accs)))
@@ -354,7 +370,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
-    await asyncio.sleep(5)  # wait for WS to process MPT issuance results
+    await _wait_for_state(workload.mpt_issuances, summary["mpt_issuances"], "mpt_issuances")
     mpt_auth_txns = []
     for mpt in workload.mpt_issuances:
         for holder_idx in holder_indices:
