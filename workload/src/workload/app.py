@@ -17,11 +17,11 @@ from xrpl.wallet import Wallet
 
 from workload import logger
 from workload.assertions import register_assertions
-from workload.transactions.tickets import check_ticket_coverage
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
 from workload.transactions import REGISTRY
+from workload.transactions.tickets import check_ticket_coverage
 
 
 class Workload:
@@ -83,6 +83,7 @@ class Workload:
 
         # Wire delegation state so submit_tx can transparently delegate.
         from workload.submit import configure as configure_submit
+
         configure_submit(self.delegates, self.accounts)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
@@ -161,6 +162,7 @@ get_workload = None
 
 def create_app(workload: Workload) -> FastAPI:
     import asyncio
+    import contextlib
     from contextlib import asynccontextmanager
 
     from workload.ws_listener import start_ws_listener
@@ -186,10 +188,8 @@ def create_app(workload: Workload) -> FastAPI:
         yield  # app runs here, shutdown after yield
 
         ws_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await ws_task
-        except asyncio.CancelledError:
-            pass
 
     app = FastAPI(lifespan=lifespan)
 
