@@ -165,6 +165,47 @@ def mpt_metadata() -> str:
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
+# ── AMM ─────────────────────────────────────────────────────────────
+def amm_trading_fee() -> int:
+    """Trading fee in 1/100,000th (0-1000 = 0-1%)."""
+    return randint(0, 1000)
+
+
+def amm_deposit_amount() -> str:
+    """AMM deposit amount for IOU tokens (within typical 10k balance)."""
+    return str(randint(100, 5_000))
+
+
+def amm_withdraw_amount() -> str:
+    """AMM withdrawal amount for IOU tokens."""
+    return str(randint(100, 50_000))
+
+
+def amm_lp_token_amount() -> str:
+    """LP token amount for deposits/withdrawals/bids."""
+    return str(randint(1, 10_000))
+
+
+def amm_bid_min() -> str:
+    """Minimum bid price for auction slot."""
+    return str(randint(1, 1_000))
+
+
+def amm_bid_max() -> str:
+    """Maximum bid price for auction slot."""
+    return str(randint(1_000, 10_000))
+
+
+def amm_vote_fee() -> int:
+    """Fee value for AMM vote (0-1000)."""
+    return randint(0, 1000)
+
+
+def amm_xrp_amount() -> str:
+    """XRP amount in drops for AMM pools."""
+    return str(randint(10_000_000, 1_000_000_000))
+
+
 # ── Lending Protocol ─────────────────────────────────────────────────
 def loan_broker_management_fee_rate() -> int:
     """1/10th basis point fee (0-10000 = 0-10%)."""

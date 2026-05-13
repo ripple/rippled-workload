@@ -21,6 +21,7 @@ from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
 from workload.models import UserAccount
 from workload.transactions import REGISTRY
+from workload.transactions.tickets import check_ticket_coverage
 
 
 class Workload:
@@ -40,6 +41,7 @@ class Workload:
         self.delegates = []
         self.loan_brokers = []
         self.loans = []
+        self.offers: list[dict] = []
         self.deleted_vault_ids: list[str] = []
         self.deleted_broker_ids: list[str] = []
         self.deleted_loan_ids: list[str] = []
@@ -82,6 +84,7 @@ class Workload:
 
         # Wire delegation state so submit_tx can transparently delegate.
         from workload.submit import configure as configure_submit
+
         configure_submit(self.delegates, self.accounts)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
@@ -89,6 +92,7 @@ class Workload:
         always(True, "workload::sdk_works", {"message": "SDK canary assertion"})
 
         register_assertions()
+        check_ticket_coverage()
 
         logger.info("Workload initialized after %ss", int(time.time() - self.start_time))
 
@@ -159,6 +163,7 @@ get_workload = None
 
 def create_app(workload: Workload) -> FastAPI:
     import asyncio
+    import contextlib
     from contextlib import asynccontextmanager
 
     from workload.ws_listener import start_ws_listener
@@ -167,7 +172,7 @@ def create_app(workload: Workload) -> FastAPI:
     async def lifespan(app: FastAPI):
         from workload.setup import run_setup
 
-        asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
+        ws_task = asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
         await asyncio.sleep(1)  # let WS listener connect before setup submits
 
         try:
@@ -182,6 +187,10 @@ def create_app(workload: Workload) -> FastAPI:
 
         lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
         yield  # app runs here, shutdown after yield
+
+        ws_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ws_task
 
     app = FastAPI(lifespan=lifespan)
 
