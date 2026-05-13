@@ -15,14 +15,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from workload.app import Workload
 
+from antithesis.lifecycle import send_event
 from xrpl.asyncio.clients import AsyncWebsocketClient
-from xrpl.models import StreamParameter, Subscribe
+from xrpl.models import StreamParameter, Subscribe, TransactionFlag
 
 from workload import logging
 from workload.assertions import tx_result
 from workload.transactions import STATE_UPDATERS
 
 log = logging.getLogger(__name__)
+
+_TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 
 
 def _handle_validated_tx(workload: Workload, msg: dict) -> None:
@@ -37,6 +40,24 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     # Only process transactions from our accounts
     if account not in workload.accounts:
         return
+
+    # Inner batch transactions are top-level entries in the closed ledger
+    # txMap (rippled rawTxInsert's them during apply). They arrive here
+    # alongside their outer Batch. Emit a dedicated event so they can be
+    # grepped from the events stream, then fall through so state updaters
+    # still see the side effects (e.g. minted NFTs from inner NFTokenMint).
+    if tx.get("Flags", 0) & _TF_INNER_BATCH_TXN:
+        send_event(
+            "workload::inner_batch_observed",
+            {
+                "tx_type": tx_type,
+                "account": account,
+                "sequence": str(tx.get("Sequence", "")),
+                "hash": tx_hash,
+                "engine_result": engine_result,
+                "parent_batch_id": meta.get("ParentBatchID", ""),
+            },
+        )
 
     # Build a normalized result dict for tx_result()
     result = {

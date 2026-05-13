@@ -47,6 +47,9 @@ def write_fuzzer_config(settings, num_validators, validator_public_keys, isolate
         "num_real_peers": num_validators,
         "node_seed": node_seed,
         "peer_seeds": peer_seeds,
+        # Mirror isolated rippled's [validation_seed] so fuzzer can re-sign
+        # mutated proposals. Switch to signing_seed if manifest is added.
+        "validation_seed": isolated_validator_keys["master_seed"],
     }
 
     template = Template(filename=str(fuzzer_config_template))
