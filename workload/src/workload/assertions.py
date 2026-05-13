@@ -27,6 +27,24 @@ _RIPPLED_INTERNAL_ERRORS = (
     "tefFAILURE",
 )
 
+# Types whose current faulty handler never produces a non-tesSUCCESS engine
+# result, so the failure assertion can't be met.
+# - SignerListSet: fake AccountIDs are accepted (rippled doesn't verify
+#   listed accounts exist); current mutations stay within weight bounds.
+# - MPTokenIssuanceCreate: no _faulty handler — always submits a valid create.
+_NO_FAILURE_TYPES = {
+    "SignerListSet",
+    "MPTokenIssuanceCreate",
+}
+
+# Types that effectively never succeed in this test environment.
+# - AccountDelete: every account owns directory objects (trust lines, NFTs,
+#   etc.), so rippled rejects with tecHAS_OBLIGATIONS.
+# - AMMDelete: rippled auto-deletes empty AMMs as a side effect of the last
+#   LP's TF_WITHDRAW_ALL, so AMMDelete usually finds the AMM already gone
+#   (tecAMM_NOT_FOUND) or with outstanding LP tokens (tecAMM_NOT_EMPTY).
+_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete"}
+
 # XRPL fields → normalized event keys. Only object identifiers needed for tracking.
 _OBJECT_ID_FIELDS: dict[str, str] = {
     "Destination": "destination",
@@ -90,8 +108,18 @@ def register_assertions() -> None:
 
     for name in TX_TYPES:
         _emit_catalog_entry(_seen_id(name), "reachability", "Reachable", must_hit=True)
-        _emit_catalog_entry(_success_id(name), "sometimes", "Sometimes", must_hit=True)
-        _emit_catalog_entry(_failure_id(name), "sometimes", "Sometimes", must_hit=True)
+        _emit_catalog_entry(
+            _success_id(name),
+            "sometimes",
+            "Sometimes",
+            must_hit=(name not in _NO_SUCCESS_TYPES),
+        )
+        _emit_catalog_entry(
+            _failure_id(name),
+            "sometimes",
+            "Sometimes",
+            must_hit=(name not in _NO_FAILURE_TYPES),
+        )
     _emit_catalog_entry("workload::always : valid_engine_result", "always", "Always", must_hit=True)
     _emit_catalog_entry(
         "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
@@ -292,7 +320,7 @@ def tx_result(name: str, result: dict) -> None:
         loc_begin_line=0,
         loc_begin_column=_LOC_COL,
         hit=True,
-        must_hit=True,
+        must_hit=name not in _NO_SUCCESS_TYPES,
         assert_type="sometimes",
         display_type="Sometimes",
         assert_id=_success_id(name),
@@ -307,7 +335,7 @@ def tx_result(name: str, result: dict) -> None:
         loc_begin_line=0,
         loc_begin_column=_LOC_COL,
         hit=True,
-        must_hit=True,
+        must_hit=name not in _NO_FAILURE_TYPES,
         assert_type="sometimes",
         display_type="Sometimes",
         assert_id=_failure_id(name),

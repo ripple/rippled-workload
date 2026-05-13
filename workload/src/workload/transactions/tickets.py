@@ -7,16 +7,21 @@ from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.amounts import IssuedCurrencyAmount
 from xrpl.models.transactions import (
     AccountSet,
+    CheckCreate,
     CredentialCreate,
+    EscrowCreate,
     MPTokenIssuanceCreate,
     NFTokenMint,
     Payment,
     PermissionedDomainSet,
+    SetRegularKey,
+    SignerListSet,
     TrustSet,
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 from xrpl.models.transactions.mptoken_issuance_create import MPTokenIssuanceCreateFlag
 from xrpl.models.transactions.nftoken_mint import NFTokenMintFlag
+from xrpl.models.transactions.signer_list_set import SignerEntry
 from xrpl.models.transactions.transaction import Memo
 
 from workload import params
@@ -74,6 +79,26 @@ _TICKET_BUILDERS: dict[str, _TicketBuilder] = {
         ),
         **c,
     ),
+    "CheckCreate": lambda dst, c: CheckCreate(
+        destination=dst,
+        send_max=params.check_send_max(),
+        **c,
+    ),
+    "EscrowCreate": lambda dst, c: EscrowCreate(
+        amount=params.escrow_amount(),
+        destination=dst,
+        finish_after=params.escrow_finish_after(),
+        **c,
+    ),
+    "SetRegularKey": lambda dst, c: SetRegularKey(
+        regular_key=dst,
+        **c,
+    ),
+    "SignerListSet": lambda dst, c: SignerListSet(
+        signer_quorum=1,
+        signer_entries=[SignerEntry(account=dst, signer_weight=1)],
+        **c,
+    ),
 }
 
 # Types explicitly excluded from ticket use.  Reasons:
@@ -117,6 +142,28 @@ _TICKET_EXCLUDED: set[str] = {
     "LoanDelete",
     "LoanManage",
     "LoanPay",
+    "CheckCash",
+    "CheckCancel",
+    "EscrowFinish",
+    "EscrowCancel",
+    "PaymentChannelFund",
+    "PaymentChannelClaim",
+    # All AMM and Offer types need asset-pair / existing-object state
+    # that the (dst, common)-only builder signature can't reach.
+    "AMMCreate",
+    "AMMDeposit",
+    "AMMWithdraw",
+    "AMMVote",
+    "AMMBid",
+    "AMMDelete",
+    "OfferCreate",
+    "OfferCancel",
+    # PaymentChannelCreate needs public_key from the wallet, which the
+    # (dst, common)-only builder signature can't reach.
+    "PaymentChannelCreate",
+    # Clawback requires the source to be an authorised issuer.
+    "Clawback",
+    "AccountDelete",
 }
 
 

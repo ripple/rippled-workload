@@ -15,7 +15,7 @@ from xrpl.models.transactions.transaction import Memo
 
 from workload import logging, params
 from workload.models import NFT, NFTOffer, UserAccount
-from workload.randoms import choice
+from workload.randoms import choice, random
 from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
@@ -37,11 +37,15 @@ async def _nftoken_mint_valid(
 ) -> None:
     account_id = choice(list(accounts))
     account = accounts[account_id]
+    # ~30% mutable so NFTokenModify has targets
+    flags = NFTokenMintFlag.TF_TRANSFERABLE
+    if random() < 0.30:
+        flags |= NFTokenMintFlag.TF_MUTABLE
     txn = NFTokenMint(
         account=account.address,
         transfer_fee=params.nft_transfer_fee(),
         nftoken_taxon=params.nft_taxon(),
-        flags=NFTokenMintFlag.TF_TRANSFERABLE,
+        flags=flags,
         memos=[Memo(memo_data=params.nft_memo().encode("utf-8").hex())],
     )
     await submit_tx("NFTokenMint", txn, client, account.wallet)
@@ -50,7 +54,19 @@ async def _nftoken_mint_valid(
 async def _nftoken_mint_faulty(
     accounts: dict[str, UserAccount], nfts: list[NFT], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if len(accounts) < 2:
+        return
+    acct_list = list(accounts.values())
+    src = choice(acct_list)
+    # Set issuer to another account that hasn't authorized us → tecNO_PERMISSION
+    other = choice([a for a in acct_list if a.address != src.address])
+    txn = NFTokenMint(
+        account=src.address,
+        nftoken_taxon=params.nft_taxon(),
+        issuer=other.address,
+        flags=NFTokenMintFlag.TF_TRANSFERABLE,
+    )
+    await submit_tx("NFTokenMint", txn, client, src.wallet)
 
 
 # ── Burn ─────────────────────────────────────────────────────────────
@@ -206,7 +222,15 @@ async def _nftoken_cancel_offer_valid(
 async def _nftoken_cancel_offer_faulty(
     accounts: dict[str, UserAccount], nft_offers: list[NFTOffer], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    if not accounts:
+        return
+    src = choice(list(accounts.values()))
+    # Cancel a non-existent offer → tecOBJECT_NOT_FOUND from rippled
+    txn = NFTokenCancelOffer(
+        account=src.address,
+        nftoken_offers=[params.fake_id()],
+    )
+    await submit_tx("NFTokenCancelOffer", txn, client, src.wallet)
 
 
 # ── Accept Offer ─────────────────────────────────────────────────────
