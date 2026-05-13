@@ -377,10 +377,8 @@ async def _loan_set_valid(
     # LoanSet requires counterparty co-signing: borrower signs, then broker co-signs
     signed = await autofill_and_sign(txn, client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
-    tx_submitted("LoanSet", txn)
-    await xrpl_submit(cosigned.tx, client)
-    # TODO: re-enable as structured log for tx sequence analysis
-    # {"tx_type": "LoanSet", "engine_result": response.result.get("engine_result", "")}
+    response = await xrpl_submit(cosigned.tx, client)
+    tx_submitted("LoanSet", txn, response.result)
 
 
 async def _loan_set_faulty(

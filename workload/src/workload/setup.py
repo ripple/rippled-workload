@@ -61,6 +61,7 @@ from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
 from workload import params
+from workload.assertions import assert_no_internal_error_submit
 from workload.models import UserAccount
 from workload.sequence import SequenceTracker
 from workload.submit import submit_tx
@@ -178,6 +179,7 @@ async def _submit_loan(
     signed = await autofill_and_sign(txn, workload.client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
     resp = await xrpl_submit(cosigned.tx, workload.client)
+    assert_no_internal_error_submit("LoanSet", resp.result)
     engine = resp.result.get("engine_result", "")
     ok = engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ")
     if not ok:
@@ -212,6 +214,7 @@ async def _probe_node(workload: Workload) -> None:
             probe = AccountSet(account=workload.funding_wallet.address)
             signed = await autofill_and_sign(probe, workload.client, workload.funding_wallet)
             resp = await xrpl_submit(signed, workload.client)
+            assert_no_internal_error_submit("AccountSet", resp.result)
             engine = resp.result.get("engine_result", "")
             if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
                 send_event(
