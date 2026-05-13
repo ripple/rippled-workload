@@ -60,8 +60,12 @@ async def submit_tx(
     # Possibly delegate: lazy import to avoid circular dependency
     if _delegates:
         from workload.transactions.delegation import maybe_delegate
+
         delegate_addr, delegate_wallet = maybe_delegate(
-            name, txn.account, _delegates, _accounts,
+            name,
+            txn.account,
+            _delegates,
+            _accounts,
         )
         if delegate_addr is not None:
             txn = txn.__replace__(delegate=delegate_addr)

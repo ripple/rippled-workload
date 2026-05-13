@@ -77,37 +77,45 @@ def register_assertions() -> None:
     """
     from workload.transactions import TX_TYPES
 
-    # Types whose faulty mutations always succeed at the rippled level
-    # (no tec* results possible), so the failure assertion can't be met.
-    # - SetRegularKey/SignerListSet: fake accounts are valid targets
-    # - MPTokenIssuanceCreate: any funded account can create; no tec* possible
+    # Types whose current faulty handler never produces a non-tesSUCCESS
+    # engine result, so the failure assertion can't be met.
+    # - SignerListSet: fake AccountIDs are accepted (rippled doesn't verify
+    #   listed accounts exist); current mutations stay within weight bounds.
+    # - MPTokenIssuanceCreate: no _faulty handler — always submits a valid
+    #   create.
     _NO_FAILURE_TYPES = {
-        "SetRegularKey", "SignerListSet",
+        "SignerListSet",
         "MPTokenIssuanceCreate",
     }
 
-    # Types that genuinely cannot succeed in this test environment.
-    # - AccountDelete: all accounts own directory objects (trust lines,
-    #   NFTs, etc.) so rippled always rejects with tecHAS_OBLIGATIONS.
-    _NO_SUCCESS_TYPES = {"AccountDelete"}
+    # Types that effectively never succeed in this test environment.
+    # - AccountDelete: every account owns directory objects (trust lines,
+    #   NFTs, etc.), so rippled rejects with tecHAS_OBLIGATIONS.
+    # - AMMDelete: rippled auto-deletes empty AMMs as a side effect of the
+    #   last LP's TF_WITHDRAW_ALL, so by the time AMMDelete tries on an
+    #   empty AMM, the AMM is already gone (tecAMM_NOT_FOUND); otherwise
+    #   it has outstanding LP tokens (tecAMM_NOT_EMPTY).
+    _NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete"}
 
     for name in TX_TYPES:
         _emit_catalog_entry(_seen_id(name), "reachability", "Reachable", must_hit=True)
         _emit_catalog_entry(
-            _success_id(name), "sometimes", "Sometimes",
+            _success_id(name),
+            "sometimes",
+            "Sometimes",
             must_hit=(name not in _NO_SUCCESS_TYPES),
         )
         _emit_catalog_entry(
-            _failure_id(name), "sometimes", "Sometimes",
+            _failure_id(name),
+            "sometimes",
+            "Sometimes",
             must_hit=(name not in _NO_FAILURE_TYPES),
         )
     _emit_catalog_entry("workload::always : valid_engine_result", "always", "Always", must_hit=True)
     _emit_catalog_entry(
         "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
     )
-    _emit_catalog_entry(
-        "workload::always : no_temDISABLED", "always", "Always", must_hit=True
-    )
+    _emit_catalog_entry("workload::always : no_temDISABLED", "always", "Always", must_hit=True)
     for setup_key in [
         "gateways",
         "trust_lines",

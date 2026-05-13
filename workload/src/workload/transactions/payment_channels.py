@@ -22,9 +22,6 @@ from workload.models import PaymentChannel, UserAccount
 from workload.randoms import choice, randint
 from workload.submit import submit_tx
 
-
-
-
 # ── PaymentChannelCreate ────────────────────────────────────────────
 
 
@@ -63,18 +60,24 @@ async def _channel_create_valid(
     )
     result = await submit_tx("PaymentChannelCreate", txn, client, src.wallet)
 
-    # Optimistically track — real channel_id from state updater
-    if result:
+    # Optimistically track — real channel_id replaces the tx_hash placeholder
+    # via the state updater on validation.  Skip the optimistic insert when
+    # the submit response already indicates the tx won't apply, so we don't
+    # leak dead channels into Fund/Claim handlers.
+    engine = result.get("engine_result", "") if result else ""
+    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
         tx_json = result.get("tx_json", result)
         tx_hash = tx_json.get("hash", "")
         if tx_hash:
-            payment_channels.append(PaymentChannel(
-                channel_id=tx_hash,
-                source=src.address,
-                destination=dst.address,
-                amount=amount,
-                settle_delay=settle_delay,
-            ))
+            payment_channels.append(
+                PaymentChannel(
+                    channel_id=tx_hash,
+                    source=src.address,
+                    destination=dst.address,
+                    amount=amount,
+                    settle_delay=settle_delay,
+                )
+            )
 
 
 async def _channel_create_faulty(
@@ -85,12 +88,14 @@ async def _channel_create_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "zero_amount",
-        "self_destination",
-        "non_existent_destination",
-        "past_cancel_after",
-    ])
+    mutation = choice(
+        [
+            "zero_amount",
+            "self_destination",
+            "non_existent_destination",
+            "past_cancel_after",
+        ]
+    )
 
     if mutation == "zero_amount":
         txn = PaymentChannelCreate(
@@ -175,11 +180,13 @@ async def _channel_fund_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "fake_channel",
-        "zero_amount",
-        "non_owner_fund",
-    ])
+    mutation = choice(
+        [
+            "fake_channel",
+            "zero_amount",
+            "non_owner_fund",
+        ]
+    )
 
     if mutation == "fake_channel":
         txn = PaymentChannelFund(
@@ -246,11 +253,13 @@ async def _channel_claim_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "fake_channel",
-        "excessive_balance",
-        "wrong_claimer",
-    ])
+    mutation = choice(
+        [
+            "fake_channel",
+            "excessive_balance",
+            "wrong_claimer",
+        ]
+    )
 
     if mutation == "fake_channel":
         txn = PaymentChannelClaim(
@@ -272,5 +281,3 @@ async def _channel_claim_faulty(
         )
 
     await submit_tx("PaymentChannelClaim", txn, client, src.wallet)
-
-    await submit_tx("PaymentChannelCreate", txn, client, src.wallet)

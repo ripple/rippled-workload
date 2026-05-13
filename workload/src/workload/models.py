@@ -68,13 +68,14 @@ class UserAccount(Account):
 @dataclass
 class Delegate:
     """A delegation relationship: source granted delegate_address permission."""
+
     source: str
     delegate_address: str
     permissions: list[str]  # TransactionType values e.g. ["Payment", "TrustSet"]
 
 
 @dataclass
-class Amm:
+class AMM:
     account: str
     assets: list[IssuedCurrency]
     lp_token: list[IssuedCurrency]
@@ -136,6 +137,7 @@ class Loan:
 @dataclass
 class Escrow:
     """An active escrow on the ledger."""
+
     owner: str
     destination: str
     sequence: int
@@ -145,10 +147,10 @@ class Escrow:
     cancel_after: int | None = None
 
 
-
 @dataclass
 class Check:
     """An active check on the ledger."""
+
     check_id: str
     creator: str
     destination: str
@@ -158,6 +160,7 @@ class Check:
 @dataclass
 class PaymentChannel:
     """An active payment channel on the ledger."""
+
     channel_id: str
     source: str
     destination: str

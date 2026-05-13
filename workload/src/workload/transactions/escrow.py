@@ -13,17 +13,12 @@ live escrows.
 from __future__ import annotations
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
-from xrpl.models.transactions import EscrowCreate, EscrowFinish, EscrowCancel
+from xrpl.models.transactions import EscrowCancel, EscrowCreate, EscrowFinish
 
 from workload import params
 from workload.models import Escrow, UserAccount
-from workload.randoms import choice, randint, random
+from workload.randoms import choice, randint
 from workload.submit import submit_tx
-
-
-
-
-
 
 # ── EscrowCreate ────────────────────────────────────────────────────
 
@@ -82,19 +77,25 @@ async def _escrow_create_valid(
 
     # Optimistically track the escrow with its fulfillment so
     # EscrowFinish can use it later.  Sequence comes from autofill.
-    if result:
+    # Only track when the submit response indicates the tx will likely
+    # apply — otherwise the entry leaks forever and downstream Finish/Cancel
+    # picks dead escrows.
+    engine = result.get("engine_result", "") if result else ""
+    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
         tx_json = result.get("tx_json", result)
         seq = tx_json.get("Sequence", 0)
         if seq:
-            escrows.append(Escrow(
-                owner=src.address,
-                destination=dst.address,
-                sequence=seq,
-                condition=condition,
-                fulfillment=fulfillment,
-                finish_after=finish_after,
-                cancel_after=cancel_after,
-            ))
+            escrows.append(
+                Escrow(
+                    owner=src.address,
+                    destination=dst.address,
+                    sequence=seq,
+                    condition=condition,
+                    fulfillment=fulfillment,
+                    finish_after=finish_after,
+                    cancel_after=cancel_after,
+                )
+            )
 
 
 async def _escrow_create_faulty(
@@ -105,12 +106,14 @@ async def _escrow_create_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "past_cancel_after",
-        "non_existent_destination",
-        "bad_condition_hex",
-        "no_time_no_condition",
-    ])
+    mutation = choice(
+        [
+            "past_cancel_after",
+            "non_existent_destination",
+            "bad_condition_hex",
+            "no_time_no_condition",
+        ]
+    )
     if mutation == "past_cancel_after":
         # cancel_after in the past
         past = params._ripple_now() - randint(100, 10_000)
@@ -190,11 +193,13 @@ async def _escrow_finish_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "non_existent_sequence",
-        "wrong_fulfillment",
-        "wrong_owner",
-    ])
+    mutation = choice(
+        [
+            "non_existent_sequence",
+            "wrong_fulfillment",
+            "wrong_owner",
+        ]
+    )
     if mutation == "non_existent_sequence":
         txn = EscrowFinish(
             account=src.address,
@@ -269,11 +274,13 @@ async def _escrow_cancel_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "non_existent_sequence",
-        "wrong_owner",
-        "cancel_non_cancellable",
-    ])
+    mutation = choice(
+        [
+            "non_existent_sequence",
+            "wrong_owner",
+            "cancel_non_cancellable",
+        ]
+    )
     if mutation == "non_existent_sequence":
         txn = EscrowCancel(
             account=src.address,

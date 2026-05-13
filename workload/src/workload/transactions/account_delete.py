@@ -9,12 +9,12 @@ to a destination.  Constraints enforced by rippled:
 
 This is a NON_DELEGABLE transaction — blocked by XRPL protocol.
 
-SAFETY: The valid path only targets accounts outside the critical setup
-ranges (gateways, MPT issuers, vault creators, holders, NFT minters,
-credential subjects, ticket holders, domain creators).  Most submissions
-will be rejected by rippled because even "unused" accounts may have
-acquired objects from driver calls.  The fuzzing value is exercising
-the transaction path itself.
+SAFETY: The valid path skips accounts in ``workload.protected_accounts``
+(addresses captured by setup: gateways, MPT issuers, vault creators,
+holders, NFT minters, credential subjects, ticket holders, domain
+creators).  Most submissions still get rejected because even "unused"
+accounts may have acquired objects from driver calls; the fuzzing value
+is exercising the transaction path itself.
 """
 
 from __future__ import annotations
@@ -28,30 +28,19 @@ from workload.randoms import choice, randint
 from workload.submit import submit_tx
 
 
-
-# Account indices used by setup — NEVER target these for deletion.
-_PROTECTED_INDICES: set[int] = set(
-    list(range(0, 5))       # MPT issuers
-    + list(range(10, 17))   # Vault creators
-    + list(range(20, 25))   # NFT minters
-    + list(range(30, 36))   # Credential issuer + subjects
-    + list(range(40, 43))   # Ticket holders
-    + list(range(50, 53))   # Domain creators
-    + list(range(60, 72))   # Gateways + IOU/MPT holders
-)
-
-
 async def account_delete(
     accounts: dict[str, UserAccount],
+    protected_accounts: set[str],
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
         return await _account_delete_faulty(accounts, client)
-    return await _account_delete_valid(accounts, client)
+    return await _account_delete_valid(accounts, protected_accounts, client)
 
 
 async def _account_delete_valid(
     accounts: dict[str, UserAccount],
+    protected_accounts: set[str],
     client: AsyncJsonRpcClient,
 ) -> None:
     if len(accounts) < 2:
@@ -59,11 +48,8 @@ async def _account_delete_valid(
 
     acct_list = list(accounts.values())
 
-    # Find expendable accounts (not in protected ranges)
-    expendable = [
-        a for i, a in enumerate(acct_list)
-        if i not in _PROTECTED_INDICES
-    ]
+    # Skip setup-critical addresses
+    expendable = [a for a in acct_list if a.address not in protected_accounts]
     if not expendable:
         return
 
@@ -86,11 +72,13 @@ async def _account_delete_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "self_destination",
-        "fake_destination",
-        "delete_with_dest_tag",
-    ])
+    mutation = choice(
+        [
+            "self_destination",
+            "fake_destination",
+            "delete_with_dest_tag",
+        ]
+    )
 
     if mutation == "self_destination":
         # Can't delete to self

@@ -20,7 +20,6 @@ from workload.randoms import choice, randint, sample
 from workload.submit import submit_tx
 
 
-
 async def signer_list_set(
     accounts: dict[str, UserAccount],
     client: AsyncJsonRpcClient,
@@ -82,18 +81,19 @@ async def _signer_list_set_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "fake_signers",
-        "single_fake_signer",
-        "high_quorum_fake_signers",
-    ])
+    mutation = choice(
+        [
+            "fake_signers",
+            "single_fake_signer",
+            "high_quorum_fake_signers",
+        ]
+    )
 
     if mutation == "fake_signers":
         # Many non-existent signer accounts
         count = randint(2, 8)
         entries = [
-            SignerEntry(account=params.fake_account(), signer_weight=1)
-            for _ in range(count)
+            SignerEntry(account=params.fake_account(), signer_weight=1) for _ in range(count)
         ]
         txn = SignerListSet(
             account=src.address,
@@ -112,8 +112,7 @@ async def _signer_list_set_faulty(
         # Quorum equals total weight — hard to meet
         count = randint(3, 8)
         entries = [
-            SignerEntry(account=params.fake_account(), signer_weight=1)
-            for _ in range(count)
+            SignerEntry(account=params.fake_account(), signer_weight=1) for _ in range(count)
         ]
         txn = SignerListSet(
             account=src.address,

@@ -25,6 +25,7 @@ from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
 
 from workload.models import (
+    AMM,
     NFT,
     Check,
     Credential,
@@ -39,26 +40,27 @@ from workload.models import (
     TrustLine,
     Vault,
 )
+from workload.transactions.account_delete import account_delete
 from workload.transactions.account_set import account_set_random
+from workload.transactions.amm import (
+    amm_bid,
+    amm_create,
+    amm_delete,
+    amm_deposit,
+    amm_vote,
+    amm_withdraw,
+)
 from workload.transactions.batch import batch_random
+from workload.transactions.checks import check_cancel, check_cash, check_create
+from workload.transactions.clawback import clawback
 from workload.transactions.credentials import (
     credential_accept,
     credential_create,
     credential_delete,
 )
-from workload.transactions.account_delete import account_delete
-from workload.transactions.checks import check_cancel, check_cash, check_create
-from workload.transactions.clawback import clawback
 from workload.transactions.delegation import delegate_set
-from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
-from workload.transactions.payment_channels import (
-    channel_claim,
-    channel_create,
-    channel_fund,
-)
-from workload.transactions.set_regular_key import set_regular_key
-from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.domains import permissioned_domain_delete, permissioned_domain_set
+from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
 from workload.transactions.lending import (
     loan_broker_cover_deposit,
     loan_broker_cover_withdraw,
@@ -78,7 +80,15 @@ from workload.transactions.nft import (
     nftoken_mint,
     nftoken_modify,
 )
+from workload.transactions.offers import offer_cancel, offer_create
+from workload.transactions.payment_channels import (
+    channel_claim,
+    channel_create,
+    channel_fund,
+)
 from workload.transactions.payments import payment_random
+from workload.transactions.set_regular_key import set_regular_key
+from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.tickets import ticket_create, ticket_use
 from workload.transactions.trustlines import trustline_create
 from workload.transactions.vaults import (
@@ -359,13 +369,15 @@ def _on_channel_create(w: Workload, tx: dict, meta: dict) -> None:
         if ch.channel_id == tx_hash:
             ch.channel_id = channel_id
             return
-    w.payment_channels.append(PaymentChannel(
-        channel_id=channel_id,
-        source=tx.get("Account", ""),
-        destination=tx.get("Destination", ""),
-        amount=str(tx.get("Amount", "0")),
-        settle_delay=tx.get("SettleDelay", 0),
-    ))
+    w.payment_channels.append(
+        PaymentChannel(
+            channel_id=channel_id,
+            source=tx.get("Account", ""),
+            destination=tx.get("Destination", ""),
+            amount=str(tx.get("Amount", "0")),
+            settle_delay=tx.get("SettleDelay", 0),
+        )
+    )
 
 
 def _on_channel_fund(w: Workload, tx: dict, meta: dict) -> None:
@@ -377,9 +389,7 @@ def _on_channel_claim(w: Workload, tx: dict, meta: dict) -> None:
     # If the channel was closed by this claim, remove it
     deleted_id = _extract_deleted_id(meta, "PayChannel")
     if deleted_id:
-        w.payment_channels[:] = [
-            ch for ch in w.payment_channels if ch.channel_id != deleted_id
-        ]
+        w.payment_channels[:] = [ch for ch in w.payment_channels if ch.channel_id != deleted_id]
 
 
 def _on_check_create(w: Workload, tx: dict, meta: dict) -> None:
@@ -393,12 +403,14 @@ def _on_check_create(w: Workload, tx: dict, meta: dict) -> None:
             c.check_id = check_id
             return
     # If not found optimistically, add it
-    w.checks.append(Check(
-        check_id=check_id,
-        creator=tx.get("Account", ""),
-        destination=tx.get("Destination", ""),
-        send_max=str(tx.get("SendMax", "0")),
-    ))
+    w.checks.append(
+        Check(
+            check_id=check_id,
+            creator=tx.get("Account", ""),
+            destination=tx.get("Destination", ""),
+            send_max=str(tx.get("SendMax", "0")),
+        )
+    )
 
 
 def _on_check_cash(w: Workload, tx: dict, meta: dict) -> None:
@@ -426,15 +438,17 @@ def _on_escrow_create(w: Workload, tx: dict, meta: dict) -> None:
         if e.owner == owner and e.sequence == seq:
             return
     # If not found (edge case), add without fulfillment
-    w.escrows.append(Escrow(
-        owner=owner,
-        destination=tx.get("Destination", ""),
-        sequence=seq,
-        condition=tx.get("Condition"),
-        fulfillment=None,
-        finish_after=tx.get("FinishAfter"),
-        cancel_after=tx.get("CancelAfter"),
-    ))
+    w.escrows.append(
+        Escrow(
+            owner=owner,
+            destination=tx.get("Destination", ""),
+            sequence=seq,
+            condition=tx.get("Condition"),
+            fulfillment=None,
+            finish_after=tx.get("FinishAfter"),
+            cancel_after=tx.get("CancelAfter"),
+        )
+    )
 
 
 def _on_escrow_finish(w: Workload, tx: dict, meta: dict) -> None:
@@ -442,10 +456,7 @@ def _on_escrow_finish(w: Workload, tx: dict, meta: dict) -> None:
     if deleted_id:
         owner = tx.get("Owner", "")
         seq = tx.get("OfferSequence", 0)
-        w.escrows[:] = [
-            e for e in w.escrows
-            if not (e.owner == owner and e.sequence == seq)
-        ]
+        w.escrows[:] = [e for e in w.escrows if not (e.owner == owner and e.sequence == seq)]
 
 
 def _on_escrow_cancel(w: Workload, tx: dict, meta: dict) -> None:
@@ -453,10 +464,7 @@ def _on_escrow_cancel(w: Workload, tx: dict, meta: dict) -> None:
     if deleted_id:
         owner = tx.get("Owner", "")
         seq = tx.get("OfferSequence", 0)
-        w.escrows[:] = [
-            e for e in w.escrows
-            if not (e.owner == owner and e.sequence == seq)
-        ]
+        w.escrows[:] = [e for e in w.escrows if not (e.owner == owner and e.sequence == seq)]
 
 
 def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
@@ -476,10 +484,78 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
         return
     # Replace existing delegation from same source to same delegate
     w.delegates[:] = [
-        d for d in w.delegates
-        if not (d.source == source and d.delegate_address == delegate_addr)
+        d for d in w.delegates if not (d.source == source and d.delegate_address == delegate_addr)
     ]
-    w.delegates.append(Delegate(source=source, delegate_address=delegate_addr, permissions=permissions))
+    w.delegates.append(
+        Delegate(
+            source=source,
+            delegate_address=delegate_addr,
+            permissions=permissions,
+        )
+    )
+
+
+def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
+    amm_id = _extract_created_id(meta, "AMM")
+    if amm_id:
+        # Parse both assets from the AMMCreate transaction
+        asset1_raw = tx.get("Amount", {})
+        asset2_raw = tx.get("Amount2", {})
+        assets = []
+        for raw in [asset1_raw, asset2_raw]:
+            if isinstance(raw, dict) and "currency" in raw:
+                assets.append(
+                    IssuedCurrency(
+                        currency=raw["currency"],
+                        issuer=raw.get("issuer", ""),
+                    )
+                )
+            elif isinstance(raw, str):
+                assets.append(xrpl.models.XRP())
+        # Extract LP token from created AMM node
+        lp_token = []
+        for node in meta.get("AffectedNodes", []):
+            created = node.get("CreatedNode", {})
+            if created.get("LedgerEntryType") == "AMM":
+                lp_raw = created.get("NewFields", {}).get("LPTokenBalance", {})
+                if lp_raw and "currency" in lp_raw:
+                    lp_token.append(
+                        IssuedCurrency(currency=lp_raw["currency"], issuer=lp_raw.get("issuer", ""))
+                    )
+        w.amms.append(AMM(account=tx["Account"], assets=assets, lp_token=lp_token))
+
+
+def _on_amm_delete(w: Workload, tx: dict, meta: dict) -> None:
+    amm_id = _extract_deleted_id(meta, "AMM")
+    if amm_id:
+        # Match by asset pair — the deleter can be anyone, not just the creator.
+        tx_assets = {_parse_asset(tx.get("Asset", {})), _parse_asset(tx.get("Asset2", {}))}
+        w.amms[:] = [a for a in w.amms if set(a.assets) != tx_assets]
+
+
+def _on_offer_create(w: Workload, tx: dict, meta: dict) -> None:
+    offer_id = _extract_created_id(meta, "Offer")
+    if offer_id:
+        w.offers.append(
+            {
+                "account": tx.get("Account", ""),
+                "sequence": tx.get("Sequence", 0),
+                "offer_id": offer_id,
+            }
+        )
+
+
+def _on_offer_cancel(w: Workload, tx: dict, meta: dict) -> None:
+    """Remove an explicitly cancelled offer from state.
+
+    NOTE: offers also disappear via fill and expiry, which don't trigger
+    this handler. Stale entries will accumulate in w.offers — the cancel-valid
+    path may pick already-gone offers and get tecNO_OFFER. This is acceptable
+    for fuzzing purposes (exercises error paths).
+    """
+    deleted_id = _extract_deleted_id(meta, "Offer")
+    if deleted_id:
+        w.offers[:] = [o for o in w.offers if o.get("offer_id") != deleted_id]
 
 
 # ── Registry ─────────────────────────────────────────────────────────
@@ -683,6 +759,62 @@ REGISTRY = [
         _on_delegate_set,
     ),
     (
+        "AMMCreate",
+        "/amm/create/random",
+        amm_create,
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
+        _on_amm_create,
+    ),
+    (
+        "AMMDeposit",
+        "/amm/deposit/random",
+        amm_deposit,
+        lambda w: (w.accounts, w.amms, w.client),
+        None,
+    ),
+    (
+        "AMMWithdraw",
+        "/amm/withdraw/random",
+        amm_withdraw,
+        lambda w: (w.accounts, w.amms, w.client),
+        None,
+    ),
+    (
+        "AMMVote",
+        "/amm/vote/random",
+        amm_vote,
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
+        None,
+    ),
+    (
+        "AMMBid",
+        "/amm/bid/random",
+        amm_bid,
+        lambda w: (w.accounts, w.amms, w.client),
+        None,
+    ),
+    (
+        "AMMDelete",
+        "/amm/delete/random",
+        amm_delete,
+        lambda w: (w.accounts, w.amms, w.client),
+        _on_amm_delete,
+    ),
+    (
+        "OfferCreate",
+        "/offer/create/random",
+        offer_create,
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
+        _on_offer_create,
+    ),
+    (
+        "OfferCancel",
+        "/offer/cancel/random",
+        offer_cancel,
+        lambda w: (w.accounts, w.offers, w.client),
+        _on_offer_cancel,
+    ),
+    (
         "CheckCreate",
         "/check/create/random",
         check_create,
@@ -749,7 +881,7 @@ REGISTRY = [
         "AccountDelete",
         "/account_delete/random",
         account_delete,
-        lambda w: (w.accounts, w.client),
+        lambda w: (w.accounts, w.protected_accounts, w.client),
         _on_account_delete,
     ),
     (

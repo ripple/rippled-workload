@@ -1,7 +1,7 @@
 """Deterministic setup for the Antithesis first_* phase.
 
 Creates the minimum ledger state needed for all transaction types to operate,
-including IOU gateways with token distribution and MPT authorization.
+including IOU gateways with token distribution, MPT authorization, and AMM pools.
 
 Account allocation:
   [0..4]   — MPT issuers
@@ -12,6 +12,8 @@ Account allocation:
   [50..52] — Domain creators
   [60..61] — IOU gateways (DefaultRipple + AllowTrustLineClawback set)
   [62..71] — IOU/MPT holders (trust lines + balances for all currencies)
+  [62]     — also creates XRP/USD AMM
+  [63]     — also creates USD/EUR AMM
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import (
     AccountSet,
     AccountSetAsfFlag,
+    AMMCreate,
     CredentialCreate,
     LoanBrokerCoverDeposit,
     LoanBrokerSet,
@@ -69,6 +72,9 @@ _VAULT_ASSETS_MAXIMUM = "1000000000"
 _TICKET_COUNT = 5
 _IOU_DISTRIBUTION_AMOUNT = "10000"
 _MPT_DISTRIBUTION_AMOUNT = "10000"
+_AMM_XRP_AMOUNT = "100000000"  # 100 XRP in drops
+_AMM_IOU_AMOUNT = "5000"  # IOU tokens per side
+_AMM_TRADING_FEE = 500  # 0.5%
 _COVER_DEPOSIT = "10000000"  # 10 XRP
 _LOAN_PRINCIPAL = "1000000"  # 1 XRP
 _LOAN_INTEREST = 1000  # 1% annualized
@@ -253,6 +259,21 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     holder_indices = list(_HOLDER_RANGE) + list(_VAULT_RANGE)
 
+    # Record addresses used by setup so AccountDelete won't target them.
+    # Indices: gateways (60-61), MPT issuers (0-4), vault creators (10-16),
+    # NFT minters (20-24), credential issuer + subjects (30-35), ticket
+    # holders (40-42), domain creators (50-52), IOU/MPT holders (62-71).
+    _setup_indices: set[int] = (
+        set(range(5))
+        | set(range(10, 17))
+        | set(range(20, 25))
+        | set(range(30, 36))
+        | set(range(40, 43))
+        | set(range(50, 53))
+        | set(range(60, 72))
+    )
+    workload.protected_accounts.update(accs[i].address for i in _setup_indices if i < len(accs))
+
     # ── 1. Gateway setup: DefaultRipple + AllowTrustLineClawback ─────
     gw_txns = []
     for gw_idx, _ in _GATEWAYS:
@@ -332,17 +353,14 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     # ── 4. MPT issuances: 5 from accounts[0..4] ─────────────────────
     _mpt_flags = (
-        MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK
-        | MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
+        MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK | MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
     )
     summary["mpt_issuances"] = await _submit_batch(
         "mpt",
         [
             (
                 "MPTokenIssuanceCreate",
-                MPTokenIssuanceCreate(
-                    account=accs[i].address, flags=_mpt_flags
-                ),
+                MPTokenIssuanceCreate(account=accs[i].address, flags=_mpt_flags),
                 accs[i].wallet,
             )
             for i in range(min(5, len(accs)))
@@ -543,6 +561,57 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             )
         )
     summary["nft_offers"] = await _submit_batch("nft_offers", nft_offer_txns, client, seq)
+
+    # ── 8c. AMMs: seed pools so Deposit/Withdraw/Vote/Bid/Delete aren't no-ops
+    amm_txns = []
+    if len(accs) > 63:
+        gw0_idx, gw0_currencies = _GATEWAYS[0]  # (60, ["USD", "BTC"])
+        gw1_idx, gw1_currencies = _GATEWAYS[1]  # (61, ["EUR", "GBP"])
+        gw0_addr = accs[gw0_idx].address if gw0_idx < len(accs) else None
+        gw1_addr = accs[gw1_idx].address if gw1_idx < len(accs) else None
+
+        # AMM 1: XRP / USD — created by holder account[62]
+        if gw0_addr:
+            amm_txns.append(
+                (
+                    "AMMCreate",
+                    AMMCreate(
+                        account=accs[62].address,
+                        amount=_AMM_XRP_AMOUNT,
+                        amount2=IssuedCurrencyAmount(
+                            currency=gw0_currencies[0],
+                            issuer=gw0_addr,
+                            value=_AMM_IOU_AMOUNT,
+                        ),
+                        trading_fee=_AMM_TRADING_FEE,
+                    ),
+                    accs[62].wallet,
+                )
+            )
+
+        # AMM 2: USD / EUR — created by holder account[63]
+        if gw0_addr and gw1_addr:
+            amm_txns.append(
+                (
+                    "AMMCreate",
+                    AMMCreate(
+                        account=accs[63].address,
+                        amount=IssuedCurrencyAmount(
+                            currency=gw0_currencies[0],
+                            issuer=gw0_addr,
+                            value=_AMM_IOU_AMOUNT,
+                        ),
+                        amount2=IssuedCurrencyAmount(
+                            currency=gw1_currencies[0],
+                            issuer=gw1_addr,
+                            value=_AMM_IOU_AMOUNT,
+                        ),
+                        trading_fee=_AMM_TRADING_FEE,
+                    ),
+                    accs[63].wallet,
+                )
+            )
+    summary["amms"] = await _submit_batch("amms", amm_txns, client, seq)
 
     # ── 9. Credentials ───────────────────────────────────────────────
     if len(accs) > 35:

@@ -40,10 +40,12 @@ def parse_features_macro(macro_path: Path) -> list[str]:
     text = "\n".join(line for line in macro_path.read_text().splitlines() if not line.lstrip().startswith("//"))
     amendments = []
 
-    for m in re.finditer(r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text):
+    # rippled renamed Supported::yes/no to Supported::Yes/No in PR #6571
+    # (clang-tidy readability check). Match both cases.
+    for m in re.finditer(r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::[Yy]es\s*,", text):
         amendments.append(m.group(1))
 
-    for m in re.finditer(r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::yes\s*,", text):
+    for m in re.finditer(r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::[Yy]es\s*,", text):
         amendments.append("fix" + m.group(1))
 
     return sorted(amendments)

@@ -13,8 +13,6 @@ from xrpl.models.transactions.mptoken_issuance_set import MPTokenIssuanceSetFlag
 from workload import params
 from workload.models import MPTokenIssuance, UserAccount
 from workload.randoms import choice, random
-
-
 from workload.submit import submit_tx
 
 # ── Create ───────────────────────────────────────────────────────────

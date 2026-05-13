@@ -16,7 +16,6 @@ from workload.randoms import choice
 from workload.submit import submit_tx
 
 
-
 async def set_regular_key(
     accounts: dict[str, UserAccount],
     client: AsyncJsonRpcClient,
@@ -63,10 +62,12 @@ async def _set_regular_key_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "set_key_to_self",
-        "set_key_to_fake",
-    ])
+    mutation = choice(
+        [
+            "set_key_to_self",
+            "set_key_to_fake",
+        ]
+    )
 
     if mutation == "set_key_to_self":
         txn = SetRegularKey(

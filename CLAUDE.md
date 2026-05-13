@@ -77,6 +77,8 @@ Gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth →
 ### Structured transaction events
 `tx_submitted()` emits `workload::submitted : {TxType}` and `tx_result()` emits `workload::result : {TxType}` via Antithesis `send_event`. Both include `account`, `sequence`, `tx_type`, and relevant object IDs (`vault_id`, `loan_id`, `nftoken_id`, etc.). Results also include `created_id`/`created_type` and `deleted_id`/`deleted_type` from metadata for object lifecycle tracking.
 
+Inner batch transactions (top-level entries with `tfInnerBatchTxn` set, applied by rippled as side effects of an outer Batch) are tagged by `ws_listener.py` with a dedicated `workload::inner_batch_observed` event for grep-ability. Normal `tx_result()` processing still runs so state updaters can track inner-txn side effects (minted NFTs, created credentials, etc.).
+
 ### Logging policy
 No logger calls in setup.py or transaction handlers — structured `send_event` calls and assertions cover observability. `setup.py` emits `workload::setup_reject : {phase}` on non-success engine results and `workload::setup_error : {phase}` on exceptions. Only `ws_listener.py` retains warning/error logs for connection issues and state update failures. `sequence.py` has one debug log for tracker initialization.
 

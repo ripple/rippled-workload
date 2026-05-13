@@ -18,9 +18,6 @@ from workload.models import Check, UserAccount
 from workload.randoms import choice, randint
 from workload.submit import submit_tx
 
-
-
-
 # ── CheckCreate ─────────────────────────────────────────────────────
 
 
@@ -57,17 +54,21 @@ async def _check_create_valid(
 
     # Optimistically track — check_id comes from state updater,
     # but we store a placeholder so CheckCash/Cancel have entries.
-    if result:
+    # Skip when the tx won't apply, so the placeholder doesn't leak.
+    engine = result.get("engine_result", "") if result else ""
+    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
         tx_json = result.get("tx_json", result)
         # check_id = hash of the tx; the real one comes from meta
         check_id = tx_json.get("hash", "")
         if check_id:
-            checks.append(Check(
-                check_id=check_id,
-                creator=src.address,
-                destination=dst.address,
-                send_max=send_max,
-            ))
+            checks.append(
+                Check(
+                    check_id=check_id,
+                    creator=src.address,
+                    destination=dst.address,
+                    send_max=send_max,
+                )
+            )
 
 
 async def _check_create_faulty(
@@ -78,12 +79,14 @@ async def _check_create_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "zero_send_max",
-        "self_destination",
-        "non_existent_destination",
-        "past_expiration",
-    ])
+    mutation = choice(
+        [
+            "zero_send_max",
+            "self_destination",
+            "non_existent_destination",
+            "past_expiration",
+        ]
+    )
 
     if mutation == "zero_send_max":
         txn = CheckCreate(
@@ -171,11 +174,13 @@ async def _check_cash_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "fake_check_id",
-        "zero_amount",
-        "non_destination_cash",
-    ])
+    mutation = choice(
+        [
+            "fake_check_id",
+            "zero_amount",
+            "non_destination_cash",
+        ]
+    )
 
     if mutation == "fake_check_id":
         txn = CheckCash(
@@ -242,10 +247,12 @@ async def _check_cancel_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "fake_check_id",
-        "cancel_others_check",
-    ])
+    mutation = choice(
+        [
+            "fake_check_id",
+            "cancel_others_check",
+        ]
+    )
 
     if mutation == "fake_check_id":
         txn = CheckCancel(

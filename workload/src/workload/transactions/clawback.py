@@ -17,10 +17,8 @@ from xrpl.models.transactions import Clawback
 
 from workload import params
 from workload.models import MPTokenIssuance, TrustLine, UserAccount
-from workload.randoms import choice, randint
+from workload.randoms import choice
 from workload.submit import submit_tx
-
-
 
 
 async def clawback(
@@ -121,13 +119,15 @@ async def _clawback_faulty(
         return
     src = choice(list(accounts.values()))
 
-    mutation = choice([
-        "non_issuer_iou",
-        "zero_iou_amount",
-        "fake_holder_mpt",
-        "non_issuer_mpt",
-        "fake_mpt_issuance",
-    ])
+    mutation = choice(
+        [
+            "non_issuer_iou",
+            "zero_iou_amount",
+            "fake_holder_mpt",
+            "non_issuer_mpt",
+            "fake_mpt_issuance",
+        ]
+    )
 
     if mutation == "non_issuer_iou":
         # Non-gateway tries to claw back IOU
