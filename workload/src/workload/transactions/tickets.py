@@ -148,6 +148,16 @@ _TICKET_EXCLUDED: set[str] = {
     "EscrowCancel",
     "PaymentChannelFund",
     "PaymentChannelClaim",
+    # All AMM and Offer types need asset-pair / existing-object state
+    # that the (dst, common)-only builder signature can't reach.
+    "AMMCreate",
+    "AMMDeposit",
+    "AMMWithdraw",
+    "AMMVote",
+    "AMMBid",
+    "AMMDelete",
+    "OfferCreate",
+    "OfferCancel",
     # PaymentChannelCreate needs public_key from the wallet, which the
     # (dst, common)-only builder signature can't reach.
     "PaymentChannelCreate",
