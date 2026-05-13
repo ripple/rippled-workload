@@ -85,9 +85,7 @@ def register_assertions() -> None:
     _emit_catalog_entry(
         "workload::always : no_internal_rippled_error", "always", "Always", must_hit=True
     )
-    _emit_catalog_entry(
-        "workload::always : no_temDISABLED", "always", "Always", must_hit=True
-    )
+    _emit_catalog_entry("workload::always : no_temDISABLED", "always", "Always", must_hit=True)
     for setup_key in [
         "gateways",
         "trust_lines",

@@ -40,6 +40,7 @@ class Workload:
         self.delegates = []
         self.loan_brokers = []
         self.loans = []
+        self.offers: list[dict] = []
         self.deleted_vault_ids: list[str] = []
         self.deleted_broker_ids: list[str] = []
         self.deleted_loan_ids: list[str] = []
@@ -82,6 +83,7 @@ class Workload:
 
         # Wire delegation state so submit_tx can transparently delegate.
         from workload.submit import configure as configure_submit
+
         configure_submit(self.delegates, self.accounts)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
