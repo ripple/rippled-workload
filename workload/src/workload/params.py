@@ -391,7 +391,7 @@ def oracle_document_id() -> int:
 
 
 def oracle_provider() -> str:
-    """Random Provider string (up to 256 bytes)."""
+    """Random Provider string, hex-encoded (up to 256 hex chars)."""
     providers = [
         "chainlink",
         "band_protocol",
@@ -402,12 +402,14 @@ def oracle_provider() -> str:
         "redstone",
         "uma_protocol",
     ]
-    return choice(providers) + "_" + str(randint(0, 999))
+    raw = choice(providers) + "_" + str(randint(0, 999))
+    return raw.encode().hex().upper()
 
 
 def oracle_asset_class() -> str:
-    """Random AssetClass string (up to 16 bytes)."""
-    return choice(["currency", "commodity", "stock", "crypto"])
+    """Random AssetClass string, hex-encoded (up to 16 hex chars)."""
+    raw = choice(["currency", "commodity", "stock", "crypto"])
+    return raw.encode().hex().upper()
 
 
 def oracle_base_asset() -> str:
