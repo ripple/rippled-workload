@@ -45,6 +45,15 @@ _NO_FAILURE_TYPES = {
 #   (tecAMM_NOT_FOUND) or with outstanding LP tokens (tecAMM_NOT_EMPTY).
 _NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete"}
 
+# Metadata expectations for tx types that must create/modify/delete specific
+# ledger entry types on tesSUCCESS.  Each value is a tuple of allowed node
+# operations followed by the expected LedgerEntryType.  Checked inside
+# tx_result() with a single shared assertion ID.
+_META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
+    "DIDSet": ("Created", "Modified", "DID"),
+    "DIDDelete": ("Deleted", "DID"),
+}
+
 # XRPL fields → normalized event keys. Only object identifiers needed for tracking.
 _OBJECT_ID_FIELDS: dict[str, str] = {
     "Destination": "destination",
@@ -128,6 +137,9 @@ def register_assertions() -> None:
         "workload::always : no_internal_rippled_error_submit", "always", "Always", must_hit=True
     )
     _emit_catalog_entry("workload::always : no_temDISABLED", "always", "Always", must_hit=True)
+    _emit_catalog_entry(
+        "workload::always : meta_matches_tx_type", "always", "Always", must_hit=True
+    )
     for setup_key in [
         "gateways",
         "trust_lines",
@@ -340,3 +352,31 @@ def tx_result(name: str, result: dict) -> None:
         display_type="Sometimes",
         assert_id=_failure_id(name),
     )
+    # Meta-invariant: on tesSUCCESS, verify expected ledger entry operations.
+    exp = _META_EXPECTATIONS.get(name)
+    if exp and engine_result == "tesSUCCESS":
+        *ops, entry_type = exp
+        has_match = any(
+            node.get(f"{op}Node", {}).get("LedgerEntryType") == entry_type
+            for node in meta.get("AffectedNodes", [])
+            for op in ops
+        )
+        assert_raw(
+            condition=has_match,
+            message="workload::always : meta_matches_tx_type",
+            details={
+                "tx_type": name,
+                "expected": list(exp),
+                "hash": details.get("hash", ""),
+            },
+            loc_filename=_LOC_FILE,
+            loc_function="tx_result",
+            loc_class=_LOC_CLASS,
+            loc_begin_line=0,
+            loc_begin_column=_LOC_COL,
+            hit=True,
+            must_hit=True,
+            assert_type="always",
+            display_type="Always",
+            assert_id="workload::always : meta_matches_tx_type",
+        )

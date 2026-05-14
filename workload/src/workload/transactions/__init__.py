@@ -26,6 +26,7 @@ from xrpl.models.currencies import MPTCurrency
 
 from workload.models import (
     AMM,
+    DID,
     NFT,
     Check,
     Credential,
@@ -59,6 +60,7 @@ from workload.transactions.credentials import (
     credential_delete,
 )
 from workload.transactions.delegation import delegate_set
+from workload.transactions.did import did_delete, did_set
 from workload.transactions.domains import permissioned_domain_delete, permissioned_domain_set
 from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
 from workload.transactions.lending import (
@@ -465,6 +467,21 @@ def _on_escrow_cancel(w: Workload, tx: dict, meta: dict) -> None:
         owner = tx.get("Owner", "")
         seq = tx.get("OfferSequence", 0)
         w.escrows[:] = [e for e in w.escrows if not (e.owner == owner and e.sequence == seq)]
+
+
+def _on_did_set(w: Workload, tx: dict, meta: dict) -> None:
+    """Track DID in w.dids (idempotent)."""
+    account = tx.get("Account", "")
+    if not account:
+        return
+    if not any(d.account == account for d in w.dids):
+        w.dids.append(DID(account=account))
+
+
+def _on_did_delete(w: Workload, tx: dict, meta: dict) -> None:
+    """Remove DID from w.dids."""
+    account = tx.get("Account", "")
+    w.dids[:] = [d for d in w.dids if d.account != account]
 
 
 def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
@@ -904,6 +921,20 @@ REGISTRY = [
         escrow_cancel,
         lambda w: (w.accounts, w.escrows, w.client),
         _on_escrow_cancel,
+    ),
+    (
+        "DIDSet",
+        "/did/set/random",
+        did_set,
+        lambda w: (w.accounts, w.client),
+        _on_did_set,
+    ),
+    (
+        "DIDDelete",
+        "/did/delete/random",
+        did_delete,
+        lambda w: (w.accounts, w.dids, w.client),
+        _on_did_delete,
     ),
     (
         "LoanBrokerSet",
