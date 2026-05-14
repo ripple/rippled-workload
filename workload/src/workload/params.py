@@ -380,3 +380,65 @@ def did_hex_field() -> str:
         n = randint(101, 128)  # near the 256-hex-char / 128-byte limit
     # n is number of BYTES; each byte = 2 hex chars → always even length
     return "".join(choice(_HEX_CHARS) for _ in range(n * 2))
+
+
+# ── Price Oracle (XLS-47) ─────────────────────────────────────────────
+
+
+def oracle_document_id() -> int:
+    """Random OracleDocumentID (uint32)."""
+    return randint(0, 2**32 - 1)
+
+
+def oracle_provider() -> str:
+    """Random Provider string (up to 256 bytes)."""
+    providers = [
+        "chainlink",
+        "band_protocol",
+        "pyth_network",
+        "switchboard",
+        "dia_data",
+        "api3",
+        "redstone",
+        "uma_protocol",
+    ]
+    return choice(providers) + "_" + str(randint(0, 999))
+
+
+def oracle_asset_class() -> str:
+    """Random AssetClass string (up to 16 bytes)."""
+    return choice(["currency", "commodity", "stock", "crypto"])
+
+
+def oracle_base_asset() -> str:
+    """Random base asset for a PriceData entry."""
+    return choice(["XRP", "USD", "EUR", "BTC", "ETH", "JPY", "GBP"])
+
+
+def oracle_quote_asset() -> str:
+    """Random quote asset for a PriceData entry."""
+    return choice(["USD", "EUR", "XRP", "BTC", "ETH", "JPY", "GBP"])
+
+
+def oracle_asset_price() -> int:
+    """Random AssetPrice (uint64 but keep reasonable)."""
+    return randint(1, 10_000_000)
+
+
+def oracle_scale() -> int:
+    """Random Scale (0-10)."""
+    return randint(0, 10)
+
+
+def oracle_price_data_count() -> int:
+    """Number of PriceData entries (1-5, spec allows up to 10)."""
+    return randint(1, 5)
+
+
+def oracle_last_update_time() -> int:
+    """Seconds since XRPL epoch (Jan 1 2000). Use current-ish time."""
+    import time
+
+    # XRPL epoch offset from Unix epoch
+    xrpl_epoch = 946684800
+    return int(time.time()) - xrpl_epoch

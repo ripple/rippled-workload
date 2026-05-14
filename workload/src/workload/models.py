@@ -173,3 +173,13 @@ class PaymentChannel:
     destination: str
     amount: str  # total XRP drops allocated
     settle_delay: int
+
+
+@dataclass
+class Oracle:
+    """An active price oracle on the ledger (XLS-47)."""
+
+    account: str
+    document_id: int
+    provider: str
+    asset_class: str

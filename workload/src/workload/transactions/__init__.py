@@ -36,6 +36,7 @@ from workload.models import (
     LoanBroker,
     MPTokenIssuance,
     NFTOffer,
+    Oracle,
     PaymentChannel,
     PermissionedDomain,
     TrustLine,
@@ -83,6 +84,7 @@ from workload.transactions.nft import (
     nftoken_modify,
 )
 from workload.transactions.offers import offer_cancel, offer_create
+from workload.transactions.oracle import oracle_delete, oracle_set
 from workload.transactions.payment_channels import (
     channel_claim,
     channel_create,
@@ -482,6 +484,39 @@ def _on_did_delete(w: Workload, tx: dict, meta: dict) -> None:
     """Remove DID from w.dids."""
     account = tx.get("Account", "")
     w.dids[:] = [d for d in w.dids if d.account != account]
+
+
+def _on_oracle_set(w: Workload, tx: dict, meta: dict) -> None:
+    account = tx.get("Account", "")
+    doc_id = tx.get("OracleDocumentID")
+    provider = tx.get("Provider", "")
+    asset_class = tx.get("AssetClass", "")
+    if doc_id is None:
+        return
+    # Idempotent: update if exists, else create
+    for o in w.oracles:
+        if o.account == account and o.document_id == doc_id:
+            if provider:
+                o.provider = provider
+            if asset_class:
+                o.asset_class = asset_class
+            return
+    w.oracles.append(
+        Oracle(
+            account=account,
+            document_id=doc_id,
+            provider=provider,
+            asset_class=asset_class,
+        )
+    )
+
+
+def _on_oracle_delete(w: Workload, tx: dict, meta: dict) -> None:
+    account = tx.get("Account", "")
+    doc_id = tx.get("OracleDocumentID")
+    if doc_id is None:
+        return
+    w.oracles[:] = [o for o in w.oracles if not (o.account == account and o.document_id == doc_id)]
 
 
 def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
@@ -935,6 +970,20 @@ REGISTRY = [
         did_delete,
         lambda w: (w.accounts, w.dids, w.client),
         _on_did_delete,
+    ),
+    (
+        "OracleSet",
+        "/oracle/set/random",
+        oracle_set,
+        lambda w: (w.accounts, w.oracles, w.client),
+        _on_oracle_set,
+    ),
+    (
+        "OracleDelete",
+        "/oracle/delete/random",
+        oracle_delete,
+        lambda w: (w.accounts, w.oracles, w.client),
+        _on_oracle_delete,
     ),
     (
         "LoanBrokerSet",

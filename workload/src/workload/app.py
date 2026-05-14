@@ -40,6 +40,7 @@ class Workload:
         self.mpt_issuances = []
         self.delegates = []
         self.dids = []
+        self.oracles = []
         self.loan_brokers = []
         self.loans = []
         self.escrows = []

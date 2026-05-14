@@ -42,6 +42,8 @@ try:
         '/delegate/set/random',
         '/did/set/random',
         '/did/delete/random',
+        '/oracle/set/random',
+        '/oracle/delete/random',
         '/nft/modify/random',
         '/mpt/create/random',
         '/mpt/authorize/random',
