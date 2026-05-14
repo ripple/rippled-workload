@@ -52,6 +52,8 @@ _NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete"}
 _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "DIDSet": ("Created", "Modified", "DID"),
     "DIDDelete": ("Deleted", "DID"),
+    "OracleSet": ("Created", "Modified", "Oracle"),
+    "OracleDelete": ("Deleted", "Oracle"),
 }
 
 # XRPL fields → normalized event keys. Only object identifiers needed for tracking.
@@ -65,6 +67,7 @@ _OBJECT_ID_FIELDS: dict[str, str] = {
     "Subject": "subject",
     "Issuer": "issuer",
     "CredentialType": "credential_type",
+    "OracleDocumentID": "oracle_document_id",
 }
 
 
