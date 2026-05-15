@@ -98,6 +98,8 @@ if __name__ == "__main__":
 
     # Tallys for state between passes
     last_index_per_validator = {}  # validator: (index, last_update)
+    ever_stalled = {v: False for v in servers}
+    ever_skewed = {v: False for v in servers}
     update_num = 0
 
     for v in servers:
@@ -147,12 +149,18 @@ if __name__ == "__main__":
                 if old_state[0] != details["index"]:
                     # Index changed
                     last_index_per_validator[v] = (details["index"], update_num)
+                    if ever_stalled[v]:
+                        assertions.reachable(
+                            "sidecar::validator_recovered_after_stall",
+                            {"validator": v, "index": details["index"]},
+                        )
 
                 else:  # Possibly stalled
                     # Check intervals elapsed and deep enough to alert
                     last_idx, last_upd = old_state
                     stalled = (last_upd + ALLOWED_MISSED_INTERVALS) < update_num
                     if stalled and last_idx >= MIN_INDEX_FOR_ALERT:
+                        ever_stalled[v] = True
                         missed = update_num - old_state[1]
                         print(
                             f"STALLED VALIDATOR: {v} "
@@ -196,7 +204,12 @@ if __name__ == "__main__":
                 skew = abs(ct_unix - now_unix)
                 evt = {"validator": v, "close_time": ct, "skew_secs": skew}
                 if skew > MAX_TIME_SKEW_SECS:
+                    ever_skewed[v] = True
                     lifecycle.send_event("validator_time_skew", evt)
+                elif ever_skewed[v]:
+                    assertions.reachable(
+                        "sidecar::close_time_recovered_after_stall", evt
+                    )
                 assertions.always(
                     skew <= MAX_TIME_SKEW_SECS,
                     "Validator close_time tracks wall clock",
