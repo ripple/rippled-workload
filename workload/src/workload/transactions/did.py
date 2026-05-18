@@ -49,13 +49,11 @@ async def _did_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcC
 async def _did_set_faulty(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
     if not accounts:
         return
-    mutation = choice(
-        [
-            "non_owner_submission",
-            "invalid_flags",
-            "single_empty_field",
-        ]
-    )
+    mutation = choice([
+        "non_owner_submission",
+        "invalid_flags",
+        "single_empty_field",
+    ])
     if mutation == "non_owner_submission":
         accounts_list = list(accounts.values())
         if len(accounts_list) < 2:
@@ -103,13 +101,11 @@ async def _did_delete_faulty(
 ) -> None:
     if not accounts:
         return
-    mutation = choice(
-        [
-            "delete_no_did",
-            "non_owner_submission",
-            "invalid_flags",
-        ]
-    )
+    mutation = choice([
+        "delete_no_did",
+        "non_owner_submission",
+        "invalid_flags",
+    ])
     accounts_list = list(accounts.values())
     if mutation == "delete_no_did":
         did_owners = {d.account for d in dids}
