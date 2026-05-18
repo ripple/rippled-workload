@@ -11,8 +11,15 @@ sidecar_service_template = "sidecar_service.yml.mako"
 container_config_path = "/opt/xrpld/etc"
 
 GENESIS_LEDGER_PATH = f"{container_config_path}/genesis_ledger.json"
-VALIDATOR_COMMAND = f'["/opt/xrpld/bin/xrpld", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
-PEER_COMMAND = f'["/opt/xrpld/bin/xrpld", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
+# Pass --conf explicitly: rippled PR #6639 changed the default system config
+# search path from /etc/opt/<name> to /etc/<name>, breaking the Dockerfile's
+# /etc/opt/xrpld -> /opt/xrpld/etc symlink. The bind-mounted config still
+# lives at container_config_path/xrpld.cfg, so point xrpld there directly.
+XRPLD_CONFIG_PATH = f"{container_config_path}/xrpld.cfg"
+VALIDATOR_COMMAND = (
+    f'["/opt/xrpld/bin/xrpld", "--conf", "{XRPLD_CONFIG_PATH}", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
+)
+PEER_COMMAND = f'["/opt/xrpld/bin/xrpld", "--conf", "{XRPLD_CONFIG_PATH}", "--ledgerfile", "{GENESIS_LEDGER_PATH}"]'
 
 
 def render_peer(idx, data):
