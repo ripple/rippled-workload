@@ -41,33 +41,69 @@ Config image mounts:
 - `ripple/rippled-antithesis` — CI workflow (main branch)
 - `ripple/rippled-workload` — workload code (main branch)
 
-## Analyzing events logs
+## Getting the data (REST API)
 
-Events logs must be provided by the user (downloaded from Antithesis triage reports). Ask the user for the file path. Key patterns:
+Prefer fetching from the Antithesis read API over a manual download. Either a **run selector** or a
+**local file/dir** is a valid input:
 
 ```bash
-# Setup failures
-grep "Setup.*failed\|Setup.*retry" events.log
-
-# Engine results breakdown
-grep "workload::result" events.log | python3 -c "
-import sys,json,collections
-counts = collections.Counter()
-for line in sys.stdin:
-    try:
-        d = json.loads(line.split(' - ',1)[1])
-        er = d.get('engine_result','')
-        counts[er] += 1
-    except: pass
-for k,v in counts.most_common(): print(f'{v:6d} {k}')
-"
-
-# Endpoint exceptions (should be zero)
-grep "endpoint_exception" events.log
-
-# WS listener errors
-grep "WS:.*failed\|WS.*disconnected" events.log
+# Resolve + save run.json, properties.json, failing.txt, events.ndjson under ~/Downloads/antithesis/<run_id>/
+python3 scripts/antithesis_fetch.py fetch <selector>
+#   selector: latest | latest-failing | gh=<github_run_id> | match=<substr> | <run_id>
+python3 scripts/antithesis_fetch.py properties <selector> --failing   # quick assertion triage
 ```
+
+Auth: `$ANTITHESIS_API_KEY` or `~/antithesis.key` (`pass:` line); tenant `$ANTITHESIS_TENANT`
+(default `ripple`). Endpoints: `GET /api/v0/runs`, `/runs/{id}`, `/runs/{id}/properties`,
+`/runs/{id}/logs?input_hash=&vtime=` (the full event stream; `/events` is only a capped stdout
+text-search). The script is in the rippled-workload repo at `scripts/antithesis_fetch.py`.
+
+`properties.json` is the authoritative assertion view. **Separate real failures from coverage gaps:**
+a genuinely failing invariant is `always`/`AlwaysOrUnreachable` with `condition:false` (e.g. a
+rippled `src/.../*.cpp` or sidecar assertion). Names like `workload::failure|success|seen : <Tx>` and
+`fuzzer::seen|faulted : <msg>` show "Failing" merely because that `sometimes`/`reachable` path was
+never exercised — that's a coverage gap (too-conservative `_valid`, missing `_faulty`, or unreached
+setup), not a server bug.
+
+## Analyzing events.ndjson
+
+`events.ndjson` is pure NDJSON (one JSON object per line, **no log prefix**). SDK event names are
+top-level keys (`"workload::result : Payment"`, `"val_health"`, `"fault"`, …). Parse with
+`json.loads(line)` directly:
+
+```bash
+# Engine-result breakdown
+python3 -c "
+import json,collections,sys
+er=collections.Counter()
+for line in open(sys.argv[1]):
+    try: d=json.loads(line)
+    except: continue
+    for k,v in d.items():
+        if k.startswith('workload::result') and isinstance(v,dict) and v.get('engine_result'):
+            er[v['engine_result']]+=1
+for k,v in er.most_common(): print(f'{v:6d} {k}')
+" events.ndjson
+
+# Fault-injection breakdown (which faults ran)
+python3 -c "
+import json,collections,sys
+f=collections.Counter()
+for line in open(sys.argv[1]):
+    try: d=json.loads(line)
+    except: continue
+    if 'fault' in d:
+        x=d['fault']; f[x.get('type') if isinstance(x,dict) else x]+=1
+print(dict(f.most_common()))
+" events.ndjson
+
+# Endpoint exceptions (should be zero) / setup
+grep -c 'workload::endpoint_exception' events.ndjson
+grep 'workload::setup_reject\|workload::setup_error' events.ndjson
+```
+
+Legacy fallback: an old downloaded `events(N).log` has a ` - {json}` prefix and event-name-as-text —
+parse those lines with `json.loads(line.split(' - ',1)[1])`.
 
 ## Triage report patterns
 
