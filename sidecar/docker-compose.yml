@@ -3,7 +3,7 @@ services:
     image: $SIDECAR_IMAGE
     container_name: sidecar
     hostname: sidecar
-    entrypoint: ["python", "/app/sidecar.py", "-t", "3", "-v", "val0", "val1", "val2", "val3", "val4"]
+    entrypoint: ["python", "/app/sidecar.py", "-t", "3", "--max-stall", "20", "-v", "val0", "val1", "val2", "val3", "val4"]
     environment:
       - PYTHONUNBUFFERED=1
     depends_on:

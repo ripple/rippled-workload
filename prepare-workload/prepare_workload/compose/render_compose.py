@@ -113,7 +113,7 @@ def render_compose_data(node_config, settings):
         "service_name": "sidecar",
         "container_name": "sidecar",
         "hostname": "sidecar",
-        "entrypoint": '["python", "/app/sidecar.py", "-t", "3", "-v", '
+        "entrypoint": '["python", "/app/sidecar.py", "-t", "3", "--max-stall", "20", "-v", '
         + ", ".join(f'"{n}"' for n in validator_names)
         + "]",
         "network_name": settings.compose_config.network_name,
