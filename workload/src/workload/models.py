@@ -47,6 +47,10 @@ class UserAccount(Account):
     balances: dict = field(default_factory=dict)
     _tickets: set = field(default_factory=set)
     _nfts: set = field(default_factory=set)
+    # ElGamal keypair for Confidential MPT (XLS-0096).
+    # Set during confidential setup phase; None if not yet generated.
+    elgamal_private_key: str | None = None
+    elgamal_public_key: str | None = None
 
     @property
     def nfts(self) -> set:
@@ -114,6 +118,31 @@ class PermissionedDomain:
 class MPTokenIssuance:
     issuer: str
     mpt_issuance_id: str
+
+
+@dataclass
+class ConfidentialMPTIssuance:
+    """An MPT issuance with privacy enabled — tracks confidential state.
+
+    ``holders`` maps address → ConfidentialHolder for balance tracking.
+    ``issuer_privkey`` / ``issuer_pubkey`` are the issuer's ElGamal keys.
+    """
+
+    issuer: str
+    mpt_issuance_id: str
+    issuer_privkey: str
+    issuer_pubkey: str
+    holders: dict[str, ConfidentialHolder] = field(default_factory=dict)
+
+
+@dataclass
+class ConfidentialHolder:
+    """Per-holder confidential balance tracking for one MPT issuance."""
+
+    address: str
+    spending_balance: int = 0  # plaintext (known from our own operations)
+    inbox_balance: int = 0  # plaintext (pending merge)
+    version: int = 0  # confidential version counter (increments on state changes)
 
 
 @dataclass

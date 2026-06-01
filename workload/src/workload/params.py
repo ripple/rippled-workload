@@ -380,3 +380,169 @@ def did_hex_field() -> str:
         n = randint(101, 128)  # near the 256-hex-char / 128-byte limit
     # n is number of BYTES; each byte = 2 hex chars → always even length
     return "".join(choice(_HEX_CHARS) for _ in range(n * 2))
+
+
+# ── Price Oracle (XLS-47) ─────────────────────────────────────────────
+
+
+def oracle_document_id() -> int:
+    """Random OracleDocumentID (uint32)."""
+    return randint(0, 2**32 - 1)
+
+
+def oracle_provider() -> str:
+    """Random Provider string, hex-encoded (up to 256 hex chars)."""
+    providers = [
+        "chainlink",
+        "band_protocol",
+        "pyth_network",
+        "switchboard",
+        "dia_data",
+        "api3",
+        "redstone",
+        "uma_protocol",
+    ]
+    raw = choice(providers) + "_" + str(randint(0, 999))
+    return raw.encode().hex().upper()
+
+
+def oracle_asset_class() -> str:
+    """Random AssetClass string, hex-encoded (up to 16 hex chars)."""
+    raw = choice(["currency", "commodity", "stock", "crypto"])
+    return raw.encode().hex().upper()
+
+
+def oracle_base_asset() -> str:
+    """Random base asset for a PriceData entry."""
+    return choice(["XRP", "USD", "EUR", "BTC", "ETH", "JPY", "GBP"])
+
+
+def oracle_quote_asset() -> str:
+    """Random quote asset for a PriceData entry."""
+    return choice(["USD", "EUR", "XRP", "BTC", "ETH", "JPY", "GBP"])
+
+
+def oracle_asset_price() -> int:
+    """Random AssetPrice (uint64 but keep reasonable)."""
+    return randint(1, 10_000_000)
+
+
+def oracle_scale() -> int:
+    """Random Scale (0-10)."""
+    return randint(0, 10)
+
+
+def oracle_price_data_count() -> int:
+    """Number of PriceData entries (1-5, spec allows up to 10)."""
+    return randint(1, 5)
+
+
+def oracle_last_update_time() -> int:
+    """Seconds since XRPL epoch (Jan 1 2000). Use current-ish time."""
+    import time
+
+    # XRPL epoch offset from Unix epoch
+    xrpl_epoch = 946684800
+    return int(time.time()) - xrpl_epoch
+
+
+# ── Confidential MPT (XLS-0096) ─────────────────────────────────────
+
+# Length constants (hex characters)
+_CIPHERTEXT_HEX_LEN = 132  # 66 bytes — ElGamal ciphertext
+_COMMITMENT_HEX_LEN = 66  # 33 bytes — Pedersen commitment
+_BLINDING_FACTOR_HEX_LEN = 64  # 32 bytes
+_SCHNORR_PROOF_HEX_LEN = 128  # 64 bytes — Convert / Clawback proof
+_SEND_PROOF_HEX_LEN = 1892  # 946 bytes — Send proof
+_CONVERT_BACK_PROOF_HEX_LEN = 1632  # 816 bytes — ConvertBack proof
+_ENCRYPTION_KEY_HEX_LEN = 66  # 33 bytes — holder ElGamal public key
+
+
+def _garbage_hex(hex_len: int) -> str:
+    """Generate random hex string of exact length."""
+    return bytes(randint(0, 255) for _ in range(hex_len // 2)).hex().upper()
+
+
+def confidential_ciphertext() -> str:
+    """Random 132-hex-char ElGamal ciphertext (correct length, garbage bytes)."""
+    return _garbage_hex(_CIPHERTEXT_HEX_LEN)
+
+
+def confidential_commitment() -> str:
+    """Random 66-hex-char Pedersen commitment (correct length, garbage bytes)."""
+    return _garbage_hex(_COMMITMENT_HEX_LEN)
+
+
+def confidential_blinding_factor() -> str:
+    """Random 64-hex-char blinding factor (correct length, garbage bytes)."""
+    return _garbage_hex(_BLINDING_FACTOR_HEX_LEN)
+
+
+def confidential_schnorr_proof() -> str:
+    """Random 128-hex-char Schnorr proof for Convert/Clawback (correct length, garbage)."""
+    return _garbage_hex(_SCHNORR_PROOF_HEX_LEN)
+
+
+def confidential_send_proof() -> str:
+    """Random 1892-hex-char proof for ConfidentialMPTSend (correct length, garbage)."""
+    return _garbage_hex(_SEND_PROOF_HEX_LEN)
+
+
+def confidential_convert_back_proof() -> str:
+    """Random 1632-hex-char proof for ConfidentialMPTConvertBack (correct length, garbage)."""
+    return _garbage_hex(_CONVERT_BACK_PROOF_HEX_LEN)
+
+
+def confidential_encryption_key() -> str:
+    """Random 66-hex-char ElGamal public key (correct length, garbage)."""
+    return _garbage_hex(_ENCRYPTION_KEY_HEX_LEN)
+
+
+def confidential_hex(hex_len: int) -> str:
+    """Random hex string of exact length — public wrapper for arbitrary sizes."""
+    return _garbage_hex(hex_len)
+
+
+def confidential_wrong_length_hex(correct_len: int) -> str:
+    """Generate hex string with WRONG length (shorter or longer than correct_len)."""
+    if random() < 0.5:
+        bad_len = max(2, correct_len - randint(2, 20))
+    else:
+        bad_len = correct_len + randint(2, 20)
+    # Ensure even length for valid hex
+    bad_len = bad_len if bad_len % 2 == 0 else bad_len + 1
+    return _garbage_hex(bad_len)
+
+
+def confidential_mpt_amount() -> int:
+    """Random plaintext MPT amount for confidential transactions."""
+    return randint(1, 10_000)
+
+
+def confidential_zero_hex(hex_len: int) -> str:
+    """Correct-length hex string of all zeros — degenerate case for crypto verifiers."""
+    return "0" * hex_len
+
+
+def confidential_negative_amount() -> int:
+    """Negative MPT amount — tests integer underflow handling."""
+    return -randint(1, 10_000)
+
+
+def confidential_overflow_amount() -> int:
+    """Amount > 2^63 — tests integer overflow in OutstandingAmount."""
+    return 2**63 + randint(1, 1_000_000)
+
+
+def confidential_invalid_flags() -> int:
+    """Undefined flag bits — tests flag validation in rippled."""
+    return choice([0x80000000, 0xFF000000, 0x40000000, randint(1, 0xFFFFFFFF)])
+
+
+def confidential_not_on_curve_point() -> str:
+    """33-byte blob that looks like a compressed EC point but is invalid.
+
+    Prefix 02/03 followed by 32 random bytes — statistically not on secp256k1.
+    """
+    prefix = choice(["02", "03"])
+    return prefix + _garbage_hex(64)

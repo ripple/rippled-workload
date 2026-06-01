@@ -11,10 +11,17 @@ so we pre-register all known transaction types via register_assertions().
 
 from antithesis.assertions import assert_raw
 from antithesis.lifecycle import send_event
+from xrpl.models import TransactionFlag
 
 _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
 _LOC_COL = 0
+
+# Inner batch transactions (XLS-56d) have metadata consolidated in the outer
+# Batch's meta — their own AffectedNodes may be empty or incomplete.  We skip
+# _META_EXPECTATIONS for these to avoid false-positive assertion failures.
+# This constant mirrors _TF_INNER_BATCH_TXN in ws_listener.py.
+_TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 
 # Engine results that indicate a rippled internal error (exception caught,
 # invariant violated, etc.). Surfaced from BOTH the immediate /submit response
@@ -52,6 +59,13 @@ _NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete"}
 _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "DIDSet": ("Created", "Modified", "DID"),
     "DIDDelete": ("Deleted", "DID"),
+    # Confidential MPT — all operations touch MPToken ledger entries.
+    # Convert may Create (first time) or Modify (subsequent); the rest always Modify.
+    "ConfidentialMPTConvert": ("Created", "Modified", "MPToken"),
+    "ConfidentialMPTMergeInbox": ("Modified", "MPToken"),
+    "ConfidentialMPTSend": ("Modified", "MPToken"),
+    "ConfidentialMPTConvertBack": ("Modified", "MPToken"),
+    "ConfidentialMPTClawback": ("Modified", "MPToken"),
 }
 
 # XRPL fields → normalized event keys. Only object identifiers needed for tracking.
@@ -139,6 +153,9 @@ def register_assertions() -> None:
     _emit_catalog_entry("workload::always : no_temDISABLED", "always", "Always", must_hit=True)
     _emit_catalog_entry(
         "workload::always : meta_matches_tx_type", "always", "Always", must_hit=True
+    )
+    _emit_catalog_entry(
+        "workload::always : conf_mpt_version_monotonic", "always", "Always", must_hit=True
     )
     for setup_key in [
         "gateways",
@@ -353,8 +370,11 @@ def tx_result(name: str, result: dict) -> None:
         assert_id=_failure_id(name),
     )
     # Meta-invariant: on tesSUCCESS, verify expected ledger entry operations.
+    # Skip for inner batch transactions — their metadata lives in the outer
+    # Batch, so AffectedNodes here may be empty (see _TF_INNER_BATCH_TXN).
+    is_inner_batch = bool(tx_json.get("Flags", 0) & _TF_INNER_BATCH_TXN)
     exp = _META_EXPECTATIONS.get(name)
-    if exp and engine_result == "tesSUCCESS":
+    if exp and engine_result == "tesSUCCESS" and not is_inner_batch:
         *ops, entry_type = exp
         has_match = any(
             node.get(f"{op}Node", {}).get("LedgerEntryType") == entry_type
@@ -380,3 +400,37 @@ def tx_result(name: str, result: dict) -> None:
             display_type="Always",
             assert_id="workload::always : meta_matches_tx_type",
         )
+
+    # ── Confidential MPT state machine invariants ────────────────────
+    # Version monotonicity: ConfidentialBalanceVersion must strictly
+    # increase on every successful confidential operation.  A stale or
+    # decreasing version signals a concurrency/TOCTOU bug in rippled.
+    if name.startswith("ConfidentialMPT") and engine_result == "tesSUCCESS" and not is_inner_batch:
+        for node in meta.get("AffectedNodes", []):
+            mod = node.get("ModifiedNode", {})
+            if mod.get("LedgerEntryType") != "MPToken":
+                continue
+            final_ver = mod.get("FinalFields", {}).get("ConfidentialBalanceVersion")
+            prev_ver = mod.get("PreviousFields", {}).get("ConfidentialBalanceVersion")
+            if final_ver is not None and prev_ver is not None:
+                assert_raw(
+                    condition=final_ver > prev_ver,
+                    message="workload::always : conf_mpt_version_monotonic",
+                    details={
+                        "tx_type": name,
+                        "account": mod.get("FinalFields", {}).get("Account", ""),
+                        "prev_version": prev_ver,
+                        "final_version": final_ver,
+                        "hash": details.get("hash", ""),
+                    },
+                    loc_filename=_LOC_FILE,
+                    loc_function="tx_result",
+                    loc_class=_LOC_CLASS,
+                    loc_begin_line=0,
+                    loc_begin_column=_LOC_COL,
+                    hit=True,
+                    must_hit=True,
+                    assert_type="always",
+                    display_type="Always",
+                    assert_id="workload::always : conf_mpt_version_monotonic",
+                )

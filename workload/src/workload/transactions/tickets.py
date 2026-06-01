@@ -168,6 +168,12 @@ _TICKET_EXCLUDED: set[str] = {
     "AccountDelete",
     # objects — needs an existing DID on the account
     "DIDDelete",
+    # confidential MPT — raw submission bypasses xrpl-py ticket wiring
+    "ConfidentialMPTMergeInbox",
+    "ConfidentialMPTConvert",
+    "ConfidentialMPTSend",
+    "ConfidentialMPTConvertBack",
+    "ConfidentialMPTClawback",
 }
 
 

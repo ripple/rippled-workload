@@ -25,6 +25,7 @@ workload = "workload.app:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# [tool.uv.sources]
+[tool.uv.sources]
+xrpl-py = { git = "https://github.com/XRPLF/xrpl-py.git", branch = "confidential-mpt" }
 # xrpl-py = { path = "../../xrpl-py" }
 # legleux-generate-ledger = { path = "../../generate_ledger"}
