@@ -9,7 +9,17 @@ COPY workload /opt/antithesis/catalog/workload
 # RUN --mount=from=ghcr.io/astral-sh/uv,source=/uv,target=/bin/uv \
 #     uv sync
 RUN uv sync
-RUN apt-get update && apt-get install -y curl
+RUN apt-get update && apt-get install -y curl gcc
+# Build the mpt-crypto CFFI extension for confidential MPT (XLS-0096).
+# xrpl-py ships pre-compiled shared libs for linux/darwin but the CFFI
+# Python extension (_mpt_crypto.cpython-*.so) must be compiled on the
+# target platform.
+RUN uv run python -c "\
+import pathlib, subprocess, sys; \
+p = pathlib.Path(sys.prefix) / 'lib'; \
+bs = list(p.rglob('xrpl/core/confidential/build_mpt_crypto.py')); \
+sys.exit(0) if not bs else None; \
+subprocess.check_call([sys.executable, str(bs[0])])"
 COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
 
 ENV PATH="/opt/venv/bin:/opt/antithesis/test/v1/all_transactions:$PATH"

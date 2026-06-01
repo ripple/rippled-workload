@@ -82,6 +82,8 @@ async def conf_mpt_merge_inbox(
     conf_issuances: list[ConfidentialMPTIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
+    if not cc.CRYPTO_AVAILABLE:
+        return
     if params.should_send_faulty():
         return await _merge_inbox_faulty(accounts, mpt_issuances, client)
     return await _merge_inbox_valid(accounts, conf_issuances, client)
@@ -203,6 +205,8 @@ async def conf_mpt_convert(
     conf_issuances: list[ConfidentialMPTIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
+    if not cc.CRYPTO_AVAILABLE:
+        return
     if params.should_send_faulty():
         return await _convert_faulty(accounts, mpt_issuances, client)
     return await _convert_valid(accounts, conf_issuances, client)
@@ -425,6 +429,8 @@ async def conf_mpt_send(
     conf_issuances: list[ConfidentialMPTIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
+    if not cc.CRYPTO_AVAILABLE:
+        return
     if params.should_send_faulty():
         return await _send_faulty(accounts, mpt_issuances, client)
     return await _send_valid(accounts, conf_issuances, client)
@@ -664,6 +670,8 @@ async def conf_mpt_convert_back(
     conf_issuances: list[ConfidentialMPTIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
+    if not cc.CRYPTO_AVAILABLE:
+        return
     if params.should_send_faulty():
         return await _convert_back_faulty(accounts, mpt_issuances, client)
     return await _convert_back_valid(accounts, conf_issuances, client)
@@ -870,6 +878,8 @@ async def conf_mpt_clawback(
     conf_issuances: list[ConfidentialMPTIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
+    if not cc.CRYPTO_AVAILABLE:
+        return
     if params.should_send_faulty():
         return await _clawback_faulty(accounts, mpt_issuances, client)
     return await _clawback_valid(accounts, conf_issuances, client)

@@ -8,11 +8,17 @@ and ``setup.py``.
 
 from __future__ import annotations
 
-from xrpl.core.confidential import MPTCrypto
-from xrpl.core.confidential import context as xrpl_context
+try:
+    from xrpl.core.confidential import MPTCrypto
+    from xrpl.core.confidential import context as xrpl_context
 
-# Single shared crypto context — secp256k1 allocation is expensive.
-_crypto = MPTCrypto()
+    # Single shared crypto context — secp256k1 allocation is expensive.
+    _crypto = MPTCrypto()
+    CRYPTO_AVAILABLE = True
+except Exception:
+    _crypto = None  # type: ignore[assignment]
+    xrpl_context = None  # type: ignore[assignment]
+    CRYPTO_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +41,7 @@ def generate_keypair_with_pok(context_id: str | None = None) -> tuple[str, str, 
 # ---------------------------------------------------------------------------
 
 # Cache a throwaway pubkey for blinding-factor generation.
-_TEMP_PRIV, _TEMP_PUB = _crypto.generate_keypair()
+_TEMP_PRIV, _TEMP_PUB = _crypto.generate_keypair() if CRYPTO_AVAILABLE else ("", "")
 
 
 def generate_blinding_factor() -> str:

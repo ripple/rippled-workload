@@ -692,7 +692,10 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 6b. Confidential MPT setup (XLS-0096) ───────────────────────
-    await _setup_confidential_mpt(workload, accs, summary)
+    from workload.confidential_crypto import CRYPTO_AVAILABLE
+
+    if CRYPTO_AVAILABLE:
+        await _setup_confidential_mpt(workload, accs, summary)
 
     # ── 7. Vaults: mix of XRP, IOU, and MPT assets ───────────────────
     vault_txns = []
