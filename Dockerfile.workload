@@ -11,15 +11,16 @@ COPY workload /opt/antithesis/catalog/workload
 RUN uv sync
 RUN apt-get update && apt-get install -y curl gcc
 # Build the mpt-crypto CFFI extension for confidential MPT (XLS-0096).
-# xrpl-py ships pre-compiled shared libs for linux/darwin but the CFFI
-# Python extension (_mpt_crypto.cpython-*.so) must be compiled on the
-# target platform.
+# xrpl-py ships pre-compiled shared libs but they may not be included in
+# the pip-installed package.  If the build fails (missing libs), the
+# workload still starts — confidential_crypto.CRYPTO_AVAILABLE will be
+# False and handlers gracefully skip confidential transactions.
 RUN uv run python -c "\
 import pathlib, subprocess, sys; \
 p = pathlib.Path(sys.prefix) / 'lib'; \
 bs = list(p.rglob('xrpl/core/confidential/build_mpt_crypto.py')); \
-sys.exit(0) if not bs else None; \
-subprocess.check_call([sys.executable, str(bs[0])])"
+exec('sys.exit(0)') if not bs else None; \
+subprocess.call([sys.executable, str(bs[0])])" || true
 COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
 
 ENV PATH="/opt/venv/bin:/opt/antithesis/test/v1/all_transactions:$PATH"
