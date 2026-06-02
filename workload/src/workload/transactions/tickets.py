@@ -13,6 +13,7 @@ from xrpl.models.transactions import (
     EscrowCreate,
     MPTokenIssuanceCreate,
     NFTokenMint,
+    OracleSet,
     Payment,
     PermissionedDomainSet,
     SetRegularKey,
@@ -22,6 +23,7 @@ from xrpl.models.transactions import (
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 from xrpl.models.transactions.mptoken_issuance_create import MPTokenIssuanceCreateFlag
 from xrpl.models.transactions.nftoken_mint import NFTokenMintFlag
+from xrpl.models.transactions.oracle_set import PriceData
 from xrpl.models.transactions.signer_list_set import SignerEntry
 from xrpl.models.transactions.transaction import Memo
 
@@ -101,6 +103,21 @@ _TICKET_BUILDERS: dict[str, _TicketBuilder] = {
         **c,
     ),
     "DIDSet": lambda dst, c: DIDSet(uri=params.did_hex_field(), **c),
+    "OracleSet": lambda dst, c: OracleSet(
+        oracle_document_id=params.oracle_document_id(),
+        provider=params.oracle_provider(),
+        asset_class=params.oracle_asset_class(),
+        last_update_time=params.oracle_last_update_time(),
+        price_data_series=[
+            PriceData(
+                base_asset=params.oracle_base_asset(),
+                quote_asset=params.oracle_quote_asset(),
+                asset_price=params.oracle_asset_price(),
+                scale=params.oracle_scale(),
+            ),
+        ],
+        **c,
+    ),
 }
 
 # Types explicitly excluded from ticket use.  Reasons:
@@ -168,6 +185,8 @@ _TICKET_EXCLUDED: set[str] = {
     "AccountDelete",
     # objects — needs an existing DID on the account
     "DIDDelete",
+    # objects — requires pre-existing oracle
+    "OracleDelete",
 }
 
 
