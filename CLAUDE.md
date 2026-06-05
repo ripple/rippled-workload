@@ -79,6 +79,8 @@ Gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth →
 
 Inner batch transactions (top-level entries with `tfInnerBatchTxn` set, applied by rippled as side effects of an outer Batch) are tagged by `ws_listener.py` with a dedicated `workload::inner_batch_observed` event for grep-ability. Normal `tx_result()` processing still runs so state updaters can track inner-txn side effects (minted NFTs, created credentials, etc.).
 
+**Inner batch caveat for `_META_EXPECTATIONS`:** The `meta_matches_tx_type` assertion in `assertions.py` is automatically skipped for inner batch transactions because their `AffectedNodes` may be empty or incomplete — the actual ledger changes are consolidated in the outer Batch's metadata. This is handled centrally in `tx_result()` via the `_TF_INNER_BATCH_TXN` flag check, so new entries added to `_META_EXPECTATIONS` are protected automatically without any per-type handling.
+
 ### Logging policy
 No logger calls in setup.py or transaction handlers — structured `send_event` calls and assertions cover observability. `setup.py` emits `workload::setup_reject : {phase}` on non-success engine results and `workload::setup_error : {phase}` on exceptions. Only `ws_listener.py` retains warning/error logs for connection issues and state update failures. `sequence.py` has one debug log for tracker initialization.
 

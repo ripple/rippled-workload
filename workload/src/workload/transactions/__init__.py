@@ -29,6 +29,7 @@ from workload.models import (
     DID,
     NFT,
     Check,
+    ConfidentialHolder,
     Credential,
     Delegate,
     Escrow,
@@ -54,6 +55,13 @@ from workload.transactions.amm import (
 from workload.transactions.batch import batch_random
 from workload.transactions.checks import check_cancel, check_cash, check_create
 from workload.transactions.clawback import clawback
+from workload.transactions.confidential_mpt import (
+    conf_mpt_clawback,
+    conf_mpt_convert,
+    conf_mpt_convert_back,
+    conf_mpt_merge_inbox,
+    conf_mpt_send,
+)
 from workload.transactions.credentials import (
     credential_accept,
     credential_create,
@@ -575,6 +583,111 @@ def _on_offer_cancel(w: Workload, tx: dict, meta: dict) -> None:
         w.offers[:] = [o for o in w.offers if o.get("offer_id") != deleted_id]
 
 
+# ── Confidential MPT state updaters ──────────────────────────────────
+
+
+def _find_conf_issuance(w: Workload, mpt_id: str):
+    """Find the ConfidentialMPTIssuance matching *mpt_id*, or ``None``."""
+    return next(
+        (ci for ci in w.confidential_mpt_issuances if ci.mpt_issuance_id == mpt_id),
+        None,
+    )
+
+
+def _on_conf_convert(w: Workload, tx: dict, meta: dict) -> None:
+    """Convert: holder moved public MPT into confidential balance."""
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    account = tx["Account"]
+    amount = int(tx.get("MPTAmount", 0))
+    holder = ci.holders.get(account)
+    if holder:
+        holder.spending_balance += amount
+        holder.version += 1
+    else:
+        ci.holders[account] = ConfidentialHolder(
+            address=account,
+            spending_balance=amount,
+            version=1,
+        )
+
+
+def _on_conf_merge_inbox(w: Workload, tx: dict, meta: dict) -> None:
+    """MergeInbox: inbox → spending for the holder.
+
+    Always bump version on tesSUCCESS — even if our local inbox_balance
+    is 0 (an external Send we didn't track may have funded it).
+    """
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    holder = ci.holders.get(tx["Account"])
+    if holder:
+        holder.spending_balance += holder.inbox_balance
+        holder.inbox_balance = 0
+        holder.version += 1
+
+
+def _on_conf_send(w: Workload, tx: dict, meta: dict) -> None:
+    """Send: sender spending balance down, destination inbox up.
+
+    The plaintext amount isn't in the validated tx (it's encrypted).
+    We recover it from the pending map populated at submission time.
+
+    Only the sender's version increments (spending balance changed).
+    The destination receives into inbox which doesn't affect their
+    version counter — that bumps on MergeInbox.
+    """
+    from workload.transactions.confidential_mpt import _pending_send_amounts
+
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    account = tx["Account"]
+    seq = tx.get("Sequence", 0)
+    mpt_id = tx.get("MPTokenIssuanceID", "")
+
+    # Pop the stashed amount from submission time
+    pending = _pending_send_amounts.pop((account, seq, mpt_id), None)
+
+    sender = ci.holders.get(account)
+    if sender:
+        if pending:
+            amount, dest_addr = pending
+            sender.spending_balance = max(0, sender.spending_balance - amount)
+            dest = ci.holders.get(dest_addr)
+            if dest:
+                dest.inbox_balance += amount
+        sender.version += 1
+
+
+def _on_conf_convert_back(w: Workload, tx: dict, meta: dict) -> None:
+    """ConvertBack: holder moved confidential back to public."""
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    account = tx["Account"]
+    amount = int(tx.get("MPTAmount", 0))
+    holder = ci.holders.get(account)
+    if holder:
+        holder.spending_balance = max(0, holder.spending_balance - amount)
+        holder.version += 1
+
+
+def _on_conf_clawback(w: Workload, tx: dict, meta: dict) -> None:
+    """Clawback: issuer reclaimed confidential balance from holder."""
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    holder_addr = tx.get("Holder", "")
+    amount = int(tx.get("MPTAmount", 0))
+    holder = ci.holders.get(holder_addr)
+    if holder:
+        holder.spending_balance = max(0, holder.spending_balance - amount)
+        holder.version += 1
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 # (name, path, handler, args_fn, state_updater_or_None)
 
@@ -991,6 +1104,41 @@ REGISTRY = [
         loan_pay,
         lambda w: (w.accounts, w.loans, w.client),
         _on_loan_pay,
+    ),
+    (
+        "ConfidentialMPTMergeInbox",
+        "/confidential/merge_inbox/random",
+        conf_mpt_merge_inbox,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_merge_inbox,
+    ),
+    (
+        "ConfidentialMPTConvert",
+        "/confidential/convert/random",
+        conf_mpt_convert,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_convert,
+    ),
+    (
+        "ConfidentialMPTSend",
+        "/confidential/send/random",
+        conf_mpt_send,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_send,
+    ),
+    (
+        "ConfidentialMPTConvertBack",
+        "/confidential/convert_back/random",
+        conf_mpt_convert_back,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_convert_back,
+    ),
+    (
+        "ConfidentialMPTClawback",
+        "/confidential/clawback/random",
+        conf_mpt_clawback,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_clawback,
     ),
 ]
 

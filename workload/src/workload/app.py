@@ -38,6 +38,7 @@ class Workload:
         self.vaults = []
         self.domains = []
         self.mpt_issuances = []
+        self.confidential_mpt_issuances = []  # ConfidentialMPTIssuance list
         self.delegates = []
         self.dids = []
         self.loan_brokers = []
