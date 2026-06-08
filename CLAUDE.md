@@ -30,8 +30,10 @@ check-endpoints      # start app, verify all endpoints register (~3s)
 4. **`transactions/__init__.py`** — Add entry to `REGISTRY` (see Patterns below).
 5. **`test_composer/`** — Add `parallel_driver_<name>_random.sh` with `curl --silent`.
 6. **`scripts/check-imports`** — Add the new module import.
-7. **`setup.py`** — Add creation logic if other transactions depend on this object existing.
-8. Run `check-imports` and `check-endpoints` before pushing.
+7. **`scripts/check-endpoints`** — Add the new endpoint path to `expected`.
+8. **`transactions/tickets.py`** — Classify the new type in `_TICKET_BUILDERS` or `_TICKET_EXCLUDED`. Builders take a `TicketCtx` (src account, dst, `common`, and workload state: accounts/domains/credentials/amms) and return a `Transaction` or `None` to skip; state-aware types (e.g. permissioned DEX) read `ctx.domains`/`ctx.amms`. Only truly impossible types (need object IDs the ctx can't supply, cosign, circular, batch) go in `_TICKET_EXCLUDED`. Every `REGISTRY` type must be in one or the other, or `check_ticket_coverage` fires `unreachable : ticket_coverage_missing`.
+9. **`setup.py`** — Add creation logic if other transactions depend on this object existing.
+10. Run `check-imports` and `check-endpoints` before pushing.
 
 ## Patterns
 

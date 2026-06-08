@@ -70,8 +70,10 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     }
     tx_result(tx_type, result)
 
-    # A Payment with TicketSequence is a TicketUse — emit both tx types
-    if tx_type == "Payment" and tx.get("TicketSequence") is not None:
+    # Any transaction carrying a TicketSequence is a TicketUse — emit that bucket
+    # too (the workload drives many tx types through the ticket path, not just
+    # Payment). Inner batch txns are tagged above and handled separately.
+    if tx.get("TicketSequence") is not None:
         tx_result("TicketUse", result)
 
     # Permissioned-DEX variants carry a DomainID. Fire their dedicated result

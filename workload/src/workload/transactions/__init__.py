@@ -697,7 +697,7 @@ REGISTRY = [
         "TicketUse",
         "/tickets/use/random",
         ticket_use,
-        lambda w: (w.accounts, w.client),
+        lambda w: (w.accounts, w.domains, w.credentials, w.amms, w.client),
         None,
     ),
     (
