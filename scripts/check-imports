@@ -22,6 +22,7 @@ from workload.transactions.did import did_set, did_delete
 from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
 from workload.transactions.nft import nftoken_mint, nftoken_modify
 from workload.transactions.offers import offer_create, offer_cancel
+from workload.transactions.permissioned_dex import offer_create_domain, offer_create_hybrid, payment_domain, payment_domain_xc
 from workload.transactions.lending import (
     loan_broker_set, loan_broker_delete,
     loan_broker_cover_deposit, loan_broker_cover_withdraw,

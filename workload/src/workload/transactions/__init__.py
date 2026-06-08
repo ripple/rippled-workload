@@ -89,6 +89,12 @@ from workload.transactions.payment_channels import (
     channel_fund,
 )
 from workload.transactions.payments import payment_random
+from workload.transactions.permissioned_dex import (
+    offer_create_domain,
+    offer_create_hybrid,
+    payment_domain,
+    payment_domain_xc,
+)
 from workload.transactions.set_regular_key import set_regular_key
 from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.tickets import ticket_create, ticket_use
@@ -257,6 +263,18 @@ def _on_credential_delete(w: Workload, tx: dict, meta: dict) -> None:
     ]
 
 
+def _on_credential_accept(w: Workload, tx: dict, meta: dict) -> None:
+    # CredentialAccept sets lsfAccepted on the credential (a ModifiedNode, no
+    # created/deleted id). The subject is the submitting account.
+    issuer = tx.get("Issuer", "")
+    subject = tx.get("Account", "")
+    cred_type = tx.get("CredentialType", "")
+    for c in w.credentials:
+        if c.issuer == issuer and c.subject == subject and c.credential_type == cred_type:
+            c.accepted = True
+            break
+
+
 def _on_ticket_create(w: Workload, tx: dict, meta: dict) -> None:
     account = tx["Account"]
     seq = tx.get("Sequence", 0)
@@ -265,10 +283,36 @@ def _on_ticket_create(w: Workload, tx: dict, meta: dict) -> None:
         w.accounts[account].tickets.update(range(seq + 1, seq + 1 + count))
 
 
+def _parse_accepted_credentials(tx: dict) -> list[tuple[str, str]]:
+    """Extract (issuer, credential_type) pairs from a PermissionedDomainSet's
+    AcceptedCredentials array."""
+    pairs: list[tuple[str, str]] = []
+    for entry in tx.get("AcceptedCredentials", []):
+        cred = entry.get("Credential", entry)
+        issuer = cred.get("Issuer", "")
+        cred_type = cred.get("CredentialType", "")
+        if issuer and cred_type:
+            pairs.append((issuer, cred_type))
+    return pairs
+
+
 def _on_domain_set(w: Workload, tx: dict, meta: dict) -> None:
+    accepted = _parse_accepted_credentials(tx)
     domain_id = _extract_created_id(meta, "PermissionedDomain")
     if domain_id:
-        w.domains.append(PermissionedDomain(owner=tx["Account"], domain_id=domain_id))
+        w.domains.append(
+            PermissionedDomain(
+                owner=tx["Account"], domain_id=domain_id, accepted_credentials=accepted
+            )
+        )
+        return
+    # Update to an existing domain (ModifiedNode): refresh accepted credentials.
+    existing_id = tx.get("DomainID")
+    if existing_id:
+        for d in w.domains:
+            if d.domain_id == existing_id:
+                d.accepted_credentials = accepted
+                break
 
 
 def _on_domain_delete(w: Workload, tx: dict, meta: dict) -> None:
@@ -703,7 +747,7 @@ REGISTRY = [
         "/credential/accept/random",
         credential_accept,
         lambda w: (w.accounts, w.credentials, w.client),
-        None,
+        _on_credential_accept,
     ),
     (
         "CredentialDelete",
@@ -830,6 +874,38 @@ REGISTRY = [
         offer_cancel,
         lambda w: (w.accounts, w.offers, w.client),
         _on_offer_cancel,
+    ),
+    # ── Permissioned DEX (featurePermissionedDEX) ────────────────────
+    # Synthetic assertion names; on-ledger TransactionType stays OfferCreate /
+    # Payment. State is tracked by the real-type updaters (_on_offer_create),
+    # and ws_listener fires the matching tx_result for the buckets below.
+    (
+        "OfferCreateDomain",
+        "/offer/create/domain/random",
+        offer_create_domain,
+        lambda w: (w.accounts, w.domains, w.credentials, w.amms, w.client),
+        None,
+    ),
+    (
+        "OfferCreateHybrid",
+        "/offer/create/hybrid/random",
+        offer_create_hybrid,
+        lambda w: (w.accounts, w.domains, w.credentials, w.amms, w.client),
+        None,
+    ),
+    (
+        "PaymentDomain",
+        "/payment/domain/random",
+        payment_domain,
+        lambda w: (w.accounts, w.domains, w.credentials, w.client),
+        None,
+    ),
+    (
+        "PaymentDomainXC",
+        "/payment/domain/xc/random",
+        payment_domain_xc,
+        lambda w: (w.accounts, w.domains, w.credentials, w.amms, w.client),
+        None,
     ),
     (
         "CheckCreate",

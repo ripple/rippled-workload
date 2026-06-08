@@ -43,7 +43,11 @@ _NO_FAILURE_TYPES = {
 # - AMMDelete: rippled auto-deletes empty AMMs as a side effect of the last
 #   LP's TF_WITHDRAW_ALL, so AMMDelete usually finds the AMM already gone
 #   (tecAMM_NOT_FOUND) or with outstanding LP tokens (tecAMM_NOT_EMPTY).
-_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete"}
+# - PaymentDomainXC: cross-currency domain payment success needs resting domain
+#   liquidity in the matching direction, which the workload does not guarantee;
+#   it reliably exercises the both-in-domain preclaim + domain pathfinding but
+#   usually ends tecPATH_DRY. Drop from this set if runs show success is hit.
+_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC"}
 
 # Metadata expectations for tx types that must create/modify/delete specific
 # ledger entry types on tesSUCCESS.  Each value is a tuple of allowed node
@@ -152,6 +156,7 @@ def register_assertions() -> None:
         "nfts",
         "nft_offers",
         "credentials",
+        "credential_accepts",
         "tickets",
         "domains",
         "loan_brokers",

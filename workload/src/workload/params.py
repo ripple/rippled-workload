@@ -58,6 +58,17 @@ def iou_amount() -> str:
     return str(randint(1, 10_000))
 
 
+# ── Offers / DEX ─────────────────────────────────────────────────────
+def offer_xrp_drops() -> str:
+    """XRP amount in drops for a DEX offer leg (0.1-10 XRP)."""
+    return str(randint(100_000, 10_000_000))
+
+
+def offer_iou_value() -> str:
+    """IOU value for a DEX offer leg."""
+    return str(randint(1, 50))
+
+
 # ── NFTokens ─────────────────────────────────────────────────────────
 def nft_taxon() -> int:
     return randint(0, 10)

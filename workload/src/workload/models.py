@@ -93,6 +93,7 @@ class Credential:
     issuer: str
     subject: str
     credential_type: str
+    accepted: bool = False
 
 
 @dataclass
@@ -108,6 +109,10 @@ class Vault:
 class PermissionedDomain:
     owner: str
     domain_id: str
+    # Accepted credentials as (issuer, credential_type) pairs. An account is a
+    # domain member if it is the owner or holds an accepted credential matching
+    # one of these pairs (see permissioned_dex._domain_members).
+    accepted_credentials: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass

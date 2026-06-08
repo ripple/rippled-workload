@@ -37,6 +37,7 @@ from xrpl.models.transactions import (
     AccountSet,
     AccountSetAsfFlag,
     AMMCreate,
+    CredentialAccept,
     CredentialCreate,
     LoanBrokerCoverDeposit,
     LoanBrokerSet,
@@ -636,8 +637,29 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             client,
             seq,
         )
+        # Subjects accept their credentials so they become permissioned-domain
+        # members (the step-11 domains accept {accs[30], _SETUP_CREDENTIAL_TYPE}).
+        # Setup credentials have no expiration, so membership stays stable.
+        summary["credential_accepts"] = await _submit_batch(
+            "credential_accepts",
+            [
+                (
+                    "CredentialAccept",
+                    CredentialAccept(
+                        account=accs[31 + i].address,
+                        issuer=issuer.address,
+                        credential_type=_SETUP_CREDENTIAL_TYPE,
+                    ),
+                    accs[31 + i].wallet,
+                )
+                for i in range(5)
+            ],
+            client,
+            seq,
+        )
     else:
         summary["credentials"] = 0
+        summary["credential_accepts"] = 0
 
     # ── 10. Tickets ──────────────────────────────────────────────────
     summary["tickets"] = await _submit_batch(

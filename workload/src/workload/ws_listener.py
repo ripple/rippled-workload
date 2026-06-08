@@ -26,6 +26,7 @@ from workload.transactions import STATE_UPDATERS
 log = logging.getLogger(__name__)
 
 _TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
+_TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
 
 
 def _handle_validated_tx(workload: Workload, msg: dict) -> None:
@@ -72,6 +73,16 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     # A Payment with TicketSequence is a TicketUse — emit both tx types
     if tx_type == "Payment" and tx.get("TicketSequence") is not None:
         tx_result("TicketUse", result)
+
+    # Permissioned-DEX variants carry a DomainID. Fire their dedicated result
+    # bucket so the synthetic-name assertions (registered from REGISTRY) resolve.
+    if tx_type == "OfferCreate" and tx.get("DomainID"):
+        is_hybrid = bool(tx.get("Flags", 0) & _TF_HYBRID)
+        tx_result("OfferCreateHybrid" if is_hybrid else "OfferCreateDomain", result)
+    elif tx_type == "Payment" and tx.get("DomainID"):
+        # Non-XRP delivery (Amount is an object) or a SendMax means cross-currency.
+        is_xc = tx.get("SendMax") is not None or not isinstance(tx.get("Amount"), str)
+        tx_result("PaymentDomainXC" if is_xc else "PaymentDomain", result)
 
     # Update state on success
     if engine_result == "tesSUCCESS":
