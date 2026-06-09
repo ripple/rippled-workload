@@ -23,6 +23,7 @@ from xrpl.models.transactions import OfferCreate, Payment
 from xrpl.models.transactions.offer_create import OfferCreateFlag
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import AMM, Credential, PermissionedDomain, UserAccount
 from workload.randoms import choice, random, sample
 from workload.submit import submit_raw, submit_tx
@@ -187,10 +188,19 @@ async def _domain_offer_faulty(
     flags = int(OfferCreateFlag.TF_HYBRID) if hybrid else 0
     mutate = None
 
-    mutations = ["not_in_domain", "fake_domain", "zero_domain", "ioc_killed"]
+    mutations = ["not_in_domain", "fake_domain", "zero_domain", "ioc_killed", "fuzz"]
     if hybrid:
         mutations.append("hybrid_no_domain")
     mutation = choice(mutations)
+
+    if mutation == "fuzz":
+        # Generative: corrupt a valid domain offer in open-ended ways.
+        built = _domain_offer_base(accounts, domains, credentials, amms, hybrid=hybrid)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed(name, base, client, wallet)
+        return
 
     if mutation == "not_in_domain":
         # Real domain, but submit from an account that is NOT a member -> tecNO_PERMISSION.
@@ -296,7 +306,15 @@ async def _payment_domain_faulty(
     if len(accounts) < 2:
         return
 
-    mutation = choice(["outsider_party", "fake_domain", "zero_domain"])
+    mutation = choice(["outsider_party", "fake_domain", "zero_domain", "fuzz"])
+    if mutation == "fuzz":
+        # Generative: corrupt a valid domain payment in open-ended ways.
+        built = _domain_payment_base(accounts, domains, credentials)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("PaymentDomain", base, client, wallet)
+        return
     if mutation == "outsider_party":
         # One in-domain member + one outsider -> tecNO_PERMISSION.
         picked = _pick_domain_with_members(domains, accounts, credentials, minimum=1)

@@ -8,6 +8,7 @@ from xrpl.models.transactions import (
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import Credential, PermissionedDomain, UserAccount
 from workload.randoms import choice, sample
 from workload.submit import submit_raw, submit_tx
@@ -100,8 +101,15 @@ async def _permissioned_domain_set_faulty(
             "empty_credentials",
             "too_many_credentials",
             "duplicate_credentials",
+            "fuzz",
         ]
     )
+
+    if mutation == "fuzz":
+        # Generative: corrupt a valid PermissionedDomainSet in open-ended ways.
+        base, wallet = _domain_set_base(accounts, domains, credentials)
+        await submit_fuzzed("PermissionedDomainSet", base, client, wallet)
+        return
 
     issuer = src.address
     domain_id = None
@@ -191,7 +199,15 @@ async def _permissioned_domain_delete_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice(["non_owner", "nonexistent", "zero_domain"])
+    mutation = choice(["non_owner", "nonexistent", "zero_domain", "fuzz"])
+    if mutation == "fuzz":
+        # Generative: corrupt a valid PermissionedDomainDelete in open-ended ways.
+        built = _domain_delete_base(accounts, domains)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("PermissionedDomainDelete", base, client, wallet)
+        return
     if mutation == "non_owner":
         # Delete a domain the src does not own -> tecNO_PERMISSION.
         others = [d for d in domains if d.owner != src.address]
