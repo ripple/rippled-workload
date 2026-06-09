@@ -5,8 +5,13 @@ validation. The WebSocket listener (ws_listener.py) observes validated
 results and fires assertions / updates state.
 """
 
+from collections.abc import Callable
+
 from xrpl.asyncio.clients import AsyncJsonRpcClient
-from xrpl.asyncio.transaction import autofill_and_sign, submit
+from xrpl.asyncio.transaction import autofill, autofill_and_sign, submit
+from xrpl.core import keypairs
+from xrpl.core.binarycodec import encode, encode_for_signing
+from xrpl.models.requests import SubmitOnly
 from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
@@ -75,4 +80,40 @@ async def submit_tx(
     response = await submit(signed, client)
     result = response.result
     tx_submitted(name, txn, result)
+    return result
+
+
+async def submit_raw(
+    name: str,
+    base: Transaction,
+    client: AsyncJsonRpcClient,
+    wallet: Wallet,
+    mutate: Callable[[dict], None] | None = None,
+) -> dict:
+    """Submit path for ``_faulty`` handlers — bypasses xrpl-py model validation.
+
+    Autofill a VALID ``base`` model (to obtain Sequence/Fee/LastLedgerSequence),
+    serialize it to an XRPL JSON dict, optionally apply ``mutate(dict)`` to
+    introduce a malformation xrpl-py would reject at construction (tfHybrid
+    without DomainID, empty/oversized/duplicate arrays, …), then sign and submit
+    the raw blob so rippled's own preflight/preclaim is what rejects it.
+
+    ``mutate`` is omitted when the faulty intent is already a valid model (e.g.
+    a non-member submitting a well-formed domain offer) — the raw path is still
+    used so every ``_faulty`` case shares one submission discipline.
+
+    Wires ``tx_submitted`` exactly like ``submit_tx`` (seen + submit-time
+    internal-error assertion). Use ONLY in ``_faulty`` paths.
+    """
+    autofilled = await autofill(base, client)
+    tx_dict = autofilled.to_xrpl()
+    tx_dict.pop("TxnSignature", None)
+    if mutate is not None:
+        mutate(tx_dict)
+    tx_dict["SigningPubKey"] = wallet.public_key
+    serialized = encode_for_signing(tx_dict)
+    tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
+    response = await client.request(SubmitOnly(tx_blob=encode(tx_dict)))
+    result = response.result
+    tx_submitted(name, tx_dict, result)
     return result

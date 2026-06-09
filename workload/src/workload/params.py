@@ -152,6 +152,19 @@ def domain_credential_count() -> int:
     return randint(1, 10)
 
 
+def zero_domain_id() -> str:
+    """All-zero 64-char DomainID. Malformed per rippled — preflight temMALFORMED
+    when fixCleanup3_2_0 is enabled, otherwise exercises the zero-key domain read
+    / accountInDomain zero-guard. xrpl-py accepts it (64 hex chars)."""
+    return "0" * 64
+
+
+def should_update_domain() -> bool:
+    """Whether PermissionedDomainSet updates an existing domain (modify path)
+    rather than creating a new one."""
+    return random() < 0.3
+
+
 # ── NFToken Modify ───────────────────────────────────────────────────
 def nft_uri() -> str:
     """Random hex-encoded URI for NFTs (max 512 hex chars = 256 bytes)."""

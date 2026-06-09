@@ -211,7 +211,9 @@ def tx_submitted(name: str, txn: object = None, result: dict | None = None) -> N
     details: dict[str, str] = {"tx_type": name}
     if txn is not None:
         try:
-            raw = txn.to_xrpl()
+            # Accept either an xrpl-py model or an already-serialized XRPL dict
+            # (the raw-submit path in submit.py passes the mutated dict directly).
+            raw = txn.to_xrpl() if hasattr(txn, "to_xrpl") else txn
             details["account"] = raw.get("Account", "")
             details["sequence"] = str(raw.get("Sequence", ""))
             details.update(_extract_object_ids(raw))
