@@ -680,6 +680,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         seq,
     )
     summary["tickets"] *= _TICKET_COUNT
+    # TicketCreate advances the account Sequence by TicketCount + 1; next_seq
+    # only counted the +1, so align the tracker for accounts reused later
+    # (e.g. domain owners 50-52 create their domains in step 11).
+    for i in ticket_indices:
+        seq.advance(accs[i].address, _TICKET_COUNT)
 
     # ── 11. Permissioned domains ─────────────────────────────────────
     if len(accs) > 52:
