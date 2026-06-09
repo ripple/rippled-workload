@@ -662,15 +662,19 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         summary["credential_accepts"] = 0
 
     # ── 10. Tickets ──────────────────────────────────────────────────
+    # 40-42: generic ticket holders. 50-52: domain owners (always domain
+    # members) — giving them tickets makes the ticket x permissioned-DEX valid
+    # path reachable from setup (a ticket holder that is also a domain member).
+    ticket_indices = [i for i in (40, 41, 42, 50, 51, 52) if i < len(accs)]
     summary["tickets"] = await _submit_batch(
         "tickets",
         [
             (
                 "TicketCreate",
-                TicketCreate(account=accs[40 + i].address, ticket_count=_TICKET_COUNT),
-                accs[40 + i].wallet,
+                TicketCreate(account=accs[i].address, ticket_count=_TICKET_COUNT),
+                accs[i].wallet,
             )
-            for i in range(min(3, max(0, len(accs) - 40)))
+            for i in ticket_indices
         ],
         client,
         seq,

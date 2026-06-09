@@ -802,7 +802,7 @@ REGISTRY = [
         "PermissionedDomainSet",
         "/domain/set/random",
         permissioned_domain_set,
-        lambda w: (w.accounts, w.domains, w.client),
+        lambda w: (w.accounts, w.domains, w.credentials, w.client),
         _on_domain_set,
     ),
     (
