@@ -98,6 +98,12 @@ EOF
 
 RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DIR} --prefix /opt/xrpld
 
+# Nix builds binaries with the loader's PT_INTERP pointing into /nix/store and a
+# /nix/store rpath, so they won't start in the clean ubuntu runtime stage. Repoint
+# to the system loader and drop the rpath (mirrors rippled CI; safe here because
+# we don't enable asan/tsan/ubsan — only voidstar). x86_64 loader (enforced above).
+RUN patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath /opt/xrpld/bin/xrpld
+
 WORKDIR ${FUZZER_SOURCE_DIR}
 
 # Install fuzzer dependencies with Conan. Use the same `ci` profile as the
@@ -130,6 +136,7 @@ RUN <<EOF
     set -ex
     mkdir -p /opt/fuzzer/bin
     cp ${FUZZER_BUILD_DIR}/rippled-fuzzer /opt/fuzzer/bin/
+    patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath /opt/fuzzer/bin/rippled-fuzzer
 EOF
 
 # Download Antithesis instrumentation library (loaded at runtime by the platform;
