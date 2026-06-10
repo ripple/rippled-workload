@@ -100,15 +100,18 @@ RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DI
 
 WORKDIR ${FUZZER_SOURCE_DIR}
 
-# Install fuzzer dependencies with Conan
+# Install fuzzer dependencies with Conan. Use the same `ci` profile as the
+# xrpld build above so shared deps (boost, openssl, protobuf, grpc, xrpl, …)
+# resolve to package-ids already in the local conan cache → reused, not rebuilt.
+# Requires the fuzzer's pinned versions to match rippled develop (conanfile.py).
 RUN <<EOF
     set -ex
     mkdir -p ${FUZZER_BUILD_DIR}
-    conan lock create .
     conan install ${FUZZER_SOURCE_DIR} \
         --output-folder ${FUZZER_BUILD_DIR} \
-        --build missing \
-        --settings build_type=Debug
+        --profile:all ci \
+        --settings:all build_type=Debug \
+        --build missing
 EOF
 
 # Configure and build fuzzer
