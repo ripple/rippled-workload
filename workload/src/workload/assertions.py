@@ -17,14 +17,18 @@ _LOC_CLASS = ""
 _LOC_COL = 0
 
 # Engine results that indicate a rippled internal error (exception caught,
-# invariant violated, etc.). Surfaced from BOTH the immediate /submit response
-# and the validated WS stream — though tef* never reaches validation, so the
-# submit-time check is what actually catches these in practice.
+# invariant violated, etc.). Checked on BOTH the submit response and the
+# validated WS stream:
+#   - tef* never validates; the submit-time check catches those.
+#   - tecINVARIANT_FAILED claims a fee and DOES validate (rippled returns it on
+#     the first invariant failure, escalating to tefINVARIANT_FAILED only if the
+#     fee-only retry also fails) — so the validated-side check catches it.
 _RIPPLED_INTERNAL_ERRORS = (
     "tefEXCEPTION",
     "tefINTERNAL",
     "tefINVARIANT_FAILED",
     "tefFAILURE",
+    "tecINVARIANT_FAILED",
 )
 
 # Types whose current faulty handler never produces a non-tesSUCCESS engine

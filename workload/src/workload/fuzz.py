@@ -13,6 +13,11 @@ left intact so the transaction authenticates and gets past the cheap rejects.
 All randomness flows through ``workload.randoms`` so Antithesis explores the
 mutation space, and every fuzzed submission emits a ``workload::fuzz`` event
 recording the exact operators applied for reproducible triage.
+
+Boundary: fuzz only mutates or drops EXISTING fields, never adds new ones.
+New-sfield injection and type-confusion-via-unknown-field are out of scope by
+design — adding fields the model didn't emit would break encoding, and keeping
+the blob encodable (so it reaches the transactor) is the whole point.
 """
 
 from __future__ import annotations
@@ -84,8 +89,10 @@ def fuzz_mutate(tx_dict: dict) -> list[str]:
             break
         field = choice(fields)
         if random() < 0.8:
-            tx_dict[field] = _hostile(tx_dict[field])
-            ops.append(f"set:{field}")
+            before = tx_dict[field]
+            after = _hostile(before)
+            tx_dict[field] = after
+            ops.append(f"set:{field}" if after != before else f"noop:{field}")
         else:
             tx_dict.pop(field, None)
             ops.append(f"drop:{field}")
@@ -117,8 +124,14 @@ async def submit_fuzzed(
             {"tx_type": name, "ops": "; ".join(ops), "error": type(e).__name__},
         )
         return None
+    tx_hash = result.get("tx_json", {}).get("hash", "") or result.get("hash", "")
     send_event(
         "workload::fuzz",
-        {"tx_type": name, "ops": "; ".join(ops), "engine_result": result.get("engine_result", "")},
+        {
+            "tx_type": name,
+            "ops": "; ".join(ops),
+            "engine_result": result.get("engine_result", ""),
+            "hash": tx_hash,
+        },
     )
     return result

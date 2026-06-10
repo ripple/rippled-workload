@@ -102,6 +102,16 @@ async def submit_raw(
     a non-member submitting a well-formed domain offer) — the raw path is still
     used so every ``_faulty`` case shares one submission discipline.
 
+    Contract: ``mutate`` MUST keep ``tx_dict`` encodable. ``submit_raw`` has no
+    encode guard — only ``submit_fuzzed`` catches ``XRPLBinaryCodecException`` /
+    ``ValueError`` from a shape that won't serialize. Curated ``mutate`` fns are
+    therefore a caller obligation: produce a malformation rippled rejects in
+    preflight/preclaim, not one the binary codec rejects before submission.
+
+    Delegation is intentionally NOT applied here (unlike ``submit_tx``): faulty
+    intent stays attributable to a single signer, so a flagged result maps back
+    to exactly one account.
+
     Wires ``tx_submitted`` exactly like ``submit_tx`` (seen + submit-time
     internal-error assertion). Use ONLY in ``_faulty`` paths.
     """
