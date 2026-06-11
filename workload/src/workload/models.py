@@ -119,6 +119,10 @@ class PermissionedDomain:
 class MPTokenIssuance:
     issuer: str
     mpt_issuance_id: str
+    can_trade: bool = False
+    can_transfer: bool = False
+    require_auth: bool = False
+    locked: bool = False
 
 
 @dataclass
