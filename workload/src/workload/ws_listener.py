@@ -99,6 +99,15 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     ):
         tx_result("OfferCreateMPT", result)
 
+    # MPT-on-DEX (XLS-82): a Payment carrying an MPT (in Amount or SendMax).
+    # Independent of the DomainID block above. Also catches the generic Payment
+    # handler's MPT sends — intentional: any MPT-bearing payment feeds the
+    # PaymentMPT buckets.
+    if tx_type == "Payment" and (
+        _amount_is_mpt(tx.get("Amount")) or _amount_is_mpt(tx.get("SendMax"))
+    ):
+        tx_result("PaymentMPT", result)
+
     # Update state on success
     if engine_result == "tesSUCCESS":
         updater = STATE_UPDATERS.get(tx_type)

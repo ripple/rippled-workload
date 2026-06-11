@@ -44,6 +44,7 @@ try:
         '/payment/domain/random',
         '/payment/domain/xc/random',
         '/offer/create/mpt/random',
+        '/payment/mpt/random',
         '/delegate/set/random',
         '/did/set/random',
         '/did/delete/random',

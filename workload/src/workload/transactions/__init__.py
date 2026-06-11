@@ -75,7 +75,7 @@ from workload.transactions.lending import (
     loan_set,
 )
 from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
-from workload.transactions.mpt_dex import offer_create_mpt
+from workload.transactions.mpt_dex import offer_create_mpt, payment_mpt
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -940,6 +940,16 @@ REGISTRY = [
         "OfferCreateMPT",
         "/offer/create/mpt/random",
         offer_create_mpt,
+        lambda w: (w.accounts, w.mpt_issuances, w.client),
+        None,
+    ),
+    # PaymentMPT: a Payment carrying an MPT. Synthetic name; on-ledger type is
+    # Payment (no state updater — Payment has none). ws_listener fires the
+    # matching tx_result when a validated Payment carries an MPT leg.
+    (
+        "PaymentMPT",
+        "/payment/mpt/random",
+        payment_mpt,
         lambda w: (w.accounts, w.mpt_issuances, w.client),
         None,
     ),
