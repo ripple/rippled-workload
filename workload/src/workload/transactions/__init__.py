@@ -75,6 +75,7 @@ from workload.transactions.lending import (
     loan_set,
 )
 from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
+from workload.transactions.mpt_dex import offer_create_mpt
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -250,6 +251,21 @@ def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
             locked=False,
         )
         w.mpt_issuances.append(issuance)
+
+
+def _on_mpt_authorize(w: Workload, tx: dict, meta: dict) -> None:
+    mpt_id = tx.get("MPTokenIssuanceID")
+    if not mpt_id:
+        return
+    # Holder self-opt-in: the submitter holds. Issuer-authorizes-holder mode:
+    # the Holder field names the account that now holds an MPToken.
+    held = tx.get("Holder") or tx.get("Account", "")
+    if not held:
+        return
+    for m in w.mpt_issuances:
+        if m.mpt_issuance_id == mpt_id:
+            m.holders.add(held)
+            return
 
 
 def _on_mpt_destroy(w: Workload, tx: dict, meta: dict) -> None:
@@ -728,7 +744,7 @@ REGISTRY = [
         "/mpt/authorize/random",
         mpt_authorize,
         lambda w: (w.accounts, w.mpt_issuances, w.client),
-        None,
+        _on_mpt_authorize,
     ),
     (
         "MPTokenIssuanceSet",
@@ -914,6 +930,17 @@ REGISTRY = [
         "/payment/domain/xc/random",
         payment_domain_xc,
         lambda w: (w.accounts, w.domains, w.credentials, w.amms, w.client),
+        None,
+    ),
+    # ── MPT-on-DEX (XLS-82) ──────────────────────────────────────────
+    # Synthetic assertion name; on-ledger TransactionType stays OfferCreate.
+    # State is tracked by the real-type updater (_on_offer_create), and
+    # ws_listener fires the matching tx_result for the buckets below.
+    (
+        "OfferCreateMPT",
+        "/offer/create/mpt/random",
+        offer_create_mpt,
+        lambda w: (w.accounts, w.mpt_issuances, w.client),
         None,
     ),
     (

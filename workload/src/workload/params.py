@@ -26,6 +26,16 @@ def fake_id() -> str:
     return bytes(randint(0, 255) for _ in range(32)).hex().upper()
 
 
+def fake_mpt_id() -> str:
+    """Generate a valid-format but nonexistent MPTokenIssuanceID.
+
+    An MPTokenIssuanceID is 192-bit (24 bytes = 48 hex chars): a 4-byte
+    sequence concatenated with the 20-byte issuer account. Distinct from
+    ``fake_id()``, which returns 64-hex (256-bit) object/ledger-entry IDs.
+    """
+    return bytes(randint(0, 255) for _ in range(24)).hex().upper()
+
+
 # ── Fees ─────────────────────────────────────────────────────────────
 def fee() -> str:
     """Transaction fee in drops."""
@@ -67,6 +77,11 @@ def offer_xrp_drops() -> str:
 def offer_iou_value() -> str:
     """IOU value for a DEX offer leg."""
     return str(randint(1, 50))
+
+
+def mpt_offer_value() -> str:
+    """Small MPT amount for a DEX offer leg (MPT value is an integer string)."""
+    return str(randint(1, 1000))
 
 
 # ── NFTokens ─────────────────────────────────────────────────────────

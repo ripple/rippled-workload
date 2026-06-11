@@ -29,6 +29,11 @@ _TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 _TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
 
 
+def _amount_is_mpt(amt: object) -> bool:
+    """True when an OfferCreate leg (Amount field) is an MPT amount object."""
+    return isinstance(amt, dict) and "mpt_issuance_id" in amt
+
+
 def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     """Process a single validated transaction from the WS stream."""
     meta = msg.get("meta", {})
@@ -85,6 +90,14 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
         # Non-XRP delivery (Amount is an object) or a SendMax means cross-currency.
         is_xc = tx.get("SendMax") is not None or not isinstance(tx.get("Amount"), str)
         tx_result("PaymentDomainXC" if is_xc else "PaymentDomain", result)
+
+    # MPT-on-DEX (XLS-82): an OfferCreate with an MPT leg. Independent of the
+    # DomainID block above — a pure MPT offer carries no DomainID, so this never
+    # double-fires with the domain buckets.
+    if tx_type == "OfferCreate" and (
+        _amount_is_mpt(tx.get("TakerGets")) or _amount_is_mpt(tx.get("TakerPays"))
+    ):
+        tx_result("OfferCreateMPT", result)
 
     # Update state on success
     if engine_result == "tesSUCCESS":

@@ -123,6 +123,7 @@ class MPTokenIssuance:
     can_transfer: bool = False
     require_auth: bool = False
     locked: bool = False
+    holders: set[str] = field(default_factory=set)
 
 
 @dataclass
