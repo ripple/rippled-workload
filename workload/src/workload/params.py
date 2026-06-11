@@ -58,6 +58,17 @@ def iou_amount() -> str:
     return str(randint(1, 10_000))
 
 
+# ── Offers / DEX ─────────────────────────────────────────────────────
+def offer_xrp_drops() -> str:
+    """XRP amount in drops for a DEX offer leg (0.1-10 XRP)."""
+    return str(randint(100_000, 10_000_000))
+
+
+def offer_iou_value() -> str:
+    """IOU value for a DEX offer leg."""
+    return str(randint(1, 50))
+
+
 # ── NFTokens ─────────────────────────────────────────────────────────
 def nft_taxon() -> int:
     return randint(0, 10)
@@ -139,6 +150,19 @@ def vault_assets_maximum() -> str:
 def domain_credential_count() -> int:
     """Number of accepted credentials in a permissioned domain (1-10)."""
     return randint(1, 10)
+
+
+def zero_domain_id() -> str:
+    """All-zero 64-char DomainID. Malformed per rippled — preflight temMALFORMED
+    when fixCleanup3_2_0 is enabled, otherwise exercises the zero-key domain read
+    / accountInDomain zero-guard. xrpl-py accepts it (64 hex chars)."""
+    return "0" * 64
+
+
+def should_update_domain() -> bool:
+    """Whether PermissionedDomainSet updates an existing domain (modify path)
+    rather than creating a new one."""
+    return random() < 0.3
 
 
 # ── NFToken Modify ───────────────────────────────────────────────────

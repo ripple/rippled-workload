@@ -36,6 +36,17 @@ class SequenceTracker:
         self._seqs[address] = seq + 1
         return seq
 
+    def advance(self, address: str, by: int) -> None:
+        """Bump the tracked sequence by an extra ``by`` (no-op if untracked).
+
+        Needed for TicketCreate: it advances the account root Sequence by
+        ``TicketCount + 1`` (it is the only transaction that increases Sequence
+        by more than one). ``next_seq`` already added the +1 for the tx itself,
+        so callers pass ``by = TicketCount`` after submitting a TicketCreate to
+        keep a reused account's counter aligned with the ledger."""
+        if address in self._seqs:
+            self._seqs[address] += by
+
     def reset(self, address: str) -> None:
         """Force re-initialization on next call (e.g., after a known desync)."""
         self._seqs.pop(address, None)

@@ -37,6 +37,7 @@ from xrpl.models.transactions import (
     AccountSet,
     AccountSetAsfFlag,
     AMMCreate,
+    CredentialAccept,
     CredentialCreate,
     LoanBrokerCoverDeposit,
     LoanBrokerSet,
@@ -636,24 +637,54 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             client,
             seq,
         )
+        # Subjects accept their credentials so they become permissioned-domain
+        # members (the step-11 domains accept {accs[30], _SETUP_CREDENTIAL_TYPE}).
+        # Setup credentials have no expiration, so membership stays stable.
+        summary["credential_accepts"] = await _submit_batch(
+            "credential_accepts",
+            [
+                (
+                    "CredentialAccept",
+                    CredentialAccept(
+                        account=accs[31 + i].address,
+                        issuer=issuer.address,
+                        credential_type=_SETUP_CREDENTIAL_TYPE,
+                    ),
+                    accs[31 + i].wallet,
+                )
+                for i in range(5)
+            ],
+            client,
+            seq,
+        )
     else:
         summary["credentials"] = 0
+        summary["credential_accepts"] = 0
 
     # ── 10. Tickets ──────────────────────────────────────────────────
+    # 40-42: generic ticket holders. 50-52: domain owners (always domain
+    # members) — giving them tickets makes the ticket x permissioned-DEX valid
+    # path reachable from setup (a ticket holder that is also a domain member).
+    ticket_indices = [i for i in (40, 41, 42, 50, 51, 52) if i < len(accs)]
     summary["tickets"] = await _submit_batch(
         "tickets",
         [
             (
                 "TicketCreate",
-                TicketCreate(account=accs[40 + i].address, ticket_count=_TICKET_COUNT),
-                accs[40 + i].wallet,
+                TicketCreate(account=accs[i].address, ticket_count=_TICKET_COUNT),
+                accs[i].wallet,
             )
-            for i in range(min(3, max(0, len(accs) - 40)))
+            for i in ticket_indices
         ],
         client,
         seq,
     )
     summary["tickets"] *= _TICKET_COUNT
+    # TicketCreate advances the account Sequence by TicketCount + 1; next_seq
+    # only counted the +1, so align the tracker for accounts reused later
+    # (e.g. domain owners 50-52 create their domains in step 11).
+    for i in ticket_indices:
+        seq.advance(accs[i].address, _TICKET_COUNT)
 
     # ── 11. Permissioned domains ─────────────────────────────────────
     if len(accs) > 52:

@@ -17,14 +17,18 @@ _LOC_CLASS = ""
 _LOC_COL = 0
 
 # Engine results that indicate a rippled internal error (exception caught,
-# invariant violated, etc.). Surfaced from BOTH the immediate /submit response
-# and the validated WS stream — though tef* never reaches validation, so the
-# submit-time check is what actually catches these in practice.
+# invariant violated, etc.). Checked on BOTH the submit response and the
+# validated WS stream:
+#   - tef* never validates; the submit-time check catches those.
+#   - tecINVARIANT_FAILED claims a fee and DOES validate (rippled returns it on
+#     the first invariant failure, escalating to tefINVARIANT_FAILED only if the
+#     fee-only retry also fails) — so the validated-side check catches it.
 _RIPPLED_INTERNAL_ERRORS = (
     "tefEXCEPTION",
     "tefINTERNAL",
     "tefINVARIANT_FAILED",
     "tefFAILURE",
+    "tecINVARIANT_FAILED",
 )
 
 # Types whose current faulty handler never produces a non-tesSUCCESS engine
@@ -43,7 +47,11 @@ _NO_FAILURE_TYPES = {
 # - AMMDelete: rippled auto-deletes empty AMMs as a side effect of the last
 #   LP's TF_WITHDRAW_ALL, so AMMDelete usually finds the AMM already gone
 #   (tecAMM_NOT_FOUND) or with outstanding LP tokens (tecAMM_NOT_EMPTY).
-_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete"}
+# - PaymentDomainXC: cross-currency domain payment success needs resting domain
+#   liquidity in the matching direction, which the workload does not guarantee;
+#   it reliably exercises the both-in-domain preclaim + domain pathfinding but
+#   usually ends tecPATH_DRY. Drop from this set if runs show success is hit.
+_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC"}
 
 # Metadata expectations for tx types that must create/modify/delete specific
 # ledger entry types on tesSUCCESS.  Each value is a tuple of allowed node
@@ -152,6 +160,7 @@ def register_assertions() -> None:
         "nfts",
         "nft_offers",
         "credentials",
+        "credential_accepts",
         "tickets",
         "domains",
         "loan_brokers",
@@ -206,7 +215,9 @@ def tx_submitted(name: str, txn: object = None, result: dict | None = None) -> N
     details: dict[str, str] = {"tx_type": name}
     if txn is not None:
         try:
-            raw = txn.to_xrpl()
+            # Accept either an xrpl-py model or an already-serialized XRPL dict
+            # (the raw-submit path in submit.py passes the mutated dict directly).
+            raw = txn.to_xrpl() if hasattr(txn, "to_xrpl") else txn
             details["account"] = raw.get("Account", "")
             details["sequence"] = str(raw.get("Sequence", ""))
             details.update(_extract_object_ids(raw))
