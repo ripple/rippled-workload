@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 import xrpl.models
 from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
+from xrpl.models.transactions import MPTokenIssuanceCreateFlag
 
 from workload.models import (
     AMM,
@@ -138,9 +139,14 @@ def _on_trust_set(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _parse_asset(
-    raw: dict,
+    raw: dict | str,
 ) -> IssuedCurrency | MPTCurrency | xrpl.models.XRP:
-    """Parse an Asset field from a transaction JSON into an xrpl-py model."""
+    """Parse an Asset field from a transaction JSON into an xrpl-py model.
+
+    A plain string (e.g. an XRP drops amount) maps to XRP.
+    """
+    if not isinstance(raw, dict):
+        return xrpl.models.XRP()
     if "mpt_issuance_id" in raw:
         return MPTCurrency(mpt_issuance_id=raw["mpt_issuance_id"])
     if "issuer" in raw:
@@ -233,7 +239,17 @@ def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
     # mpt_issuance_id is at the top level of meta (like nftoken_id for NFTs)
     mpt_id = meta.get("mpt_issuance_id")
     if mpt_id:
-        w.mpt_issuances.append(MPTokenIssuance(issuer=tx["Account"], mpt_issuance_id=mpt_id))
+        flags = tx.get("Flags", 0)
+        issuance = MPTokenIssuance(
+            issuer=tx["Account"],
+            mpt_issuance_id=mpt_id,
+            can_trade=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRADE)),
+            can_transfer=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER)),
+            require_auth=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH)),
+            # lock state is set later by setup, not at create
+            locked=False,
+        )
+        w.mpt_issuances.append(issuance)
 
 
 def _on_mpt_destroy(w: Workload, tx: dict, meta: dict) -> None:
@@ -559,20 +575,13 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
 def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
     amm_id = _extract_created_id(meta, "AMM")
     if amm_id:
-        # Parse both assets from the AMMCreate transaction
+        # Parse both assets from the AMMCreate transaction. Use _parse_asset so
+        # MPT amounts (dict with mpt_issuance_id, no currency) are tracked too.
         asset1_raw = tx.get("Amount", {})
         asset2_raw = tx.get("Amount2", {})
-        assets = []
-        for raw in [asset1_raw, asset2_raw]:
-            if isinstance(raw, dict) and "currency" in raw:
-                assets.append(
-                    IssuedCurrency(
-                        currency=raw["currency"],
-                        issuer=raw.get("issuer", ""),
-                    )
-                )
-            elif isinstance(raw, str):
-                assets.append(xrpl.models.XRP())
+        assets = [
+            _parse_asset(raw) for raw in (asset1_raw, asset2_raw) if isinstance(raw, (dict, str))
+        ]
         # Extract LP token from created AMM node
         lp_token = []
         for node in meta.get("AffectedNodes", []):

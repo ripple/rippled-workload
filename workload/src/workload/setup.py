@@ -4,7 +4,7 @@ Creates the minimum ledger state needed for all transaction types to operate,
 including IOU gateways with token distribution, MPT authorization, and AMM pools.
 
 Account allocation:
-  [0..4]   — MPT issuers
+  [0..5]   — MPT issuers (one per flag cohort; [5] is the lockable cohort)
   [10..16] — Vault creators (also get trust lines + IOU/MPT balances for non-XRP vaults)
   [20..24] — NFT minters
   [30..35] — Credential issuer + subjects
@@ -46,6 +46,8 @@ from xrpl.models.transactions import (
     MPTokenAuthorize,
     MPTokenIssuanceCreate,
     MPTokenIssuanceCreateFlag,
+    MPTokenIssuanceSet,
+    MPTokenIssuanceSetFlag,
     NFTokenCreateOffer,
     NFTokenCreateOfferFlag,
     NFTokenMint,
@@ -264,11 +266,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     holder_indices = list(_HOLDER_RANGE) + list(_VAULT_RANGE)
 
     # Record addresses used by setup so AccountDelete won't target them.
-    # Indices: gateways (60-61), MPT issuers (0-4), vault creators (10-16),
+    # Indices: gateways (60-61), MPT issuers (0-5), vault creators (10-16),
     # NFT minters (20-24), credential issuer + subjects (30-35), ticket
     # holders (40-42), domain creators (50-52), IOU/MPT holders (62-71).
     _setup_indices: set[int] = (
-        set(range(5))
+        set(range(6))
         | set(range(10, 17))
         | set(range(20, 25))
         | set(range(30, 36))
@@ -355,19 +357,38 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 )
     summary["iou_distribution"] = await _submit_batch("iou_distribution", iou_txns, client, seq)
 
-    # ── 4. MPT issuances: 5 from accounts[0..4] ─────────────────────
-    _mpt_flags = (
-        MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK | MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
-    )
+    # ── 4. MPT issuances: 6 flag-distinct cohorts, one issuer each ───
+    # Flag-distinct cohorts so both valid DEX/AMM paths and the XLS-82 fault
+    # gates (tecNO_PERMISSION/tecNO_AUTH/tecFROZEN) become reachable:
+    #   [0] tradeable    CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER
+    #   [1] tradeable    CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER
+    #   [2] no-trade     CAN_LOCK
+    #   [3] no-transfer  CAN_LOCK | CAN_TRADE
+    #   [4] require-auth CAN_LOCK | CAN_TRADE | CAN_TRANSFER | REQUIRE_AUTH
+    #   [5] lockable     CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER (locked in 6b)
+    _LOCK = MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK
+    _CLAW = MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
+    _TRADE = MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRADE
+    _XFER = MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER
+    _AUTH = MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH
+    _mpt_cohorts: list[tuple[int, int]] = [
+        (0, _LOCK | _CLAW | _TRADE | _XFER),  # tradeable
+        (1, _LOCK | _CLAW | _TRADE | _XFER),  # tradeable
+        (2, _LOCK),  # no-trade
+        (3, _LOCK | _TRADE),  # no-transfer
+        (4, _LOCK | _TRADE | _XFER | _AUTH),  # require-auth
+        (5, _LOCK | _CLAW | _TRADE | _XFER),  # lockable (locked in 6b)
+    ]
     summary["mpt_issuances"] = await _submit_batch(
         "mpt",
         [
             (
                 "MPTokenIssuanceCreate",
-                MPTokenIssuanceCreate(account=accs[i].address, flags=_mpt_flags),
+                MPTokenIssuanceCreate(account=accs[i].address, flags=flags),
                 accs[i].wallet,
             )
-            for i in range(min(5, len(accs)))
+            for i, flags in _mpt_cohorts
+            if i < len(accs)
         ],
         client,
         seq,
@@ -422,6 +443,34 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     summary["mpt_distribution"] = await _submit_batch(
         "mpt_distribution", mpt_dist_txns, client, seq
     )
+
+    # ── 6b. MPT lock: lock the lockable issuance ─────────────────────
+    # The cohort minted from accs[5] is reserved for the locked state so the
+    # tecFROZEN/tecLOCKED gates are reachable. Lock it after distribution so
+    # holders are funded before the freeze takes effect.
+    lock_count = 0
+    if len(accs) > 5:
+        lockable = next((m for m in workload.mpt_issuances if m.issuer == accs[5].address), None)
+        if lockable is not None:
+            lock_count = await _submit_batch(
+                "mpt_lock",
+                [
+                    (
+                        "MPTokenIssuanceSet",
+                        MPTokenIssuanceSet(
+                            account=accs[5].address,
+                            mptoken_issuance_id=lockable.mpt_issuance_id,
+                            flags=MPTokenIssuanceSetFlag.TF_MPT_LOCK,
+                        ),
+                        accs[5].wallet,
+                    )
+                ],
+                client,
+                seq,
+            )
+            if lock_count:
+                lockable.locked = True
+    summary["mpt_lock"] = lock_count
 
     # ── 7. Vaults: mix of XRP, IOU, and MPT assets ───────────────────
     vault_txns = []
