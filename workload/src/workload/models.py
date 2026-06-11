@@ -84,7 +84,7 @@ class DID:
 @dataclass
 class AMM:
     account: str
-    assets: list[IssuedCurrency]
+    assets: list[IssuedCurrency | MPTCurrency | xrpl.models.XRP]
     lp_token: list[IssuedCurrency]
 
 
