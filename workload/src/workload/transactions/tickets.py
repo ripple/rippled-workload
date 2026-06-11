@@ -250,6 +250,9 @@ _TICKET_EXCLUDED: set[str] = {
     "AMMDelete",
     "OfferCreate",
     "OfferCancel",
+    # OfferCreateMPT needs MPT-issuance state the (dst, common)-only builder
+    # can't reach — same rationale as OfferCreate / AMMCreate above.
+    "OfferCreateMPT",
     # PaymentChannelCreate needs public_key from the wallet, which the
     # (dst, common)-only builder signature can't reach.
     "PaymentChannelCreate",
