@@ -15,7 +15,6 @@ precedent in ws_listener.py).
 
 from __future__ import annotations
 
-import xrpl.models
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.currencies import IssuedCurrency
@@ -70,7 +69,7 @@ def _amm_iou(amms: list[AMM]) -> IssuedCurrency | None:
     if not amms:
         return None
     amm = choice(amms)
-    ious = [a for a in amm.assets if not isinstance(a, xrpl.models.XRP)]
+    ious = [a for a in amm.assets if isinstance(a, IssuedCurrency)]
     return choice(ious) if ious else None
 
 

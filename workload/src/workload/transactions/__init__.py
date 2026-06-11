@@ -848,7 +848,7 @@ REGISTRY = [
         "AMMCreate",
         "/amm/create/random",
         amm_create,
-        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.mpt_issuances, w.client),
         _on_amm_create,
     ),
     (
