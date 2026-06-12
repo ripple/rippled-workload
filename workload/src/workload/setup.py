@@ -359,7 +359,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     # ── 4. MPT issuances: 6 flag-distinct cohorts, one issuer each ───
     # Flag-distinct cohorts so both valid DEX/AMM paths and the XLS-82 fault
-    # gates (tecNO_PERMISSION/tecNO_AUTH/tecFROZEN) become reachable:
+    # gates (tecNO_PERMISSION/tecNO_AUTH/tecLOCKED) become reachable:
     #   [0] tradeable    CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER
     #   [1] tradeable    CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER
     #   [2] no-trade     CAN_LOCK
@@ -446,7 +446,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     # ── 6b. MPT lock: lock the lockable issuance ─────────────────────
     # The cohort minted from accs[5] is reserved for the locked state so the
-    # tecFROZEN/tecLOCKED gates are reachable. Lock it after distribution so
+    # locked-MPT gates are reachable (tecLOCKED on offers/AMM, tecPATH_DRY on
+    # MPTokensV2 payments). Lock it after distribution so
     # holders are funded before the freeze takes effect.
     lock_count = 0
     if len(accs) > 5:
