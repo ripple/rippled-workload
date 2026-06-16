@@ -30,8 +30,18 @@ _TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
 
 
 def _amount_is_mpt(amt: object) -> bool:
-    """True when an OfferCreate leg (Amount field) is an MPT amount object."""
+    """True when an amount field is an MPT amount object."""
     return isinstance(amt, dict) and "mpt_issuance_id" in amt
+
+
+def _delivered_amount(tx: dict) -> object:
+    """A validated Payment's delivered amount.
+
+    api_version 2 renames the Payment ``Amount`` field to ``DeliverMax`` (and
+    drops ``Amount`` from the response/stream JSON), so read ``DeliverMax`` with
+    an ``Amount`` fallback for api_version 1. The workload's WS stream is
+    api_version 2, so a Payment here has ``DeliverMax``, never ``Amount``."""
+    return tx.get("DeliverMax", tx.get("Amount"))
 
 
 def _handle_validated_tx(workload: Workload, msg: dict) -> None:
@@ -87,8 +97,9 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
         is_hybrid = bool(tx.get("Flags", 0) & _TF_HYBRID)
         tx_result("OfferCreateHybrid" if is_hybrid else "OfferCreateDomain", result)
     elif tx_type == "Payment" and tx.get("DomainID"):
-        # Non-XRP delivery (Amount is an object) or a SendMax means cross-currency.
-        is_xc = tx.get("SendMax") is not None or not isinstance(tx.get("Amount"), str)
+        # Non-XRP delivery (delivered amount is an object) or a SendMax means
+        # cross-currency. Read DeliverMax (api_version 2 renames Amount).
+        is_xc = tx.get("SendMax") is not None or not isinstance(_delivered_amount(tx), str)
         tx_result("PaymentDomainXC" if is_xc else "PaymentDomain", result)
 
     # MPT-on-DEX (XLS-82): an OfferCreate with an MPT leg. Independent of the
@@ -104,7 +115,7 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     # handler's MPT sends — intentional: any MPT-bearing payment feeds the
     # PaymentMPT buckets.
     if tx_type == "Payment" and (
-        _amount_is_mpt(tx.get("Amount")) or _amount_is_mpt(tx.get("SendMax"))
+        _amount_is_mpt(_delivered_amount(tx)) or _amount_is_mpt(tx.get("SendMax"))
     ):
         tx_result("PaymentMPT", result)
 
