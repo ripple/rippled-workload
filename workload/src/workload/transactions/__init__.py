@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 import xrpl.models
 from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
+from xrpl.models.transactions import MPTokenIssuanceCreateFlag
 
 from workload.models import (
     AMM,
@@ -74,6 +75,7 @@ from workload.transactions.lending import (
     loan_set,
 )
 from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
+from workload.transactions.mpt_dex import offer_create_mpt, payment_mpt
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -138,9 +140,14 @@ def _on_trust_set(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _parse_asset(
-    raw: dict,
+    raw: dict | str,
 ) -> IssuedCurrency | MPTCurrency | xrpl.models.XRP:
-    """Parse an Asset field from a transaction JSON into an xrpl-py model."""
+    """Parse an Asset field from a transaction JSON into an xrpl-py model.
+
+    A plain string (e.g. an XRP drops amount) maps to XRP.
+    """
+    if not isinstance(raw, dict):
+        return xrpl.models.XRP()
     if "mpt_issuance_id" in raw:
         return MPTCurrency(mpt_issuance_id=raw["mpt_issuance_id"])
     if "issuer" in raw:
@@ -233,7 +240,32 @@ def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
     # mpt_issuance_id is at the top level of meta (like nftoken_id for NFTs)
     mpt_id = meta.get("mpt_issuance_id")
     if mpt_id:
-        w.mpt_issuances.append(MPTokenIssuance(issuer=tx["Account"], mpt_issuance_id=mpt_id))
+        flags = tx.get("Flags", 0)
+        issuance = MPTokenIssuance(
+            issuer=tx["Account"],
+            mpt_issuance_id=mpt_id,
+            can_trade=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRADE)),
+            can_transfer=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER)),
+            require_auth=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH)),
+            # lock state is set later by setup, not at create
+            locked=False,
+        )
+        w.mpt_issuances.append(issuance)
+
+
+def _on_mpt_authorize(w: Workload, tx: dict, meta: dict) -> None:
+    mpt_id = tx.get("MPTokenIssuanceID")
+    if not mpt_id:
+        return
+    # Holder self-opt-in: the submitter holds. Issuer-authorizes-holder mode:
+    # the Holder field names the account that now holds an MPToken.
+    held = tx.get("Holder") or tx.get("Account", "")
+    if not held:
+        return
+    for m in w.mpt_issuances:
+        if m.mpt_issuance_id == mpt_id:
+            m.holders.add(held)
+            return
 
 
 def _on_mpt_destroy(w: Workload, tx: dict, meta: dict) -> None:
@@ -559,20 +591,13 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
 def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
     amm_id = _extract_created_id(meta, "AMM")
     if amm_id:
-        # Parse both assets from the AMMCreate transaction
+        # Parse both assets from the AMMCreate transaction. Use _parse_asset so
+        # MPT amounts (dict with mpt_issuance_id, no currency) are tracked too.
         asset1_raw = tx.get("Amount", {})
         asset2_raw = tx.get("Amount2", {})
-        assets = []
-        for raw in [asset1_raw, asset2_raw]:
-            if isinstance(raw, dict) and "currency" in raw:
-                assets.append(
-                    IssuedCurrency(
-                        currency=raw["currency"],
-                        issuer=raw.get("issuer", ""),
-                    )
-                )
-            elif isinstance(raw, str):
-                assets.append(xrpl.models.XRP())
+        assets = [
+            _parse_asset(raw) for raw in (asset1_raw, asset2_raw) if isinstance(raw, (dict, str))
+        ]
         # Extract LP token from created AMM node
         lp_token = []
         for node in meta.get("AffectedNodes", []):
@@ -719,7 +744,7 @@ REGISTRY = [
         "/mpt/authorize/random",
         mpt_authorize,
         lambda w: (w.accounts, w.mpt_issuances, w.client),
-        None,
+        _on_mpt_authorize,
     ),
     (
         "MPTokenIssuanceSet",
@@ -823,7 +848,7 @@ REGISTRY = [
         "AMMCreate",
         "/amm/create/random",
         amm_create,
-        lambda w: (w.accounts, w.amms, w.trust_lines, w.client),
+        lambda w: (w.accounts, w.amms, w.trust_lines, w.mpt_issuances, w.client),
         _on_amm_create,
     ),
     (
@@ -905,6 +930,27 @@ REGISTRY = [
         "/payment/domain/xc/random",
         payment_domain_xc,
         lambda w: (w.accounts, w.domains, w.credentials, w.amms, w.client),
+        None,
+    ),
+    # ── MPT-on-DEX (XLS-82) ──────────────────────────────────────────
+    # Synthetic assertion name; on-ledger TransactionType stays OfferCreate.
+    # State is tracked by the real-type updater (_on_offer_create), and
+    # ws_listener fires the matching tx_result for the buckets below.
+    (
+        "OfferCreateMPT",
+        "/offer/create/mpt/random",
+        offer_create_mpt,
+        lambda w: (w.accounts, w.mpt_issuances, w.client),
+        None,
+    ),
+    # PaymentMPT: a Payment carrying an MPT. Synthetic name; on-ledger type is
+    # Payment (no state updater — Payment has none). ws_listener fires the
+    # matching tx_result when a validated Payment carries an MPT leg.
+    (
+        "PaymentMPT",
+        "/payment/mpt/random",
+        payment_mpt,
+        lambda w: (w.accounts, w.mpt_issuances, w.client),
         None,
     ),
     (

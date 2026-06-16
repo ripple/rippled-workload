@@ -8,7 +8,7 @@ from __future__ import annotations
 import xrpl.models
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
-from xrpl.models.currencies import IssuedCurrency
+from xrpl.models.currencies import IssuedCurrency, MPTCurrency
 from xrpl.models.transactions import OfferCancel, OfferCreate
 from xrpl.models.transactions.offer_create import OfferCreateFlag
 
@@ -23,6 +23,12 @@ from workload.transactions.amm import _find_account_with_trust_lines
 
 def _fake_iou() -> IssuedCurrency:
     return IssuedCurrency(currency=params.currency_code(), issuer=params.fake_account())
+
+
+def _non_mpt_amms(amms: list[AMM]) -> list[AMM]:
+    """AMMs with no MPT leg — the generic OfferCreate path trades IOU/XRP
+    pools only; MPT pools are covered by OfferCreateMPT (mpt_dex.py)."""
+    return [a for a in amms if not any(isinstance(x, MPTCurrency) for x in a.assets)]
 
 
 def _random_flag() -> int:
@@ -89,7 +95,7 @@ def _find_account_for_amm(
     amm: AMM,
 ) -> UserAccount | None:
     """Find an account that has trust lines for the AMM's IOU assets."""
-    needed_ious = [a for a in amm.assets if not isinstance(a, xrpl.models.XRP)]
+    needed_ious = [a for a in amm.assets if isinstance(a, IssuedCurrency)]
     return _find_account_with_trust_lines(accounts, trust_lines, needed_ious)
 
 
@@ -116,7 +122,11 @@ async def _offer_create_valid(
     if not amms:
         return
 
-    amm = choice(amms)
+    iou_amms = _non_mpt_amms(amms)
+    if not iou_amms:
+        return
+
+    amm = choice(iou_amms)
     src = _find_account_for_amm(accounts, trust_lines, amm)
     if not src:
         return
@@ -175,9 +185,10 @@ async def _offer_create_faulty(
 
     elif mutation == "zero_amount":
         # Zero taker_gets or taker_pays
-        if not amms:
+        iou_amms = _non_mpt_amms(amms)
+        if not iou_amms:
             return
-        amm = choice(amms)
+        amm = choice(iou_amms)
         if len(amm.assets) < 2:
             return
         a2 = amm.assets[1] if isinstance(amm.assets[0], xrpl.models.XRP) else amm.assets[0]
@@ -191,9 +202,10 @@ async def _offer_create_faulty(
 
     elif mutation == "negative_iou_amount":
         # Negative IOU amount — passes xrpl-py, rejected by rippled
-        if not amms:
+        iou_amms = _non_mpt_amms(amms)
+        if not iou_amms:
             return
-        amm = choice(amms)
+        amm = choice(iou_amms)
         if len(amm.assets) < 2:
             return
         a2 = amm.assets[1] if isinstance(amm.assets[0], xrpl.models.XRP) else amm.assets[0]
@@ -207,9 +219,10 @@ async def _offer_create_faulty(
 
     else:  # crossed_offer
         # Create an offer that crosses itself (same account, opposite direction)
-        if not amms:
+        iou_amms = _non_mpt_amms(amms)
+        if not iou_amms:
             return
-        amm = choice(amms)
+        amm = choice(iou_amms)
         pair = _make_offer_amounts(amm)
         if not pair:
             return

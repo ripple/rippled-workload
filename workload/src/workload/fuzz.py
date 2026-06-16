@@ -118,7 +118,7 @@ async def submit_fuzzed(
 
     try:
         result = await submit_raw(name, base, client, wallet, _mutate)
-    except (XRPLBinaryCodecException, ValueError, TypeError, KeyError) as e:
+    except (XRPLBinaryCodecException, ValueError, TypeError, KeyError, OverflowError) as e:
         send_event(
             "workload::fuzz_skipped",
             {"tx_type": name, "ops": "; ".join(ops), "error": type(e).__name__},

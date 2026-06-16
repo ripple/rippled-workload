@@ -84,7 +84,7 @@ class DID:
 @dataclass
 class AMM:
     account: str
-    assets: list[IssuedCurrency]
+    assets: list[IssuedCurrency | MPTCurrency | xrpl.models.XRP]
     lp_token: list[IssuedCurrency]
 
 
@@ -119,6 +119,11 @@ class PermissionedDomain:
 class MPTokenIssuance:
     issuer: str
     mpt_issuance_id: str
+    can_trade: bool = False
+    can_transfer: bool = False
+    require_auth: bool = False
+    locked: bool = False
+    holders: set[str] = field(default_factory=set)
 
 
 @dataclass
