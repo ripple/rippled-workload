@@ -1,8 +1,22 @@
+# xrpld build image, built on XRPLF/rippled's Nix CI toolchain
+# (ghcr.io/xrplf/xrpld/nix-ubuntu): a single pinned clang (LLVM 22) + gcc, with
+# libstdc++/libgcc rebuilt against a glibc pinned to the oldest supported
+# release. rippled links -static-libstdc++/-static-libgcc (cmake/XrplCompiler.cmake)
+# and targets that old glibc, so the resulting binary is portable: it runs on a
+# clean ubuntu runtime with nothing extra installed. We mirror rippled CI's
+# conan setup (global.conf + profiles + xrplf remote + the `ci` profile) so our
+# package-ids match the prebuilt cache on conan.ripplex.io and we get cache hits.
 ARG CODENAME=noble
-FROM ghcr.io/xrplf/ci/ubuntu-${CODENAME}:clang-17 AS build
+ARG NIX_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:latest-amd64
+FROM ${NIX_IMAGE} AS build
+
+# The Nix image is nixos/nix-based — no reliable /bin/sh, so force bash. The CI
+# toolchain (clang/clang++, conan, cmake, ninja, git, curl, perl) is already on
+# PATH via /nix/ci-env/bin, and SSL_CERT_FILE is set for HTTPS.
+SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
 
 # Antithesis supports only x86_64 architecture
-RUN uname -m | grep -E '^x86_64$'
+RUN [ "$(uname -m)" = "x86_64" ]
 
 ARG XRPLD_REPO="https://github.com/XRPLF/rippled.git"
 ARG XRPLD_COMMIT="develop"
@@ -11,7 +25,10 @@ ARG FUZZER_REPO="https://github.com/ripple/rippled-fuzzer.git"
 ARG FUZZER_COMMIT="main"
 ARG FUZZER_CREDENTIALS=""
 
-ENV DEBIAN_FRONTEND=noninteractive \
+# Build with clang so -Dvoidstar=ON's coverage instrumentation (LLVM sancov) is
+# available; conan's profiles detect the compiler from CC/CXX.
+ENV CC=clang \
+    CXX=clang++ \
     SOURCE_DIR=/root/xrpld \
     BUILD_DIR=/root/build \
     FUZZER_SOURCE_DIR=/root/rippled-fuzzer \
@@ -20,10 +37,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Clone xrpld
 RUN <<EOF
     set -ex
-    if [ -n "${XRPLD_CREDENTIALS}" ]; then 
-    REPO_URL="$(echo "${XRPLD_REPO}" | sed "s#https://#https://${XRPLD_CREDENTIALS}@#")"; 
-    else 
-    REPO_URL="${XRPLD_REPO}";
+    REPO_URL="${XRPLD_REPO}"
+    if [ -n "${XRPLD_CREDENTIALS}" ]; then
+        REPO_URL="https://${XRPLD_CREDENTIALS}@${XRPLD_REPO#https://}"
     fi
     git clone --depth 1 --branch ${XRPLD_COMMIT} ${REPO_URL} ${SOURCE_DIR}
     git -C ${SOURCE_DIR} checkout ${XRPLD_COMMIT}
@@ -34,35 +50,40 @@ RUN <<EOF
 EOF
 
 # Force-enable all amendments for Antithesis testing
-RUN sed -i 's/Supported::[Nn]o/Supported::Yes/g' ${SOURCE_DIR}/include/xrpl/protocol/detail/features.macro
+RUN perl -i -pe 's/Supported::[Nn]o/Supported::Yes/g' \
+    ${SOURCE_DIR}/include/xrpl/protocol/detail/features.macro
 
 # Clone fuzzer
 RUN <<EOF
     set -ex
+    FUZZER_URL="${FUZZER_REPO}"
     if [ -n "${FUZZER_CREDENTIALS}" ]; then
-    FUZZER_URL="$(echo "${FUZZER_REPO}" | sed "s#https://#https://${FUZZER_CREDENTIALS}@#")";
-    else
-    FUZZER_URL="${FUZZER_REPO}";
+        FUZZER_URL="https://${FUZZER_CREDENTIALS}@${FUZZER_REPO#https://}"
     fi
     git clone --depth 1 --branch ${FUZZER_COMMIT} ${FUZZER_URL} ${FUZZER_SOURCE_DIR}
     git -C ${FUZZER_SOURCE_DIR} checkout ${FUZZER_COMMIT}
     rm -rf ${FUZZER_SOURCE_DIR}/.git
 EOF
 
-# Configure Conan
+WORKDIR ${SOURCE_DIR}
+
+# Configure Conan (mirror rippled CI: global.conf + profiles + xrplf remote)
 RUN <<EOF
     set -ex
-    conan remote add --index 0 xrplf https://conan.ripplex.io
+    cat conan/global.conf >> "$(conan config home)/global.conf"
+    conan config install conan/profiles/ --target-folder "$(conan config home)/profiles/"
+    conan remote add --index 0 --force xrplf https://conan.ripplex.io
 EOF
-    WORKDIR ${SOURCE_DIR}
 
-RUN conan config install conan/profiles/ --target-folder $(conan config home)/profiles/
-
+# Install dependencies with the `ci` profile so package-ids match the prebuilt
+# cache (its libc_version conf is part of the package-id).
 RUN <<EOF
     set -ex
     conan install ${SOURCE_DIR} \
         --output-folder ${BUILD_DIR} \
-        --settings:a build_type=Debug \
+        --profile:all ci \
+        --options:host='&:xrpld=True' \
+        --settings:all build_type=Debug \
         --build missing
 EOF
 
@@ -77,17 +98,37 @@ EOF
 
 RUN cmake --build ${BUILD_DIR} --parallel $(nproc) && cmake --install ${BUILD_DIR} --prefix /opt/xrpld
 
+# Nix builds binaries with the loader's PT_INTERP pointing into /nix/store and a
+# /nix/store rpath, so they won't start in the clean ubuntu runtime stage. Repoint
+# to the system loader and drop the rpath (mirrors rippled CI; safe here because
+# we don't enable asan/tsan/ubsan — only voidstar). x86_64 loader (enforced above).
+RUN patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath /opt/xrpld/bin/xrpld
+
+# Export the just-cloned rippled source as `xrpl/develop` into the local conan
+# cache so the fuzzer builds libxrpl from the SAME develop it was checked out at.
+# Without this, the fuzzer's `xrpl/develop` requirement resolves to a separately
+# published package on conan.ripplex.io that can lag develop (e.g. missing
+# newly-relocated headers) — xrpld would be latest develop but the fuzzer's
+# libxrpl stale. `--version develop` overrides the recipe versionString
+# (e.g. 3.2.0-rc3) to match the fuzzer's `xrpl/develop` pin.
+RUN conan export ${SOURCE_DIR} --version develop
+
 WORKDIR ${FUZZER_SOURCE_DIR}
 
-# Install fuzzer dependencies with Conan
+# Install fuzzer dependencies with Conan. Use the same `ci` profile as the
+# xrpld build above so shared deps (boost, openssl, protobuf, grpc, …) resolve
+# to package-ids already in the local conan cache → reused, not rebuilt.
+# `xrpl/develop` is built from the source exported above (`--build "xrpl/*"`) so
+# the fuzzer's libxrpl matches the cloned develop, not a stale published package.
 RUN <<EOF
     set -ex
     mkdir -p ${FUZZER_BUILD_DIR}
-    conan lock create .
     conan install ${FUZZER_SOURCE_DIR} \
         --output-folder ${FUZZER_BUILD_DIR} \
+        --profile:all ci \
+        --settings:all build_type=Debug \
         --build missing \
-        --settings build_type=Debug
+        --build "xrpl/*"
 EOF
 
 # Configure and build fuzzer
@@ -106,17 +147,21 @@ RUN <<EOF
     set -ex
     mkdir -p /opt/fuzzer/bin
     cp ${FUZZER_BUILD_DIR}/rippled-fuzzer /opt/fuzzer/bin/
+    patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath /opt/fuzzer/bin/rippled-fuzzer
 EOF
 
-# Download Antithesis instrumentation library
-RUN wget https://antithesis.com/assets/instrumentation/libvoidstar.so -O /usr/lib/libvoidstar.so
+# Download Antithesis instrumentation library (loaded at runtime by the platform;
+# not needed at build/link time). /usr/lib may not exist on the Nix base, so
+# stage it under /root and place it in the runtime image below.
+RUN curl -fsSL https://antithesis.com/assets/instrumentation/libvoidstar.so \
+    -o /root/libvoidstar.so
 
 # Runtime stage
 FROM ubuntu:${CODENAME}
 
 COPY --from=build /opt/xrpld /opt/xrpld
 COPY --from=build /opt/fuzzer /opt/fuzzer
-COPY --from=build /usr/lib/libvoidstar.so /usr/lib/libvoidstar.so
+COPY --from=build /root/libvoidstar.so /usr/lib/libvoidstar.so
 COPY --from=build /root/xrpld.txt /opt/xrpld/bin/xrpld.git-commit.txt
 
 RUN ln -s /opt/xrpld/bin/xrpld /usr/local/bin/xrpld
@@ -138,4 +183,3 @@ RUN mkdir -p /etc/fuzzer /var/lib/xrpld/db /var/log/xrpld
 # Copy entrypoint script
 COPY fuzzer-entrypoint.sh /opt/fuzzer/fuzzer-entrypoint.sh
 RUN chmod +x /opt/fuzzer/fuzzer-entrypoint.sh
-
