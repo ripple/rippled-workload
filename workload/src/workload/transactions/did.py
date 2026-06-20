@@ -1,4 +1,4 @@
-"""DID transaction generators for the antithesis workload."""
+"""DID transaction generators."""
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import DIDDelete, DIDSet

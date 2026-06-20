@@ -1,54 +1,4 @@
-"""MPT-on-DEX workload handlers (XLS-82).
-
-Two synthetic assertion names share this module; the on-ledger TransactionType
-stays ``OfferCreate`` / ``Payment`` in each case. ws_listener fires the matching
-``tx_result(...)`` when a validated transaction carries an MPT leg, so the
-success/failure buckets for the synthetic name resolve (mirrors the
-permissioned-DEX precedent).
-
-OfferCreateMPT — an OfferCreate with an MPT leg.
-
-Direction semantics: ``TakerGets`` is what the offer owner SELLS; ``TakerPays``
-is what the owner BUYS. A buy-MPT-for-XRP offer (taker_gets=XRP, taker_pays=MPT)
-needs only XRP funding so any account can place it and it rests (the book for
-this MPT pair is typically empty), reliably tesSUCCESS. A sell-MPT-for-XRP offer
-by the issuer is also reliable (the issuer is funding-exempt on the TakerGets
-leg).
-
-XLS-82 gates exercised by the OfferCreate faulty path: both legs must carry
-lsfMPTCanTrade (else tecNO_PERMISSION); receiving a require-auth MPT the holder
-was never issuer-authorized for → tecNO_AUTH; a globally-locked MPT leg →
-tecLOCKED; a nonexistent issuance in TakerPays → tecNO_ISSUER (checkAcceptAsset
-reads the issuer embedded in the MPTokenIssuanceID); a non-holder selling MPT it
-does not hold → tecUNFUNDED_OFFER; same asset both legs → temREDUNDANT; zero MPT
-value → temBAD_OFFER (preflight saTakerPays <= kZero).
-
-PaymentMPT — a Payment carrying an MPT. The reliable valid surface is a direct
-holder→holder transfer of a tradeable MPT (CanTransfer set, both parties
-opted-in and funded by setup) → tesSUCCESS. With featureMPTokensV2 enabled a
-direct MPT payment routes through the payment engine (MPTEndpointPaymentStep),
-not the legacy V1 direct path, so its failure codes are the engine's:
-
-* dst with no MPToken (unauthorized receiver) → tecNO_AUTH
-  (MPTokenHelpers.cpp requireAuth, MPToken_test.cpp:1336-1342)
-* CanTransfer unset, holder→holder → tecNO_AUTH
-  (MPTokenHelpers.cpp canTransfer, MPToken_test.cpp:1321)
-* require-auth MPT to an unauthorized holder → tecNO_AUTH (requireAuth)
-* globally/individually locked, holder→holder → tecPATH_DRY under MPTokensV2
-  (terLOCKED from MPTEndpointStep::check is a retry code mapped to tecPATH_DRY
-  in Payment::doApply; MPToken_test.cpp:1379-1385 — NOT tecLOCKED)
-* deliver more than the source holds → tecPATH_PARTIAL
-  (Payment::doApply / MPToken_test.cpp:1359-1362)
-* nonexistent issuance → tecOBJECT_NOT_FOUND (requireAuth reads the issuance
-  keylet; MPToken_test.cpp:1656,1685)
-* zero/negative MPT Amount → temBAD_AMOUNT (preflight dstAmount <= kZero;
-  MPToken_test.cpp:1025-1029)
-
-A cross-token best-effort variant (SendMax in XRP, deliver MPT) routes through
-the order book and ends tecPATH_DRY with no resting liquidity
-(MPToken_test.cpp:4862 family); the direct path guarantees the success bucket,
-so PaymentMPT is NOT in assertions._NO_SUCCESS_TYPES.
-"""
+"""MPT-on-DEX (XLS-82): OfferCreateMPT, PaymentMPT submitted as OfferCreate/Payment."""
 
 from __future__ import annotations
 
@@ -64,12 +14,10 @@ from workload.randoms import choice, randint, random, sample
 from workload.submit import submit_raw, submit_tx
 
 # ── Cohort filter helpers ───────────────────────────────────────────
-# Defensively skip ``locked`` wherever a usable token is required.
 
 
 def _tradeable(mpts: list[MPTokenIssuance]) -> list[MPTokenIssuance]:
-    """Issuances usable on both legs of a resting offer: CanTrade + CanTransfer,
-    not require-auth (our setup never issuer-authorizes), not locked."""
+    """Usable on both offer legs: CanTrade + CanTransfer, not require-auth, not locked."""
     return [
         m
         for m in mpts
@@ -78,26 +26,22 @@ def _tradeable(mpts: list[MPTokenIssuance]) -> list[MPTokenIssuance]:
 
 
 def _no_trade(mpts: list[MPTokenIssuance]) -> list[MPTokenIssuance]:
-    """Issuances missing lsfMPTCanTrade → an offer leg referencing them gets
-    tecNO_PERMISSION."""
+    """Missing CanTrade → offer leg gets tecNO_PERMISSION."""
     return [m for m in mpts if m.can_trade is False]
 
 
 def _require_auth(mpts: list[MPTokenIssuance]) -> list[MPTokenIssuance]:
-    """Require-auth issuances (still CanTrade in our setup) whose holders were
-    never issuer-authorized → receiving them gets tecNO_AUTH."""
+    """Require-auth, holders never authorized → receiving gets tecNO_AUTH."""
     return [m for m in mpts if m.require_auth and not m.locked]
 
 
 def _locked(mpts: list[MPTokenIssuance]) -> list[MPTokenIssuance]:
-    """Globally-locked issuances → an offer leg referencing them gets tecLOCKED."""
+    """Globally-locked → offer leg gets tecLOCKED."""
     return [m for m in mpts if m.locked]
 
 
 def _no_transfer(mpts: list[MPTokenIssuance]) -> list[MPTokenIssuance]:
-    """Tradeable issuances missing lsfMPTCanTransfer (the idx3 setup cohort):
-    holders are opted-in and funded, but a holder→holder transfer fails
-    canTransfer → tecNO_AUTH. CanTrade is set so they are not in _no_trade."""
+    """CanTrade but not CanTransfer → holder→holder transfer fails canTransfer (tecNO_AUTH)."""
     return [
         m
         for m in mpts
@@ -106,7 +50,7 @@ def _no_transfer(mpts: list[MPTokenIssuance]) -> list[MPTokenIssuance]:
 
 
 def _controlled_holders(mpt: MPTokenIssuance, accounts: dict[str, UserAccount]) -> list[str]:
-    """Holders of ``mpt`` that we control (and so are funded by setup)."""
+    """Holders we control (hence funded by setup)."""
     return [h for h in mpt.holders if h in accounts]
 
 
@@ -127,11 +71,8 @@ def _offer_mpt_base(
     accounts: dict[str, UserAccount],
     mpt_issuances: list[MPTokenIssuance],
 ) -> tuple[OfferCreate, Wallet] | None:
-    """Build a valid MPT offer + its signing wallet. Shared by valid and fuzz.
-
-    ~40%: if we control the issuer, the issuer SELLS the MPT for XRP
-    (funding-exempt). Otherwise any account BUYS the MPT for XRP (needs only
-    XRP funding, rests in an empty book)."""
+    """Valid MPT offer + wallet; shared by valid and fuzz. ~40% issuer sells
+    (funding-exempt), else any account buys MPT for XRP (rests in empty book)."""
     tr = _tradeable(mpt_issuances)
     if not tr or not accounts:
         return None
@@ -172,13 +113,11 @@ async def _offer_create_mpt_faulty(
     lk = _locked(mpt_issuances)
     xrp = params.offer_xrp_drops()
 
-    # Build the conditional mutation list: only include a vector when its cohort
-    # (and the accounts it needs) exists. fake_mpt is always available.
+    # Include a vector only when its cohort + accounts exist; fake_mpt always available.
     mutations = ["fake_mpt"]
     if tr:
         mutations += ["fuzz", "redundant", "zero_amount"]
-        # unfunded_sell needs a tradeable MPT with at least one account that is
-        # neither the issuer nor a tracked holder (so its balance is provably 0).
+        # unfunded_sell needs a non-issuer non-holder (provably zero balance).
         if any(any(a != m.issuer and a not in m.holders for a in accounts) for m in tr):
             mutations.append("unfunded_sell")
     if nt:
@@ -190,7 +129,6 @@ async def _offer_create_mpt_faulty(
     mutation = choice(mutations)
 
     if mutation == "fuzz":
-        # Generative: corrupt a valid MPT offer in open-ended ways.
         built = _offer_mpt_base(accounts, mpt_issuances)
         if built is None:
             return
@@ -199,7 +137,7 @@ async def _offer_create_mpt_faulty(
         return
 
     if mutation == "not_tradeable":
-        # Any account BUYS a no-CanTrade MPT -> tecNO_PERMISSION.
+        # Buy a no-CanTrade MPT -> tecNO_PERMISSION.
         mpt = choice(nt)
         acct = accounts[choice(list(accounts))]
         base = OfferCreate(
@@ -213,9 +151,8 @@ async def _offer_create_mpt_faulty(
         return
 
     if mutation == "fake_mpt":
-        # Any account BUYS a nonexistent MPT issuance -> tecNO_ISSUER.
-        # checkAcceptAsset reads the issuer embedded in the fake MPTokenIssuanceID
-        # (its trailing 20 bytes) and rejects before canTrade is reached.
+        # Buy a nonexistent issuance -> tecNO_ISSUER (checkAcceptAsset reads the
+        # issuer embedded in the fake ID before canTrade).
         acct = accounts[choice(list(accounts))]
         base = OfferCreate(
             account=acct.address,
@@ -228,9 +165,7 @@ async def _offer_create_mpt_faulty(
         return
 
     if mutation == "unfunded_sell":
-        # A non-holder SELLS a tradeable MPT it does not hold -> tecUNFUNDED_OFFER.
-        # The seller is neither the issuer (funding-exempt) nor a tracked holder,
-        # so its balance is provably zero — any positive value suffices.
+        # Non-holder sells a tradeable MPT it does not hold -> tecUNFUNDED_OFFER.
         mpt = choice(tr)
         non_holders = [a for a in accounts if a != mpt.issuer and a not in mpt.holders]
         if not non_holders:
@@ -247,9 +182,8 @@ async def _offer_create_mpt_faulty(
         return
 
     if mutation == "require_auth":
-        # A non-issuer BUYS a require-auth MPT it was never authorized for
-        # -> tecNO_AUTH (receiving the MPT runs requireAuth). The issuer is
-        # exempt and would rest as tesSUCCESS, so exclude it.
+        # Non-issuer buys a require-auth MPT it was never authorized for ->
+        # tecNO_AUTH. Issuer is exempt (would rest tesSUCCESS), so exclude it.
         mpt = choice(ra)
         buyers = [a for a in accounts if a != mpt.issuer]
         if not buyers:
@@ -266,8 +200,7 @@ async def _offer_create_mpt_faulty(
         return
 
     if mutation == "locked":
-        # Any account BUYS a globally-locked MPT -> tecLOCKED
-        # (MPT path of checkGlobalFrozen).
+        # Buy a globally-locked MPT -> tecLOCKED.
         mpt = choice(lk)
         acct = accounts[choice(list(accounts))]
         base = OfferCreate(
@@ -281,8 +214,7 @@ async def _offer_create_mpt_faulty(
         return
 
     if mutation == "redundant":
-        # Same MPT on both legs -> temREDUNDANT. Build a valid BUY base, then
-        # copy the MPT TakerPays onto TakerGets.
+        # Same MPT on both legs -> temREDUNDANT.
         mpt = choice(tr)
         acct = accounts[choice(list(accounts))]
         base = OfferCreate(
@@ -299,9 +231,8 @@ async def _offer_create_mpt_faulty(
         await submit_raw("OfferCreateMPT", base, client, acct.wallet, mutate)
         return
 
-    # zero_amount — set the MPT leg's value to "0" -> temBAD_OFFER (preflight
-    # saTakerPays <= beast::kZero). xrpl-py accepts MPTAmount(value="0"), so the
-    # zero is injected via the raw path and rippled preflight is what rejects it.
+    # zero_amount — MPT leg value "0" -> temBAD_OFFER. xrpl-py accepts value="0",
+    # so the zero goes via the raw path for rippled preflight to reject.
     mpt = choice(tr)
     acct = accounts[choice(list(accounts))]
     base = OfferCreate(
@@ -336,12 +267,8 @@ def _payment_mpt_base(
     accounts: dict[str, UserAccount],
     mpt_issuances: list[MPTokenIssuance],
 ) -> tuple[Payment, Wallet] | None:
-    """Build a reliable direct holder→holder MPT transfer + its wallet. Shared
-    by the valid and fuzz paths.
-
-    Picks a tradeable issuance with at least two controlled (hence funded)
-    holders and moves a modest value (<=1000, well within the 10000 setup
-    distribution) between them → reliable tesSUCCESS. No SendMax, no Paths."""
+    """Reliable direct holder→holder MPT transfer + wallet; shared by valid and fuzz.
+    Tradeable issuance with ≥2 controlled holders, modest value -> reliable tesSUCCESS."""
     tr = _tradeable(mpt_issuances)
     if not tr or not accounts:
         return None
@@ -365,10 +292,8 @@ async def _payment_mpt_valid(
     client: AsyncJsonRpcClient,
 ) -> None:
     built = _payment_mpt_base(accounts, mpt_issuances)
-    # ~30%: a cross-token best-effort routed payment (sender pays XRP via
-    # SendMax, delivers MPT through the order book). Usually tecPATH_DRY with no
-    # resting liquidity — that exercises the routing/step code; the direct path
-    # below guarantees the success bucket.
+    # ~30%: cross-token routed payment (XRP via SendMax, deliver MPT through the
+    # book). Usually tecPATH_DRY; the direct path below guarantees the success bucket.
     if built is not None and random() < 0.3:
         tr = _tradeable(mpt_issuances)
         routable = [m for m in tr if _controlled_holders(m, accounts)]
@@ -405,41 +330,34 @@ async def _payment_mpt_faulty(
     nx = _no_transfer(mpt_issuances)
     base = _payment_mpt_base(accounts, mpt_issuances)
 
-    # Conditional mutation list: include a vector only when its cohort + the
-    # accounts it needs exist. fake_mpt builds its own Payment from scratch, so
-    # it is always available; zero_amount and fuzz need a buildable base.
+    # Include a vector only when its cohort + accounts exist. fake_mpt builds its
+    # own Payment so it is always available; zero_amount/fuzz need a buildable base.
     mutations = ["fake_mpt"]
     if base is not None:
         mutations += ["zero_amount", "fuzz"]
-    # dest_not_authorized needs a tradeable MPT with a controlled holder.
     if any(_controlled_holders(m, accounts) for m in tr):
         mutations.append("dest_not_authorized")
-    # overdraw needs >=2 controlled holders so the dst is authorized and the
-    # failure is the funds check (tecPATH_PARTIAL), not the receiver auth check.
+    # overdraw needs >=2 controlled holders so dst is authorized and the failure
+    # is the funds check (tecPATH_PARTIAL), not the receiver auth check.
     if any(len(_controlled_holders(m, accounts)) >= 2 for m in tr):
         mutations.append("overdraw")
-    # no_transfer needs >=2 controlled holders (neither is the issuer by cohort).
     if any(len(_controlled_holders(m, accounts)) >= 2 for m in nx):
         mutations.append("no_transfer")
-    # locked needs >=2 controlled holders (funded pre-lock).
     if any(len(_controlled_holders(m, accounts)) >= 2 for m in lk):
         mutations.append("locked")
-    # require_auth needs the issuer (controlled) + an unauthorized non-issuer dst.
+    # require_auth needs the issuer + an unauthorized non-issuer dst.
     if any(m.issuer in accounts and len(accounts) >= 2 for m in ra):
         mutations.append("require_auth")
     mutation = choice(mutations)
 
     if mutation == "fuzz":
-        # Generative: corrupt a valid direct MPT payment in open-ended ways.
         b, wallet = base  # type: ignore[misc]
         await submit_fuzzed("PaymentMPT", b, client, wallet)
         return
 
     if mutation == "fake_mpt":
-        # Deliver a nonexistent issuance -> tecOBJECT_NOT_FOUND (requireAuth
-        # reads the issuance keylet; MPToken_test.cpp:1656,1685). fake_mpt_id is
-        # well-formed (random sequence + random issuer), not the bad-asset
-        # sentinel that would yield temBAD_CURRENCY.
+        # Deliver a nonexistent issuance -> tecOBJECT_NOT_FOUND. fake_mpt_id is
+        # well-formed, not the bad-asset sentinel that yields temBAD_CURRENCY.
         src_id, dst_id = sample(list(accounts), 2)
         src = accounts[src_id]
         txn = Payment(
@@ -451,9 +369,8 @@ async def _payment_mpt_faulty(
         return
 
     if mutation == "dest_not_authorized":
-        # Deliver a tradeable MPT to a dst that holds no MPToken -> tecNO_AUTH
-        # (requireAuth on the receiver; MPToken_test.cpp:1336-1342). src is a
-        # controlled (funded) holder of that issuance.
+        # Deliver to a dst that holds no MPToken -> tecNO_AUTH (requireAuth on
+        # the receiver). src is a controlled holder.
         usable = [m for m in tr if _controlled_holders(m, accounts)]
         mpt = choice(usable)
         holders = _controlled_holders(mpt, accounts)
@@ -471,8 +388,7 @@ async def _payment_mpt_faulty(
         return
 
     if mutation == "no_transfer":
-        # CanTransfer unset, holder->holder where neither is the issuer
-        # -> tecNO_AUTH (canTransfer; MPToken_test.cpp:1321).
+        # CanTransfer unset, holder->holder, neither the issuer -> tecNO_AUTH.
         usable = [m for m in nx if len(_controlled_holders(m, accounts)) >= 2]
         mpt = choice(usable)
         src_id, dst_id = sample(_controlled_holders(mpt, accounts), 2)
@@ -486,9 +402,8 @@ async def _payment_mpt_faulty(
         return
 
     if mutation == "locked":
-        # Globally-locked MPT, holder->holder (both funded pre-lock)
-        # -> tecPATH_DRY under MPTokensV2 (terLOCKED retry-mapped in
-        # Payment::doApply; MPToken_test.cpp:1379-1385 — NOT tecLOCKED).
+        # Globally-locked, holder->holder -> tecPATH_DRY under MPTokensV2
+        # (terLOCKED retry-mapped in Payment::doApply — NOT tecLOCKED).
         usable = [m for m in lk if len(_controlled_holders(m, accounts)) >= 2]
         mpt = choice(usable)
         src_id, dst_id = sample(_controlled_holders(mpt, accounts), 2)
@@ -502,9 +417,8 @@ async def _payment_mpt_faulty(
         return
 
     if mutation == "require_auth":
-        # Issuer delivers a require-auth MPT to a holder that was never
-        # issuer-authorized -> tecNO_AUTH (requireAuth on the receiver). Our
-        # setup never issuer-authorizes require-auth cohort holders.
+        # Issuer delivers a require-auth MPT to a never-authorized holder ->
+        # tecNO_AUTH. Setup never authorizes require-auth cohort holders.
         usable = [m for m in ra if m.issuer in accounts]
         mpt = choice(usable)
         src = accounts[mpt.issuer]
@@ -521,10 +435,8 @@ async def _payment_mpt_faulty(
         return
 
     if mutation == "overdraw":
-        # Deliver far more than the source holds, holder->holder (both authorized)
-        # -> tecPATH_PARTIAL (Payment::doApply; MPToken_test.cpp:1359-1362). The
-        # floor (>10x the 10000 setup distribution) exceeds any balance the
-        # source could plausibly accumulate from modest transfers in a session.
+        # Deliver more than the source holds (both authorized) -> tecPATH_PARTIAL.
+        # Floor >10x the setup distribution exceeds any plausible session balance.
         usable = [m for m in tr if len(_controlled_holders(m, accounts)) >= 2]
         mpt = choice(usable)
         src_id, dst_id = sample(_controlled_holders(mpt, accounts), 2)
@@ -539,10 +451,8 @@ async def _payment_mpt_faulty(
         await submit_raw("PaymentMPT", txn, client, src.wallet)
         return
 
-    # zero_amount — set the MPT Amount's value to "0" -> temBAD_AMOUNT (preflight
-    # dstAmount <= kZero; MPToken_test.cpp:1025-1029). xrpl-py accepts
-    # MPTAmount(value="0"), so the zero is injected via the raw path and
-    # rippled preflight is what rejects it. Only in the list when base is built.
+    # zero_amount — MPT Amount value "0" -> temBAD_AMOUNT. xrpl-py accepts
+    # value="0", so the zero goes via the raw path for rippled preflight to reject.
     b, wallet = base  # type: ignore[misc]
 
     def mutate_zero(d: dict) -> None:

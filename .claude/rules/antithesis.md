@@ -1,30 +1,20 @@
 # Antithesis Rules
 
 ## SDK assertions
-
-- `assert_raw()` is the only reliable way to register assertions with dynamic names — f-strings are invisible to the static scanner
-- `TX_TYPES` is derived from `REGISTRY` in `transactions/__init__.py` — the single source of truth. Every entry gets `seen`, `success`, and `failure` catalog entries registered at startup via `register_assertions()`
-- `reachable` — must be reached at least once (tx submitted)
-- `sometimes(success)` — must succeed at least once
-- `sometimes(failure)` — must fail at least once (verifies error paths exercised)
-- `always` — must hold every time evaluated (invariants)
-- `unreachable` — must never be reached (fatal errors like missing accounts.json)
+- `assert_raw()` is the only way to register dynamic-name assertions — f-strings are invisible to the static scanner.
+- `TX_TYPES` derives from `REGISTRY` (single source of truth). Each entry gets `seen`/`success`/`failure` at startup via `register_assertions()`.
+- `reachable` — reached ≥ once. `sometimes(success)` — succeeds ≥ once. `sometimes(failure)` — fails ≥ once. `always` — invariant. `unreachable` — must never fire (fatal errors).
 
 ## SDK handler chain (Python)
-
-`VoidstarHandler` (/usr/lib/libvoidstar.so, injected by Antithesis) → `LocalHandler` (ANTITHESIS_SDK_LOCAL_OUTPUT env var) → `NoopHandler` (silent, discards everything)
-
-Outside Antithesis: `export ANTITHESIS_SDK_LOCAL_OUTPUT=/path/to/file.jsonl`
+`VoidstarHandler` (libvoidstar.so, injected by Antithesis) → `LocalHandler` (`ANTITHESIS_SDK_LOCAL_OUTPUT`) → `NoopHandler` (silent). Outside Antithesis: `export ANTITHESIS_SDK_LOCAL_OUTPUT=/path/file.jsonl`.
 
 ## Test composer phases
-
 ```
 setup_complete() -> [first_*] -> [drivers + anytime_*] -> [eventually_* / finally_*]
                     no faults     faults active           faults stopped
 ```
-
-Current state: only `first_*` and `parallel_driver_*` implemented.
+Implemented: `first_*`, `parallel_driver_*`.
 
 ## Network topology
-
-The workload submits to a **non-validating tracking node** (`xrpld`), intentionally isolated from Antithesis fault injection. The 6 validators (`val0`–`val4` + `fuzzer`) are subject to faults. Do not change the submission target — submitting to a validator would introduce fault-induced jitter into transaction results.
+Workload submits to the non-validating tracking node (`xrpld`), isolated from fault injection. The 6 validators (`val0`–`val4`, `fuzzer`) take faults. Don't retarget submission to a validator — fault jitter would corrupt transaction results.
+</content>

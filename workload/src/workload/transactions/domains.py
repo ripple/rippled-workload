@@ -28,12 +28,8 @@ async def permissioned_domain_set(
 
 
 def _accepted_from_real_credentials(credentials: list[Credential]) -> list[XRPLCredential] | None:
-    """Build accepted_credentials from real (preferably accepted) credentials so
-    the domain gains actual members — their subjects — not just the owner.
-
-    Random issuer/type pairs (the fallback) match no real credential, leaving the
-    domain owner-only and starving the >=2-member paths (PaymentDomain, ticket
-    domain payments)."""
+    """Use real credentials so the domain gains members; random pairs leave it
+    owner-only and starve the >=2-member paths (PaymentDomain, ticket domain payments)."""
     pool = [c for c in credentials if c.accepted] or credentials
     if not pool:
         return None
@@ -54,12 +50,10 @@ def _domain_set_base(
     domains: list[PermissionedDomain],
     credentials: list[Credential],
 ) -> tuple[PermissionedDomainSet, object]:
-    """Build a valid PermissionedDomainSet (sometimes a create, sometimes an
-    update of an owned domain) + its wallet. Shared by the valid and fuzz paths."""
+    """Valid PermissionedDomainSet (create/update an owned domain) + wallet."""
     accepted = _accepted_from_real_credentials(credentials) or _accepted_random(accounts)
     own_domains = [d for d in domains if d.owner in accounts]
     if own_domains and params.should_update_domain():
-        # Update an existing domain's accepted credentials (the modify path).
         domain = choice(own_domains)
         src = accounts[domain.owner]
         base = PermissionedDomainSet(
@@ -106,7 +100,6 @@ async def _permissioned_domain_set_faulty(
     )
 
     if mutation == "fuzz":
-        # Generative: corrupt a valid PermissionedDomainSet in open-ended ways.
         base, wallet = _domain_set_base(accounts, domains, credentials)
         await submit_fuzzed("PermissionedDomainSet", base, client, wallet)
         return
@@ -144,8 +137,7 @@ async def _permissioned_domain_set_faulty(
                 ctype = params.credential_type()
                 d["AcceptedCredentials"] = [_cred(ctype), _cred(ctype)]
 
-    # Base is always a valid model (>=1 distinct credential); mutate (when set)
-    # introduces the malformed array shape after serialization.
+    # Base is a valid model; mutate (when set) injects the malformed array post-serialization.
     base = PermissionedDomainSet(
         account=src.address,
         domain_id=domain_id,
@@ -171,8 +163,7 @@ async def permissioned_domain_delete(
 def _domain_delete_base(
     accounts: dict[str, UserAccount], domains: list[PermissionedDomain]
 ) -> tuple[PermissionedDomainDelete, object] | None:
-    """Build a valid PermissionedDomainDelete (owner deletes own domain) + its
-    wallet. Shared by the valid and fuzz paths."""
+    """Valid PermissionedDomainDelete (owner deletes own domain) + wallet."""
     if not domains:
         return None
     domain = choice(domains)
@@ -201,7 +192,6 @@ async def _permissioned_domain_delete_faulty(
     src = choice(list(accounts.values()))
     mutation = choice(["non_owner", "nonexistent", "zero_domain", "fuzz"])
     if mutation == "fuzz":
-        # Generative: corrupt a valid PermissionedDomainDelete in open-ended ways.
         built = _domain_delete_base(accounts, domains)
         if built is None:
             return

@@ -1,17 +1,4 @@
-"""Permissioned DEX workload handlers (featurePermissionedDEX).
-
-Domain-restricted offers, hybrid offers, and domain-restricted payments. A
-``DomainID`` offer crosses only the domain-keyed order book; a hybrid offer
-additionally rests in the open book. Both require the submitting account to be
-a member of the domain (owner, or holder of an accepted matching credential) —
-otherwise rippled returns ``tecNO_PERMISSION``.
-
-These are registered under synthetic assertion names (OfferCreateDomain,
-OfferCreateHybrid, PaymentDomain, PaymentDomainXC); the on-ledger
-TransactionType stays OfferCreate / Payment. ws_listener fires the matching
-``tx_result`` so the success/failure buckets resolve (see the TicketUse
-precedent in ws_listener.py).
-"""
+"""Permissioned DEX handlers (featurePermissionedDEX): domain/hybrid offers and domain payments."""
 
 from __future__ import annotations
 
@@ -35,9 +22,7 @@ def _domain_members(
     accounts: dict[str, UserAccount],
     credentials: list[Credential],
 ) -> list[str]:
-    """Accounts that are members of ``domain``: the owner plus every account
-    holding an accepted credential matching one of the domain's accepted
-    (issuer, credential_type) pairs. Restricted to accounts we control."""
+    """Owner plus holders of an accepted credential matching the domain's pairs; ours only."""
     members = {domain.owner}
     accepted = set(domain.accepted_credentials)
     for c in credentials:
@@ -52,8 +37,7 @@ def _pick_domain_with_members(
     credentials: list[Credential],
     minimum: int,
 ) -> tuple[PermissionedDomain, list[str]] | None:
-    """Pick a random domain (owned by an account we control) that has at least
-    ``minimum`` members. Returns the domain and its member list, or None."""
+    """A controlled-owner domain with ≥ minimum members, plus its members; else None."""
     candidates = []
     for d in domains:
         if d.owner not in accounts:
@@ -65,7 +49,6 @@ def _pick_domain_with_members(
 
 
 def _amm_iou(amms: list[AMM]) -> IssuedCurrency | None:
-    """Pick a real gateway IOU from a random AMM's asset pair."""
     if not amms:
         return None
     amm = choice(amms)
@@ -74,8 +57,7 @@ def _amm_iou(amms: list[AMM]) -> IssuedCurrency | None:
 
 
 def _domain_offer_flags(hybrid: bool) -> int:
-    """Flags for a valid domain offer. tfPassive / tfSell still rest, so they
-    keep the success path reliable; tfHybrid is set for the hybrid bucket."""
+    """tfPassive/tfSell still rest, so they keep the success path reliable."""
     flags = int(OfferCreateFlag.TF_HYBRID) if hybrid else 0
     if random() < 0.3:
         flags |= int(OfferCreateFlag.TF_PASSIVE)
@@ -127,8 +109,7 @@ def _domain_offer_base(
     *,
     hybrid: bool,
 ) -> tuple[OfferCreate, object] | None:
-    """Build a valid domain offer (a member trades XRP for a real gateway IOU)
-    and return it with the signing wallet. Shared by the valid and fuzz paths."""
+    """Valid domain offer (member trades XRP for a gateway IOU) + wallet."""
     picked = _pick_domain_with_members(domains, accounts, credentials, minimum=1)
     if not picked:
         return None
@@ -137,8 +118,7 @@ def _domain_offer_base(
         return None
     domain, members = picked
     member = accounts[choice(members)]
-    # taker_gets = XRP (the member always has it); taker_pays = a real gateway
-    # IOU. The domain book starts empty, so the offer rests cleanly.
+    # Empty domain book, so the offer rests cleanly.
     base = OfferCreate(
         account=member.address,
         taker_gets=params.offer_xrp_drops(),
@@ -193,7 +173,6 @@ async def _domain_offer_faulty(
     mutation = choice(mutations)
 
     if mutation == "fuzz":
-        # Generative: corrupt a valid domain offer in open-ended ways.
         built = _domain_offer_base(accounts, domains, credentials, amms, hybrid=hybrid)
         if built is None:
             return
@@ -202,7 +181,7 @@ async def _domain_offer_faulty(
         return
 
     if mutation == "not_in_domain":
-        # Real domain, but submit from an account that is NOT a member -> tecNO_PERMISSION.
+        # Non-member submits to a real domain -> tecNO_PERMISSION.
         picked = _pick_domain_with_members(domains, accounts, credentials, minimum=1)
         if not picked:
             return
@@ -213,15 +192,15 @@ async def _domain_offer_faulty(
         account = accounts[choice(outsiders)]
         domain_id = domain.domain_id
     elif mutation == "fake_domain":
-        # A domain that does not exist -> tecNO_PERMISSION.
+        # Nonexistent domain -> tecNO_PERMISSION.
         account = choice(list(accounts.values()))
         domain_id = params.fake_id()
     elif mutation == "zero_domain":
-        # All-zero DomainID -> temMALFORMED (fixCleanup3_2_0) / zero-key path otherwise.
+        # temMALFORMED (fixCleanup3_2_0) / zero-key path otherwise.
         account = choice(list(accounts.values()))
         domain_id = params.zero_domain_id()
     elif mutation == "ioc_killed":
-        # Member places an IoC offer that can't cross the empty domain book -> tecKILLED.
+        # IoC offer can't cross the empty domain book -> tecKILLED.
         picked = _pick_domain_with_members(domains, accounts, credentials, minimum=1)
         if not picked:
             return
@@ -229,7 +208,7 @@ async def _domain_offer_faulty(
         account = accounts[choice(members)]
         domain_id = domain.domain_id
         flags |= int(OfferCreateFlag.TF_IMMEDIATE_OR_CANCEL)
-    else:  # hybrid_no_domain — strip DomainID from a valid hybrid base -> temINVALID_FLAG.
+    else:  # hybrid_no_domain — tfHybrid without DomainID -> temINVALID_FLAG.
         picked = _pick_domain_with_members(domains, accounts, credentials, minimum=1)
         domain_id = picked[0].domain_id if picked else params.fake_id()
         account = choice(list(accounts.values()))
@@ -266,8 +245,7 @@ def _domain_payment_base(
     domains: list[PermissionedDomain],
     credentials: list[Credential],
 ) -> tuple[Payment, object] | None:
-    """Build a valid direct XRP domain payment between two members + its wallet.
-    Shared by the valid and fuzz paths (both parties must be in-domain)."""
+    """Direct XRP payment between two in-domain members + wallet; shared by valid and fuzz."""
     picked = _pick_domain_with_members(domains, accounts, credentials, minimum=2)
     if not picked:
         return None
@@ -307,7 +285,6 @@ async def _payment_domain_faulty(
 
     mutation = choice(["outsider_party", "fake_domain", "zero_domain", "fuzz"])
     if mutation == "fuzz":
-        # Generative: corrupt a valid domain payment in open-ended ways.
         built = _domain_payment_base(accounts, domains, credentials)
         if built is None:
             return
@@ -315,7 +292,7 @@ async def _payment_domain_faulty(
         await submit_fuzzed("PaymentDomain", base, client, wallet)
         return
     if mutation == "outsider_party":
-        # One in-domain member + one outsider -> tecNO_PERMISSION.
+        # One member + one outsider -> tecNO_PERMISSION.
         picked = _pick_domain_with_members(domains, accounts, credentials, minimum=1)
         if not picked:
             return
@@ -327,11 +304,11 @@ async def _payment_domain_faulty(
         dst_id = choice(outsiders)
         domain_id = domain.domain_id
     elif mutation == "fake_domain":
-        # Neither party can be in a domain that does not exist -> tecNO_PERMISSION.
+        # Nonexistent domain -> tecNO_PERMISSION.
         src_id, dst_id = sample(list(accounts), 2)
         src = accounts[src_id]
         domain_id = params.fake_id()
-    else:  # zero_domain — all-zero DomainID -> temMALFORMED / zero-key path
+    else:  # zero_domain — temMALFORMED / zero-key path
         src_id, dst_id = sample(list(accounts), 2)
         src = accounts[src_id]
         domain_id = params.zero_domain_id()
@@ -355,12 +332,8 @@ async def payment_domain_xc(
     amms: list[AMM],
     client: AsyncJsonRpcClient,
 ) -> None:
-    """Cross-currency Payment + DomainID — exercises domain pathfinding (routing
-    through the domain order book). Success requires resting domain liquidity in
-    the matching direction, which is not guaranteed here, so PaymentDomainXC is
-    listed in assertions._NO_SUCCESS_TYPES; the common result is a tec failure
-    (tecPATH_DRY / tecNO_PERMISSION), which still satisfies the failure bucket
-    and exercises the both-parties-in-domain preclaim + pathfinding code."""
+    """Cross-currency Payment + DomainID for domain pathfinding. No guaranteed liquidity, so
+    success is unreliable (in _NO_SUCCESS_TYPES); usual result is a tec failure."""
     if not amms:
         return
     picked = _pick_domain_with_members(domains, accounts, credentials, minimum=2)
@@ -372,8 +345,7 @@ async def payment_domain_xc(
     domain, members = picked
     src_id, dst_id = sample(members, 2)
     src = accounts[src_id]
-    # Sender pays XRP (always fundable) via SendMax; deliver a small IOU amount
-    # to the destination, routed through the domain book.
+    # Sender pays XRP via SendMax; deliver an IOU routed through the domain book.
     deliver = IOUAmount(currency=iou.currency, issuer=iou.issuer, value=params.offer_iou_value())
     txn = Payment(
         account=src.address,

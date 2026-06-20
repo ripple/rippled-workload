@@ -6,71 +6,46 @@ tools: Glob, Grep, Read, Bash, WebFetch, WebSearch
 
 You analyze Antithesis experiment results for the XRP Ledger workload.
 
-## Assertion naming in triage reports
-
-- `workload::seen : TxType` — transaction submitted at least once
-- `workload::success : TxType` — at least one tesSUCCESS
-- `workload::failure : TxType` — at least one non-tesSUCCESS
-- `workload::always : valid_engine_result` — engine_result always a valid string
-- `workload::always : no_internal_rippled_error` — tefEXCEPTION/tefINTERNAL/tefINVARIANT_FAILED never occur
-- `workload::setup_*` — per-step reachability (gateways, trust_lines, iou_distribution, mpt_*, vaults, nfts, credentials, tickets, domains, loan_brokers, cover_deposits, loans)
-- `workload::endpoint_exception` (unreachable) — should never fire
+## Assertion names
+- `workload::seen : TxType` — submitted ≥ once.
+- `workload::success : TxType` — ≥ one tesSUCCESS.
+- `workload::failure : TxType` — ≥ one non-tesSUCCESS.
+- `workload::always : valid_engine_result` — engine_result always a valid string.
+- `workload::always : no_internal_rippled_error` — tefEXCEPTION/tefINTERNAL/tefINVARIANT_FAILED never occur.
+- `workload::setup_*` — per-step reachability.
+- `workload::endpoint_exception` (unreachable) — must never fire.
 
 ## Genesis ledger
-
-- `genesis/genesis_ledger.json` — committed base with 100 pre-funded SECP256K1 accounts, amendments empty
-- `genesis/accounts.json` — account seeds for wallet derivation
-- CI injects amendment hashes from `features.macro` (SHA-512Half of name, pure Python, no xrpld binary)
-- All validators + xrpld must start from same ledger or consensus breaks
-- `wait_for_network` requires 3 consecutive sync checks before calling `setup_complete()`
+- `genesis/genesis_ledger.json` — committed base, 100 pre-funded SECP256K1 accounts, empty amendments.
+- `genesis/accounts.json` — seeds for wallet derivation.
+- CI injects amendment hashes from `features.macro` (SHA-512Half of name, pure Python).
+- All validators + xrpld start from the same ledger or consensus breaks.
+- `wait_for_network` needs 3 consecutive sync checks before `setup_complete()`.
 
 ## CI pipeline (ripple/rippled-antithesis)
+1. Checkout workload + rippled (sparse, only `features.macro`).
+2. Build xrpld image.
+3. Network config: validator keys, compose files → `testnet/`.
+4. Inject amendments into genesis → `testnet/volumes/*/`.
+5. Build sidecar/workload/config images → push → launch.
 
-1. Checkout workload + rippled (sparse, only `features.macro`)
-2. Build xrpld Docker image
-3. Generate network config: validator keys, compose files → `testnet/`
-4. Inject amendments into committed genesis → copy to `testnet/volumes/*/`
-5. Build sidecar, workload, config images → push → launch experiment
+Config image mounts: xrpld `testnet/volumes/val0/` → `/opt/xrpld/etc/`; workload `/accounts.json`, `/genesis_ledger.json` from image root.
 
-Config image mounts:
-- xrpld: `testnet/volumes/val0/` → `/opt/xrpld/etc/` (cfg + genesis)
-- Workload: `/accounts.json`, `/genesis_ledger.json` from config image root
+Repos: `ripple/rippled-antithesis` (CI), `ripple/rippled-workload` (workload), both main.
 
-## Two repos
-
-- `ripple/rippled-antithesis` — CI workflow (main branch)
-- `ripple/rippled-workload` — workload code (main branch)
-
-## Getting the data (REST API)
-
-Prefer fetching from the Antithesis read API over a manual download. Either a **run selector** or a
-**local file/dir** is a valid input:
-
+## Getting the data
+Prefer the read REST API over manual download. Selector or local dir both valid.
 ```bash
-# Resolve + save run.json, properties.json, failing.txt, events.ndjson under ~/Downloads/antithesis/<run_id>/
 python3 scripts/antithesis_fetch.py fetch <selector>
-#   selector: latest | latest-failing | gh=<github_run_id> | match=<substr> | <run_id>
-python3 scripts/antithesis_fetch.py properties <selector> --failing   # quick assertion triage
+#   selector: latest | latest-failing | gh=<id> | match=<substr> | <run_id>
+python3 scripts/antithesis_fetch.py properties <selector> --failing   # assertion triage
 ```
+Auth: `$ANTITHESIS_API_KEY` or `~/antithesis.key` (`pass:` line); tenant `$ANTITHESIS_TENANT` (default `ripple`). Endpoints: `/api/v0/runs`, `/runs/{id}`, `/runs/{id}/properties`, `/runs/{id}/logs?input_hash=&vtime=` (full stream; `/events` is a capped stdout search).
 
-Auth: `$ANTITHESIS_API_KEY` or `~/antithesis.key` (`pass:` line); tenant `$ANTITHESIS_TENANT`
-(default `ripple`). Endpoints: `GET /api/v0/runs`, `/runs/{id}`, `/runs/{id}/properties`,
-`/runs/{id}/logs?input_hash=&vtime=` (the full event stream; `/events` is only a capped stdout
-text-search). The script is in the rippled-workload repo at `scripts/antithesis_fetch.py`.
+`properties.json` is authoritative. Separate real failures from coverage gaps: a real failure is `always`/`AlwaysOrUnreachable` with `condition:false` (rippled `*.cpp` or sidecar). `workload::failure|success|seen : <Tx>` and `fuzzer::seen|faulted` showing "Failing" just means that `sometimes`/`reachable` path went unexercised — a coverage gap, not a server bug.
 
-`properties.json` is the authoritative assertion view. **Separate real failures from coverage gaps:**
-a genuinely failing invariant is `always`/`AlwaysOrUnreachable` with `condition:false` (e.g. a
-rippled `src/.../*.cpp` or sidecar assertion). Names like `workload::failure|success|seen : <Tx>` and
-`fuzzer::seen|faulted : <msg>` show "Failing" merely because that `sometimes`/`reachable` path was
-never exercised — that's a coverage gap (too-conservative `_valid`, missing `_faulty`, or unreached
-setup), not a server bug.
-
-## Analyzing events.ndjson
-
-`events.ndjson` is pure NDJSON (one JSON object per line, **no log prefix**). SDK event names are
-top-level keys (`"workload::result : Payment"`, `"val_health"`, `"fault"`, …). Parse with
-`json.loads(line)` directly:
-
+## events.ndjson
+Pure NDJSON, no log prefix. SDK event names are top-level keys (`"workload::result : Payment"`, `"val_health"`, `"fault"`). Parse with `json.loads(line)`.
 ```bash
 # Engine-result breakdown
 python3 -c "
@@ -85,7 +60,7 @@ for line in open(sys.argv[1]):
 for k,v in er.most_common(): print(f'{v:6d} {k}')
 " events.ndjson
 
-# Fault-injection breakdown (which faults ran)
+# Fault-injection breakdown
 python3 -c "
 import json,collections,sys
 f=collections.Counter()
@@ -97,30 +72,25 @@ for line in open(sys.argv[1]):
 print(dict(f.most_common()))
 " events.ndjson
 
-# Endpoint exceptions (should be zero) / setup
 grep -c 'workload::endpoint_exception' events.ndjson
 grep 'workload::setup_reject\|workload::setup_error' events.ndjson
 ```
+Legacy `events(N).log` has a ` - {json}` prefix: `json.loads(line.split(' - ',1)[1])`.
 
-Legacy fallback: an old downloaded `events(N).log` has a ` - {json}` prefix and event-name-as-text —
-parse those lines with `json.loads(line.split(' - ',1)[1])`.
-
-## Triage report patterns
-
-- **[new] failure** — assertion was passing, now failing (regression or new code path)
-- **[resolved]** — was failing, now passing (fix worked)
-- **[ongoing]** — still failing (known issue)
-- `sometimes(failure)` never fires → `_valid` path too conservative, needs broader state exploration or `_faulty` implementation
-- `sometimes(success)` never fires → transaction structurally broken (wrong params, missing prerequisites, wrong submitter)
-- `reachability` fails → setup step returned count=0, or endpoint never called
+## Triage patterns
+- `[new] failure` — was passing, now failing (regression / new path).
+- `[resolved]` — fixed. `[ongoing]` — known issue.
+- `sometimes(failure)` never fires → `_valid` too conservative, or missing `_faulty`.
+- `sometimes(success)` never fires → tx structurally broken (params/prereqs/submitter).
+- `reachability` fails → setup step count=0, or endpoint never called.
 
 ## Common root causes
-
 | Symptom | Likely cause |
 |---------|-------------|
-| All setup_* fail | `notSynced` race — check `wait_for_network` stability |
-| `tecPATH_DRY` on IOU payments | Trust lines not created (cascading from setup failure) |
-| `tefPAST_SEQ` on some txns | Same-account sequence race (acceptable in small numbers) |
-| `tecINSUFFICIENT_FUNDS` on loans | Missing `LoanBrokerCoverDeposit` step |
+| All setup_* fail | `notSynced` race — check `wait_for_network` |
+| `tecPATH_DRY` on IOU payments | Trust lines missing (setup cascade) |
+| `tefPAST_SEQ` | Same-account sequence race (OK in small numbers) |
+| `tecINSUFFICIENT_FUNDS` on loans | Missing `LoanBrokerCoverDeposit` |
 | `temBAD_SIGNER` on LoanSet | Missing counterparty co-signing |
-| `tecHAS_OBLIGATIONS` on LoanDelete | Loan not fully paid off yet |
+| `tecHAS_OBLIGATIONS` on LoanDelete | Loan not paid off |
+</content>

@@ -1,4 +1,4 @@
-"""Delegation transaction generators for the antithesis workload."""
+"""Delegation transaction generators."""
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import DelegateSet
@@ -101,7 +101,6 @@ async def _delegate_set_faulty(
 
 # ── Delegation helper for submit_tx ──────────────────────────────────
 
-# Names of non-delegable transaction types for fast lookup.
 _NON_DELEGABLE_NAMES: set[str] = {t.value for t in NON_DELEGABLE_TRANSACTIONS}
 
 
@@ -111,13 +110,7 @@ def maybe_delegate(
     delegates: list,
     accounts: dict[str, UserAccount],
 ) -> tuple[str | None, object | None]:
-    """Possibly pick a delegate to submit *tx_type* on behalf of *src_address*.
-
-    Returns ``(delegate_address, delegate_wallet)`` when delegation should
-    happen, or ``(None, None)`` otherwise.
-
-    Called from ``submit_tx`` — no handler changes required.
-    """
+    """Pick a delegate for tx_type on behalf of src_address, or (None, None)."""
     from workload.randoms import random as _random
 
     if tx_type in _NON_DELEGABLE_NAMES:

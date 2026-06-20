@@ -1,21 +1,4 @@
-"""AccountDelete workload handler.
-
-AccountDelete removes an account from the ledger, sending remaining XRP
-to a destination.  Constraints enforced by rippled:
-  - Account's sequence must be ≥ current ledger seq - 256
-  - Account must own ZERO directory objects (trust lines, offers, escrows,
-    checks, channels, NFTs, vaults, etc.)
-  - Costs the owner reserve (typically 5 XRP) as fee
-
-This is a NON_DELEGABLE transaction — blocked by XRPL protocol.
-
-SAFETY: The valid path skips accounts in ``workload.protected_accounts``
-(addresses captured by setup: gateways, MPT issuers, vault creators,
-holders, NFT minters, credential subjects, ticket holders, domain
-creators).  Most submissions still get rejected because even "unused"
-accounts may have acquired objects from driver calls; the fuzzing value
-is exercising the transaction path itself.
-"""
+"""AccountDelete (NON_DELEGABLE); valid path skips protected_accounts to not break setup."""
 
 from __future__ import annotations
 
@@ -48,13 +31,11 @@ async def _account_delete_valid(
 
     acct_list = list(accounts.values())
 
-    # Skip setup-critical addresses
     expendable = [a for a in acct_list if a.address not in protected_accounts]
     if not expendable:
         return
 
     src = choice(expendable)
-    # Destination must differ from source — pick any other account
     dst = choice([a for a in acct_list if a.address != src.address])
 
     txn = AccountDelete(
@@ -81,13 +62,11 @@ async def _account_delete_faulty(
     )
 
     if mutation == "self_destination":
-        # Can't delete to self
         txn = AccountDelete(
             account=src.address,
             destination=src.address,
         )
     elif mutation == "fake_destination":
-        # Destination doesn't exist
         txn = AccountDelete(
             account=src.address,
             destination=params.fake_account(),

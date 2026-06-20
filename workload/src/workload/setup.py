@@ -1,20 +1,4 @@
-"""Deterministic setup for the Antithesis first_* phase.
-
-Creates the minimum ledger state needed for all transaction types to operate,
-including IOU gateways with token distribution, MPT authorization, and AMM pools.
-
-Account allocation:
-  [0..5]   — MPT issuers (one per flag cohort; [5] is the lockable cohort)
-  [10..16] — Vault creators (also get trust lines + IOU/MPT balances for non-XRP vaults)
-  [20..24] — NFT minters
-  [30..35] — Credential issuer + subjects
-  [40..42] — Ticket holders
-  [50..52] — Domain creators
-  [60..61] — IOU gateways (DefaultRipple + AllowTrustLineClawback set)
-  [62..71] — IOU/MPT holders (trust lines + balances for all currencies)
-  [62]     — also creates XRP/USD AMM
-  [63]     — also creates USD/EUR AMM
-"""
+"""Deterministic ledger-state setup for the Antithesis first_* phase."""
 
 from __future__ import annotations
 
@@ -104,7 +88,6 @@ def _accounts_list(workload: Workload) -> list[UserAccount]:
 async def _wait_for_state(
     items: list, expected: int, label: str, timeout: float = 15, poll: float = 1
 ) -> int:
-    """Wait for WS listener to populate a list. Returns actual count. Non-blocking."""
     elapsed = 0.0
     while len(items) < expected and elapsed < timeout:
         await asyncio.sleep(poll)
@@ -123,7 +106,6 @@ async def _submit_batch(
     client: AsyncJsonRpcClient,
     seq: SequenceTracker,
 ) -> int:
-    """Submit a batch with local sequence tracking."""
     if not txns:
         return 0
     created = 0
@@ -167,7 +149,6 @@ async def _submit_loan(
     interest_rate: int = _LOAN_INTEREST,
     payment_total: int = _LOAN_TOTAL,
 ) -> bool:
-    """Create a co-signed LoanSet. Returns True on success."""
     txn = LoanSet(
         account=borrower.address,
         loan_broker_id=broker_id,
@@ -201,12 +182,8 @@ async def _submit_loan(
 
 
 async def _probe_node(workload: Workload) -> None:
-    """Submit a no-op AccountSet to confirm the node accepts transactions.
-
-    Retries with backoff until accepted. The sync checks in wait_for_network
-    verify the node reports 'full', but that doesn't guarantee it will accept
-    transaction submissions — autofill and submit have stricter sync requirements.
-    """
+    # A 'full' sync report doesn't guarantee submit acceptance; retry until a
+    # no-op AccountSet is accepted (autofill/submit have stricter sync needs).
     max_wait = 300
     start = asyncio.get_event_loop().time()
     attempt = 0
@@ -256,7 +233,6 @@ async def _probe_node(workload: Workload) -> None:
 
 
 async def run_setup(workload: Workload) -> dict[str, int]:
-    """Submit deterministic setup transactions. State tracking via WS listener."""
     await _probe_node(workload)
     accs = _accounts_list(workload)
     client = workload.client
@@ -265,10 +241,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     holder_indices = list(_HOLDER_RANGE) + list(_VAULT_RANGE)
 
-    # Record addresses used by setup so AccountDelete won't target them.
-    # Indices: gateways (60-61), MPT issuers (0-5), vault creators (10-16),
-    # NFT minters (20-24), credential issuer + subjects (30-35), ticket
-    # holders (40-42), domain creators (50-52), IOU/MPT holders (62-71).
+    # Record setup-owned addresses so AccountDelete won't target them.
     _setup_indices: set[int] = (
         set(range(6))
         | set(range(10, 17))
@@ -358,14 +331,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     summary["iou_distribution"] = await _submit_batch("iou_distribution", iou_txns, client, seq)
 
     # ── 4. MPT issuances: 6 flag-distinct cohorts, one issuer each ───
-    # Flag-distinct cohorts so both valid DEX/AMM paths and the XLS-82 fault
-    # gates (tecNO_PERMISSION/tecNO_AUTH/tecLOCKED) become reachable:
-    #   [0] tradeable    CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER
-    #   [1] tradeable    CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER
-    #   [2] no-trade     CAN_LOCK
-    #   [3] no-transfer  CAN_LOCK | CAN_TRADE
-    #   [4] require-auth CAN_LOCK | CAN_TRADE | CAN_TRANSFER | REQUIRE_AUTH
-    #   [5] lockable     CAN_LOCK | CAN_CLAWBACK | CAN_TRADE | CAN_TRANSFER (locked in 6b)
+    # Flag-distinct cohorts so valid DEX/AMM paths AND XLS-82 fault gates
+    # (tecNO_PERMISSION/tecNO_AUTH/tecLOCKED) are all reachable; [5] is the
+    # lockable cohort locked in step 6b.
     _LOCK = MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK
     _CLAW = MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
     _TRADE = MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRADE
@@ -445,10 +413,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 6b. MPT lock: lock the lockable issuance ─────────────────────
-    # The cohort minted from accs[5] is reserved for the locked state so the
-    # locked-MPT gates are reachable (tecLOCKED on offers/AMM, tecPATH_DRY on
-    # MPTokensV2 payments). Lock it after distribution so
-    # holders are funded before the freeze takes effect.
+    # Lock accs[5]'s cohort to make locked-MPT gates reachable (tecLOCKED on
+    # offers/AMM, tecPATH_DRY on MPTokensV2 payments). After distribution so
+    # holders are funded before the freeze.
     lock_count = 0
     if len(accs) > 5:
         lockable = next((m for m in workload.mpt_issuances if m.issuer == accs[5].address), None)
@@ -624,7 +591,6 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         gw0_addr = accs[gw0_idx].address if gw0_idx < len(accs) else None
         gw1_addr = accs[gw1_idx].address if gw1_idx < len(accs) else None
 
-        # AMM 1: XRP / USD — created by holder account[62]
         if gw0_addr:
             amm_txns.append(
                 (
@@ -643,7 +609,6 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 )
             )
 
-        # AMM 2: USD / EUR — created by holder account[63]
         if gw0_addr and gw1_addr:
             amm_txns.append(
                 (
@@ -687,9 +652,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             client,
             seq,
         )
-        # Subjects accept their credentials so they become permissioned-domain
-        # members (the step-11 domains accept {accs[30], _SETUP_CREDENTIAL_TYPE}).
-        # Setup credentials have no expiration, so membership stays stable.
+        # Subjects accept so they become members of the step-11 domains; setup
+        # credentials never expire, so membership stays stable.
         summary["credential_accepts"] = await _submit_batch(
             "credential_accepts",
             [
@@ -712,9 +676,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         summary["credential_accepts"] = 0
 
     # ── 10. Tickets ──────────────────────────────────────────────────
-    # 40-42: generic ticket holders. 50-52: domain owners (always domain
-    # members) — giving them tickets makes the ticket x permissioned-DEX valid
-    # path reachable from setup (a ticket holder that is also a domain member).
+    # 50-52 (domain owners) also get tickets so the ticket x permissioned-DEX
+    # valid path (ticket holder that is also a domain member) is reachable.
     ticket_indices = [i for i in (40, 41, 42, 50, 51, 52) if i < len(accs)]
     summary["tickets"] = await _submit_batch(
         "tickets",
@@ -730,9 +693,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         seq,
     )
     summary["tickets"] *= _TICKET_COUNT
-    # TicketCreate advances the account Sequence by TicketCount + 1; next_seq
-    # only counted the +1, so align the tracker for accounts reused later
-    # (e.g. domain owners 50-52 create their domains in step 11).
+    # TicketCreate advances Sequence by TicketCount + 1 but next_seq counted
+    # only +1; realign the tracker for accounts reused later (domains in step 11).
     for i in ticket_indices:
         seq.advance(accs[i].address, _TICKET_COUNT)
 

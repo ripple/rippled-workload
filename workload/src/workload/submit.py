@@ -1,9 +1,4 @@
-"""Fire-and-forget transaction submission.
-
-Autofills, signs, and submits a transaction via RPC without waiting for
-validation. The WebSocket listener (ws_listener.py) observes validated
-results and fires assertions / updates state.
-"""
+"""Fire-and-forget transaction submission; ws_listener.py handles validated results."""
 
 from collections.abc import Callable
 
@@ -26,11 +21,7 @@ _accounts: dict = {}
 
 
 def configure(delegates: list, accounts: dict) -> None:
-    """Store references to workload delegation state.
-
-    Called once during ``Workload.__init__`` so that ``submit_tx`` can
-    transparently apply delegation without any handler changes.
-    """
+    """Store delegation state once at init so submit_tx can apply it transparently."""
     global _delegates, _accounts
     _delegates = delegates
     _accounts = accounts
@@ -43,26 +34,16 @@ async def submit_tx(
     wallet: Wallet,
     seq: int | None = None,
 ) -> dict:
-    """Sign and submit a transaction. Returns the submit response result.
+    """Sign and submit; returns the tentative engine_result (final via WS listener).
 
-    The returned dict contains the preliminary (tentative) engine_result
-    and the transaction hash. Final results arrive via the WS listener.
-
-    If ``seq`` is provided, it is stamped onto the transaction before
-    autofill so that xrpl-py skips the RPC sequence fetch.
-
-    When delegation state is configured (via ``configure``), there is a
-    10% chance that a matching delegate will sign on behalf of the
-    source account for delegable transaction types.
-
-    Raises XRPLRequestFailureException on RPC-level failures (connection
-    refused, malformed request, etc.) — let it propagate to the endpoint
-    handler's XRPLException catch.
+    ``seq`` (if given) is stamped pre-autofill so xrpl-py skips the RPC seq fetch.
+    With delegation configured, a matching delegate co-signs ~10% of the time.
+    Lets XRPLRequestFailureException propagate to the handler's XRPLException catch.
     """
     if seq is not None:
         txn = txn.__replace__(sequence=seq)
 
-    # Possibly delegate: lazy import to avoid circular dependency
+    # Lazy import: avoids circular dependency.
     if _delegates:
         from workload.transactions.delegation import maybe_delegate
 
@@ -90,30 +71,13 @@ async def submit_raw(
     wallet: Wallet,
     mutate: Callable[[dict], None] | None = None,
 ) -> dict:
-    """Submit path for ``_faulty`` handlers — bypasses xrpl-py model validation.
+    """Raw ``_faulty`` submit path: autofill a valid ``base``, ``mutate(dict)`` it
+    into a malformation xrpl-py rejects at construction, then sign+submit raw so
+    rippled's preflight/preclaim does the rejecting.
 
-    Autofill a VALID ``base`` model (to obtain Sequence/Fee/LastLedgerSequence),
-    serialize it to an XRPL JSON dict, optionally apply ``mutate(dict)`` to
-    introduce a malformation xrpl-py would reject at construction (tfHybrid
-    without DomainID, empty/oversized/duplicate arrays, …), then sign and submit
-    the raw blob so rippled's own preflight/preclaim is what rejects it.
-
-    ``mutate`` is omitted when the faulty intent is already a valid model (e.g.
-    a non-member submitting a well-formed domain offer) — the raw path is still
-    used so every ``_faulty`` case shares one submission discipline.
-
-    Contract: ``mutate`` MUST keep ``tx_dict`` encodable. ``submit_raw`` has no
-    encode guard — only ``submit_fuzzed`` catches ``XRPLBinaryCodecException`` /
-    ``ValueError`` from a shape that won't serialize. Curated ``mutate`` fns are
-    therefore a caller obligation: produce a malformation rippled rejects in
-    preflight/preclaim, not one the binary codec rejects before submission.
-
-    Delegation is intentionally NOT applied here (unlike ``submit_tx``): faulty
-    intent stays attributable to a single signer, so a flagged result maps back
-    to exactly one account.
-
-    Wires ``tx_submitted`` exactly like ``submit_tx`` (seen + submit-time
-    internal-error assertion). Use ONLY in ``_faulty`` paths.
+    Contract: ``mutate`` MUST keep the dict encodable — submit_raw has no encode
+    guard (only submit_fuzzed catches XRPLBinaryCodecException / ValueError).
+    Delegation is intentionally NOT applied here so a flagged result maps to one account.
     """
     autofilled = await autofill(base, client)
     tx_dict = autofilled.to_xrpl()

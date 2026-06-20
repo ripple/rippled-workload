@@ -36,18 +36,13 @@ from workload.submit import submit_tx
 from workload.transactions.permissioned_dex import _amm_iou, _domain_members
 
 # ── Ticket-eligible transaction builders ─────────────────────────────
-# Each builder takes a TicketCtx and returns a Transaction (or None to skip
-# when its preconditions aren't met). ``ctx.common`` already contains
-# account, sequence=0, ticket_sequence=N. State-aware builders (permissioned
-# DEX) read ctx.domains/credentials/amms; simple ones use only ctx.dst.
-# To add a new type: add one entry to this dict (or to _TICKET_EXCLUDED).
+# Each builder takes a TicketCtx and returns a Transaction or None (skip when
+# preconditions unmet). Add a new type here or to _TICKET_EXCLUDED.
 
 
 @dataclass
 class TicketCtx:
-    """Context for a ticket builder: the ticket-holding ``src`` account, a
-    random ``dst``, the ``common`` fields (account / sequence=0 /
-    ticket_sequence), and workload state for builders needing existing objects."""
+    """Passed to a ticket builder; ``common`` carries sequence=0 + ticket_sequence."""
 
     src: UserAccount
     dst: str
@@ -67,8 +62,7 @@ def _ticket_domain_offer(ctx: TicketCtx, *, hybrid: bool) -> "xrpl.models.Transa
     iou = _amm_iou(ctx.amms)
     if iou is None:
         return None
-    # Prefer a domain the src is a member of (offer rests → tesSUCCESS); else any
-    # domain (src not a member → tecNO_PERMISSION). Both exercise ticket x domain.
+    # Prefer a domain src belongs to (offer rests) else any domain (tecNO_PERMISSION).
     member_domains = [
         d
         for d in ctx.domains
@@ -90,8 +84,7 @@ def _ticket_domain_offer(ctx: TicketCtx, *, hybrid: bool) -> "xrpl.models.Transa
 def _ticket_domain_payment(
     ctx: TicketCtx, *, cross_currency: bool
 ) -> "xrpl.models.Transaction | None":
-    # Need a domain the src is a member of; pick a co-member as destination so the
-    # both-parties-in-domain preclaim can pass (else tecNO_PERMISSION).
+    # Both parties must be domain members or preclaim fails (tecNO_PERMISSION).
     member_domains = []
     for d in ctx.domains:
         members = _domain_members(d, ctx.accounts, ctx.credentials)
@@ -129,8 +122,7 @@ _TICKET_BUILDERS: dict[str, _TicketBuilder] = {
         amount=params.payment_amount(),
         **ctx.common,
     ),
-    # dst as credential issuer is intentional — exercises the domain with an
-    # arbitrary issuer so ticket-derived keylets get the coverage we need.
+    # dst as credential issuer is intentional — arbitrary issuer covers ticket keylets.
     "PermissionedDomainSet": lambda ctx: PermissionedDomainSet(
         accepted_credentials=[
             XRPLCredential(issuer=ctx.dst, credential_type=params.credential_type()),
@@ -185,30 +177,20 @@ _TICKET_BUILDERS: dict[str, _TicketBuilder] = {
         **ctx.common,
     ),
     "DIDSet": lambda ctx: DIDSet(uri=params.did_hex_field(), **ctx.common),
-    # Permissioned DEX x tickets — exercise ticket consumption together with the
-    # domain preclaim / hybrid placement. State-aware (reads ctx.domains/amms).
+    # Permissioned DEX x tickets — state-aware (reads ctx.domains/amms).
     "OfferCreateDomain": lambda ctx: _ticket_domain_offer(ctx, hybrid=False),
     "OfferCreateHybrid": lambda ctx: _ticket_domain_offer(ctx, hybrid=True),
     "PaymentDomain": lambda ctx: _ticket_domain_payment(ctx, cross_currency=False),
     "PaymentDomainXC": lambda ctx: _ticket_domain_payment(ctx, cross_currency=True),
 }
 
-# Types explicitly excluded from ticket use.  Reasons:
-#   "objects"  — requires pre-existing object IDs (vault_id, nft, offer, etc.)
-#   "circular" — tickets creating/using tickets
-#   "cosign"   — requires multi-party signing
-#   "batch"    — outer batch manages inner sequences
-# Adding a new REGISTRY type without a builder or exclusion triggers a
-# startup warning so new types can't silently skip ticket coverage.
+# Types the (dst, common)-only builder signature can't reach: objects (need
+# pre-existing IDs), circular (tickets on tickets), cosign, batch.
 _TICKET_EXCLUDED: set[str] = {
-    # circular — tickets creating/using tickets
     "TicketCreate",
     "TicketUse",
-    # batch — outer batch manages inner sequences
     "Batch",
-    # cosign — requires multi-party signing
     "LoanSet",
-    # objects — requires pre-existing object IDs
     "NFTokenBurn",
     "NFTokenModify",
     "NFTokenCreateOffer",
@@ -240,8 +222,6 @@ _TICKET_EXCLUDED: set[str] = {
     "EscrowCancel",
     "PaymentChannelFund",
     "PaymentChannelClaim",
-    # All AMM and Offer types need asset-pair / existing-object state
-    # that the (dst, common)-only builder signature can't reach.
     "AMMCreate",
     "AMMDeposit",
     "AMMWithdraw",
@@ -250,31 +230,17 @@ _TICKET_EXCLUDED: set[str] = {
     "AMMDelete",
     "OfferCreate",
     "OfferCancel",
-    # OfferCreateMPT needs MPT-issuance state the (dst, common)-only builder
-    # can't reach — same rationale as OfferCreate / AMMCreate above.
     "OfferCreateMPT",
-    # PaymentMPT needs MPT-issuance/holder state the (dst, common)-only builder
-    # can't reach — same rationale as OfferCreateMPT.
     "PaymentMPT",
-    # PaymentChannelCreate needs public_key from the wallet, which the
-    # (dst, common)-only builder signature can't reach.
-    "PaymentChannelCreate",
-    # Clawback requires the source to be an authorised issuer.
-    "Clawback",
+    "PaymentChannelCreate",  # needs public_key from the wallet
+    "Clawback",  # source must be an authorised issuer
     "AccountDelete",
-    # objects — needs an existing DID on the account
     "DIDDelete",
 }
 
 
 def check_ticket_coverage() -> None:
-    """Assert at startup that every REGISTRY type is covered.
-
-    Called during app init.  Compares REGISTRY against _TICKET_BUILDERS
-    and _TICKET_EXCLUDED so new types can't silently skip ticket coverage.
-    Missing types fire an ``unreachable`` assertion that surfaces in
-    Antithesis triage.
-    """
+    """Fire ``unreachable`` for any REGISTRY type missing from both builders and exclusions."""
     from antithesis.assertions import unreachable
 
     from workload.transactions import TX_TYPES
@@ -338,19 +304,16 @@ async def _ticket_use_valid(
     amms: list[AMM],
     client: AsyncJsonRpcClient,
 ) -> None:
-    # Find an account with tickets
     accounts_with_tickets = [(addr, acc) for addr, acc in accounts.items() if acc.tickets]
     if not accounts_with_tickets:
         return
     src_addr, src = choice(accounts_with_tickets)
     ticket_sequence = choice(list(src.tickets))
-    # Pick a destination that isn't the source
     other_accounts = [a for a in accounts if a != src_addr]
     if not other_accounts:
         return
     dst = choice(other_accounts)
 
-    # Randomly pick a ticket-eligible transaction type
     tx_type = choice(list(_TICKET_BUILDERS))
     common = {"account": src.address, "sequence": 0, "ticket_sequence": ticket_sequence}
     ctx = TicketCtx(
@@ -366,10 +329,9 @@ async def _ticket_use_valid(
     if txn is None:
         return  # state-aware builder couldn't satisfy preconditions this round
 
-    # Remove ticket optimistically to avoid reuse by concurrent calls
+    # Optimistic discard avoids reuse by concurrent calls.
     src.tickets.discard(ticket_sequence)
-    # Hit the TicketUse reachability assertion separately — submit_tx uses
-    # the inner type so success/failure track the real TransactionType.
+    # Separate TicketUse assertion — submit_tx tracks success/failure on the inner type.
     tx_submitted("TicketUse", txn)
     await submit_tx(tx_type, txn, client, src.wallet)
 

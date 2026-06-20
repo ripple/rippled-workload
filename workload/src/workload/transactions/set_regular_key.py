@@ -1,9 +1,4 @@
-"""SetRegularKey workload handler.
-
-SetRegularKey assigns or removes a regular key pair for an account.
-When set, both the master key and the regular key can sign transactions.
-Setting regular_key to None removes it.
-"""
+"""SetRegularKey handler; omitting regular_key removes it."""
 
 from __future__ import annotations
 
@@ -35,18 +30,15 @@ async def _set_regular_key_valid(
     acct_list = list(accounts.values())
     src = choice(acct_list)
 
-    # Randomly set or remove the regular key
     action = choice(["set", "remove"])
 
     if action == "set":
-        # Pick another account's address as the regular key
         dst = choice([a for a in acct_list if a.address != src.address])
         txn = SetRegularKey(
             account=src.address,
             regular_key=dst.address,
         )
     else:
-        # Remove regular key
         txn = SetRegularKey(
             account=src.address,
         )

@@ -1,13 +1,8 @@
 # Debug Antithesis Run
 
-How to diagnose issues from an Antithesis experiment.
+Diagnose issues from an Antithesis experiment. The triage report ships `events(N).log` — download and grep it.
 
-## Get the events log
-
-Antithesis provides `events(N).log` in the triage report. Download and search it.
-
-## Key patterns to grep
-
+## Grep patterns
 ```bash
 # Workload assertion failures
 grep "workload::" events.log | grep '"condition":false\|"hit":true.*Unreachable'
@@ -22,32 +17,21 @@ for line in sys.stdin:
     except: pass
 "
 
-# Validator crashes
-grep "fatal\|Unable to open\|SIGABRT\|condition.:false" events.log | head -20
-
-# accounts.json missing
+grep "fatal\|Unable to open\|SIGABRT\|condition.:false" events.log | head -20   # validator crashes
 grep "accounts_json" events.log
-
-# Setup assertions (did /setup work?)
-grep "workload::setup" events.log | grep '"hit": true'
+grep "workload::setup" events.log | grep '"hit": true'                          # did /setup work?
 ```
 
-## Common issues and fixes
-
+## Common issues
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `accounts_json_missing` fires | accounts.json not mounted in workload container | Check docker-compose volume mounts survive the workflow's compose manipulation |
-| `endpoint_exception` fires | Handler name shadows import | Rename inner async def with `_endpoint` suffix |
-| All tx assertions fail (never seen) | Accounts not loaded / endpoint returning None | Check accounts.json exists, check for early returns |
-| Validators crash instantly | genesis_ledger.json not found | Confirm genesis_ledger.json is in each node's volume dir |
-| `Unable to open /genesis_ledger.json` | Wrong path in xrpld command | Path must be `/opt/xrpld/etc/genesis_ledger.json` (in node volume) |
+| `accounts_json_missing` | accounts.json not mounted in workload container | Check compose volume mounts survive the workflow's compose manipulation |
+| `endpoint_exception` | Handler name shadows import | Rename inner async def with `_endpoint` suffix |
+| All tx assertions never seen | Accounts not loaded / endpoint returns None | Check accounts.json exists, check early returns |
+| Validators crash instantly | genesis_ledger.json not found | Confirm it's in each node's volume dir |
+| `Unable to open /genesis_ledger.json` | Wrong path | Must be `/opt/xrpld/etc/genesis_ledger.json` |
 
-## Verify SDK pipeline working
-
-If `workload::started` and `workload::sdk_works` appear in triage but tx assertions don't:
-- SDK is working (VoidstarHandler active)
-- Transactions aren't being submitted — check account loading, check for exceptions
-
-If nothing appears:
-- Check if workload container even started
-- VoidstarHandler may not be getting injected — check `/usr/lib/libvoidstar.so` exists in container
+## SDK pipeline check
+- `workload::started` + `workload::sdk_works` present but no tx assertions → SDK works (VoidstarHandler active); txns not submitted (check account loading / exceptions).
+- Nothing present → container didn't start, or `/usr/lib/libvoidstar.so` not injected.
+</content>

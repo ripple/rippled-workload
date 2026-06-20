@@ -1,13 +1,4 @@
-"""Antithesis assertion helpers for the workload.
-
-Follows the fuzzer's naming convention:
-  "workload::seen : TxType"    — transaction was created and submitted (reachable)
-  "workload::success : TxType" — transaction got tesSUCCESS (sometimes)
-
-Uses assert_raw() to register catalog entries at startup and emit assertions
-at runtime. The static scanner cannot extract assertion names from f-strings,
-so we pre-register all known transaction types via register_assertions().
-"""
+"""Antithesis assertion helpers for the workload."""
 
 from antithesis.assertions import assert_raw
 from antithesis.lifecycle import send_event
@@ -16,13 +7,10 @@ _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
 _LOC_COL = 0
 
-# Engine results that indicate a rippled internal error (exception caught,
-# invariant violated, etc.). Checked on BOTH the submit response and the
-# validated WS stream:
-#   - tef* never validates; the submit-time check catches those.
-#   - tecINVARIANT_FAILED claims a fee and DOES validate (rippled returns it on
-#     the first invariant failure, escalating to tefINVARIANT_FAILED only if the
-#     fee-only retry also fails) — so the validated-side check catches it.
+# Engine results signalling a rippled internal error. Checked on BOTH submit
+# and validated WS: tef* never validates (submit-side catches it); but
+# tecINVARIANT_FAILED claims a fee and DOES validate, so the validated side
+# must catch that one.
 _RIPPLED_INTERNAL_ERRORS = (
     "tefEXCEPTION",
     "tefINTERNAL",
@@ -31,38 +19,32 @@ _RIPPLED_INTERNAL_ERRORS = (
     "tecINVARIANT_FAILED",
 )
 
-# Types whose current faulty handler never produces a non-tesSUCCESS engine
-# result, so the failure assertion can't be met.
-# - SignerListSet: fake AccountIDs are accepted (rippled doesn't verify
-#   listed accounts exist); current mutations stay within weight bounds.
-# - MPTokenIssuanceCreate: no _faulty handler — always submits a valid create.
+# Types whose faulty handler never produces a non-tesSUCCESS, so failure can't
+# be met:
+# - SignerListSet: fake AccountIDs accepted (rippled doesn't verify listed
+#   accounts exist); mutations stay within weight bounds.
+# - MPTokenIssuanceCreate: no _faulty handler — always a valid create.
 _NO_FAILURE_TYPES = {
     "SignerListSet",
     "MPTokenIssuanceCreate",
 }
 
-# Types that effectively never succeed in this test environment.
-# - AccountDelete: every account owns directory objects (trust lines, NFTs,
-#   etc.), so rippled rejects with tecHAS_OBLIGATIONS.
-# - AMMDelete: rippled auto-deletes empty AMMs as a side effect of the last
-#   LP's TF_WITHDRAW_ALL, so AMMDelete usually finds the AMM already gone
-#   (tecAMM_NOT_FOUND) or with outstanding LP tokens (tecAMM_NOT_EMPTY).
-# - PaymentDomainXC: cross-currency domain payment success needs resting domain
-#   liquidity in the matching direction, which the workload does not guarantee;
-#   it reliably exercises the both-in-domain preclaim + domain pathfinding but
-#   usually ends tecPATH_DRY. Drop from this set if runs show success is hit.
+# Types that effectively never succeed in this test environment:
+# - AccountDelete: every account owns directory objects → tecHAS_OBLIGATIONS.
+# - AMMDelete: rippled auto-deletes empty AMMs on the last LP's TF_WITHDRAW_ALL,
+#   so it finds the AMM gone (tecAMM_NOT_FOUND) or non-empty (tecAMM_NOT_EMPTY).
+# - PaymentDomainXC: cross-currency domain payment needs resting domain
+#   liquidity the workload doesn't guarantee; usually tecPATH_DRY. Drop if hit.
 _NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC"}
 
-# Metadata expectations for tx types that must create/modify/delete specific
-# ledger entry types on tesSUCCESS.  Each value is a tuple of allowed node
-# operations followed by the expected LedgerEntryType.  Checked inside
-# tx_result() with a single shared assertion ID.
+# tx types that must touch a specific ledger entry on tesSUCCESS.
+# Value: allowed node ops followed by the expected LedgerEntryType.
 _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "DIDSet": ("Created", "Modified", "DID"),
     "DIDDelete": ("Deleted", "DID"),
 }
 
-# XRPL fields → normalized event keys. Only object identifiers needed for tracking.
+# XRPL fields → normalized event keys; only object identifiers, for tracking.
 _OBJECT_ID_FIELDS: dict[str, str] = {
     "Destination": "destination",
     "VaultID": "vault_id",
@@ -89,7 +71,6 @@ def _failure_id(name: str) -> str:
 
 
 def _extract_object_ids(raw: dict) -> dict[str, str]:
-    """Extract known object ID fields from a transaction dict."""
     ids: dict[str, str] = {}
     for xrpl_key, event_key in _OBJECT_ID_FIELDS.items():
         if xrpl_key in raw:
@@ -98,7 +79,7 @@ def _extract_object_ids(raw: dict) -> dict[str, str]:
 
 
 def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
-    """Register a single catalog entry (hit=False) so Antithesis knows this assertion exists."""
+    """hit=False registers existence with Antithesis without claiming a hit."""
     assert_raw(
         condition=True,
         message=message,
@@ -117,10 +98,7 @@ def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_
 
 
 def register_assertions() -> None:
-    """Register catalog entries for all known transaction types.
-
-    Call once at app startup before any transactions are submitted.
-    """
+    """Call once at startup, before any transactions are submitted."""
     from workload.transactions import TX_TYPES
 
     for name in TX_TYPES:
@@ -173,13 +151,8 @@ def register_assertions() -> None:
 
 
 def assert_no_internal_error_submit(name: str, result: dict) -> None:
-    """Fire the no_internal_rippled_error_submit always-assertion for a submit result.
-
-    Use from any path that submits directly via xrpl-py (bypassing ``submit_tx``)
-    — e.g. setup-phase LoanSet co-signing and the node probe. Submit-time is
-    where tef* internal errors must be caught: they never enter a closed ledger
-    and so never reach the validated WS stream that ``tx_result`` consumes.
-    """
+    """For direct xrpl-py submits (bypassing submit_tx): tef* internal errors
+    never enter a closed ledger, so only the submit side can catch them."""
     engine_result = result.get("engine_result", "") or ""
     if not engine_result:
         return
@@ -206,17 +179,12 @@ def assert_no_internal_error_submit(name: str, result: dict) -> None:
 
 
 def tx_submitted(name: str, txn: object = None, result: dict | None = None) -> None:
-    """Report that a transaction was submitted to the network.
-
-    ``result`` is the immediate /submit response dict. Passing it here
-    surfaces ``engine_result`` in the event details and triggers the
-    submit-time tef* internal-error always-assertion.
-    """
+    """Passing the /submit response triggers the submit-time tef* check."""
     details: dict[str, str] = {"tx_type": name}
     if txn is not None:
         try:
-            # Accept either an xrpl-py model or an already-serialized XRPL dict
-            # (the raw-submit path in submit.py passes the mutated dict directly).
+            # Accept an xrpl-py model or an already-serialized dict (raw-submit
+            # path passes the mutated dict directly).
             raw = txn.to_xrpl() if hasattr(txn, "to_xrpl") else txn
             details["account"] = raw.get("Account", "")
             details["sequence"] = str(raw.get("Sequence", ""))
@@ -254,7 +222,6 @@ def tx_submitted(name: str, txn: object = None, result: dict | None = None) -> N
 
 
 def tx_result(name: str, result: dict) -> None:
-    """Report a validated transaction result to Antithesis."""
     tx_json = result.get("tx_json", {})
     meta = result.get("meta", {})
     engine_result = result.get("engine_result") or meta.get("TransactionResult") or "unknown"
@@ -363,7 +330,7 @@ def tx_result(name: str, result: dict) -> None:
         display_type="Sometimes",
         assert_id=_failure_id(name),
     )
-    # Meta-invariant: on tesSUCCESS, verify expected ledger entry operations.
+    # On tesSUCCESS, verify the expected ledger entry operations.
     exp = _META_EXPECTATIONS.get(name)
     if exp and engine_result == "tesSUCCESS":
         *ops, entry_type = exp

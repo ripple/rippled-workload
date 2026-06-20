@@ -1,11 +1,4 @@
-"""WebSocket transaction observer.
-
-Subscribes to the xrpld transactions stream and processes all validated
-transaction results. Fires Antithesis assertions and updates workload
-state (vaults, NFTs, etc.) from the validated metadata.
-
-State updaters are defined in transactions/__init__.py (the registry).
-"""
+"""WebSocket transaction observer: fires assertions and updates state from validated tx metadata."""
 
 from __future__ import annotations
 
@@ -30,22 +23,15 @@ _TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
 
 
 def _amount_is_mpt(amt: object) -> bool:
-    """True when an amount field is an MPT amount object."""
     return isinstance(amt, dict) and "mpt_issuance_id" in amt
 
 
 def _delivered_amount(tx: dict) -> object:
-    """A validated Payment's delivered amount.
-
-    api_version 2 renames the Payment ``Amount`` field to ``DeliverMax`` (and
-    drops ``Amount`` from the response/stream JSON), so read ``DeliverMax`` with
-    an ``Amount`` fallback for api_version 1. The workload's WS stream is
-    api_version 2, so a Payment here has ``DeliverMax``, never ``Amount``."""
+    """api_version 2 renames Payment Amount→DeliverMax and drops Amount; fall back for v1."""
     return tx.get("DeliverMax", tx.get("Amount"))
 
 
 def _handle_validated_tx(workload: Workload, msg: dict) -> None:
-    """Process a single validated transaction from the WS stream."""
     meta = msg.get("meta", {})
     tx = msg.get("tx_json", {})
     tx_type = tx.get("TransactionType", "")
@@ -53,15 +39,11 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     tx_hash = msg.get("hash", "")
     account = tx.get("Account", "")
 
-    # Only process transactions from our accounts
     if account not in workload.accounts:
         return
 
-    # Inner batch transactions are top-level entries in the closed ledger
-    # txMap (rippled rawTxInsert's them during apply). They arrive here
-    # alongside their outer Batch. Emit a dedicated event so they can be
-    # grepped from the events stream, then fall through so state updaters
-    # still see the side effects (e.g. minted NFTs from inner NFTokenMint).
+    # Inner batch txns arrive as top-level entries alongside their outer Batch.
+    # Tag them, then fall through so state updaters still see the side effects.
     if tx.get("Flags", 0) & _TF_INNER_BATCH_TXN:
         send_event(
             "workload::inner_batch_observed",
@@ -75,7 +57,6 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
             },
         )
 
-    # Build a normalized result dict for tx_result()
     result = {
         "engine_result": engine_result,
         "engine_result_message": "",
@@ -85,41 +66,31 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     }
     tx_result(tx_type, result)
 
-    # Any transaction carrying a TicketSequence is a TicketUse — emit that bucket
-    # too (the workload drives many tx types through the ticket path, not just
-    # Payment). Inner batch txns are tagged above and handled separately.
+    # TicketSequence ⇒ TicketUse bucket: many tx types drive the ticket path, not just Payment.
     if tx.get("TicketSequence") is not None:
         tx_result("TicketUse", result)
 
-    # Permissioned-DEX variants carry a DomainID. Fire their dedicated result
-    # bucket so the synthetic-name assertions (registered from REGISTRY) resolve.
+    # DomainID ⇒ synthetic permissioned-DEX buckets so REGISTRY synthetic-name assertions resolve.
     if tx_type == "OfferCreate" and tx.get("DomainID"):
         is_hybrid = bool(tx.get("Flags", 0) & _TF_HYBRID)
         tx_result("OfferCreateHybrid" if is_hybrid else "OfferCreateDomain", result)
     elif tx_type == "Payment" and tx.get("DomainID"):
-        # Non-XRP delivery (delivered amount is an object) or a SendMax means
-        # cross-currency. Read DeliverMax (api_version 2 renames Amount).
+        # SendMax or non-string delivered amount ⇒ cross-currency (api_version 2 renames Amount).
         is_xc = tx.get("SendMax") is not None or not isinstance(_delivered_amount(tx), str)
         tx_result("PaymentDomainXC" if is_xc else "PaymentDomain", result)
 
-    # MPT-on-DEX (XLS-82): an OfferCreate with an MPT leg. Independent of the
-    # DomainID block above — a pure MPT offer carries no DomainID, so this never
-    # double-fires with the domain buckets.
+    # MPT-on-DEX (XLS-82): pure MPT offer has no DomainID, so never double-fires domain buckets.
     if tx_type == "OfferCreate" and (
         _amount_is_mpt(tx.get("TakerGets")) or _amount_is_mpt(tx.get("TakerPays"))
     ):
         tx_result("OfferCreateMPT", result)
 
-    # MPT-on-DEX (XLS-82): a Payment carrying an MPT (in Amount or SendMax).
-    # Independent of the DomainID block above. Also catches the generic Payment
-    # handler's MPT sends — intentional: any MPT-bearing payment feeds the
-    # PaymentMPT buckets.
+    # MPT-on-DEX (XLS-82): any MPT-bearing payment (Amount or SendMax) feeds PaymentMPT.
     if tx_type == "Payment" and (
         _amount_is_mpt(_delivered_amount(tx)) or _amount_is_mpt(tx.get("SendMax"))
     ):
         tx_result("PaymentMPT", result)
 
-    # Update state on success
     if engine_result == "tesSUCCESS":
         updater = STATE_UPDATERS.get(tx_type)
         if updater:
@@ -130,10 +101,7 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
 
 
 async def start_ws_listener(workload: Workload, ws_url: str) -> None:
-    """Subscribe to validated transactions and process results.
-
-    Runs forever with automatic reconnection. Start as a background task.
-    """
+    """Run forever with auto-reconnect; start as a background task."""
     while True:
         try:
             async with AsyncWebsocketClient(ws_url) as ws:

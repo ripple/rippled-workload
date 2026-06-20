@@ -1,14 +1,4 @@
-"""AMM transaction generators for the antithesis workload.
-
-MPT-on-DEX (XLS-82, Phase 4): MPT assets are folded into the existing AMM
-handlers — no new synthetic names or REGISTRY entries. ``w.amms`` may now hold
-MPT-paired pools (``_on_amm_create`` tracks them via ``_parse_asset``), so every
-handler that does ``choice(amms)`` must build MPT amounts/assets correctly.
-xrpl-py accepts ``MPTCurrency`` in ``asset``/``asset2`` and ``MPTAmount`` in
-``amount``/``amount2``/``e_price`` for all six AMM models (verified at
-construction AND binary-codec encode), so the policy is HANDLE everywhere — no
-handler skips MPT pools.
-"""
+"""AMM transaction generators; MPT pools (XLS-82) are handled everywhere, not skipped."""
 
 import xrpl.models
 from xrpl.asyncio.clients import AsyncJsonRpcClient
@@ -49,12 +39,7 @@ def _find_account_with_trust_lines(
     trust_lines: list[TrustLine],
     needed_ious: list[IssuedCurrency],
 ) -> UserAccount | None:
-    """Find an account that has trust lines for all needed IOUs.
-
-    Accounts with trust lines received IOU distributions during setup,
-    so having the trust line implies having balance.
-    Returns None if no eligible account exists.
-    """
+    """Trust line implies balance: accounts got IOU distributions at setup."""
     if not needed_ious:
         return choice(list(accounts.values()))
 
@@ -76,18 +61,13 @@ def _find_account_with_trust_lines(
 def _pick_asset_pair(
     trust_lines: list[TrustLine],
 ) -> tuple[IssuedCurrency | xrpl.models.XRP, IssuedCurrency] | None:
-    """Pick a random asset pair for AMM creation.
-
-    Returns (asset1, asset2) where asset1 may be XRP and asset2 is always IOU.
-    Returns None if no trust lines exist.
-    """
+    """asset1 may be XRP, asset2 always IOU; None when no trust lines exist."""
     if not trust_lines:
         return None
     tl = choice(trust_lines)
     iou = IssuedCurrency(currency=tl.currency, issuer=tl.account_b)
     if random() < 0.3:
         return xrpl.models.XRP(), iou
-    # Pick a second different IOU
     other_tls = [t for t in trust_lines if t.currency != tl.currency or t.account_b != tl.account_b]
     if other_tls:
         tl2 = choice(other_tls)
@@ -97,20 +77,14 @@ def _pick_asset_pair(
 
 
 def _fake_iou() -> IssuedCurrency:
-    """Generate an IOU with a valid-format but non-existent issuer."""
+    """IOU with valid format but non-existent issuer."""
     return IssuedCurrency(currency=params.currency_code(), issuer=params.fake_account())
 
 
 def _amount_for(
     asset: IssuedCurrency | MPTCurrency | xrpl.models.XRP, value: str
 ) -> IOUAmount | MPTAmount | str:
-    """Build an amount for the given asset.
-
-    XRP -> drops string; IssuedCurrency -> IOUAmount; MPTCurrency -> MPTAmount.
-    ``value`` is an integer-or-decimal string; MPT amounts must be integers, and
-    all callers pass integer-valued ``params`` generators (amm_deposit_amount /
-    amm_withdraw_amount / mpt-safe values), so an MPTAmount is always well-formed.
-    """
+    """Callers pass integer ``value`` so MPTAmount (integers only) stays well-formed."""
     if isinstance(asset, xrpl.models.XRP):
         return value
     if isinstance(asset, MPTCurrency):
@@ -119,11 +93,7 @@ def _amount_for(
 
 
 def _iou_leg(amm: AMM) -> IssuedCurrency | None:
-    """Return an IOU leg of ``amm`` (skip XRP and MPT), or None if none exists.
-
-    Used by faulty vectors that build a signed-IOU amount (negative / overdraw)
-    which xrpl-py only models for IssuedCurrencyAmount — those vectors must skip
-    MPT-only pools rather than raise on ``MPTCurrency.currency``."""
+    """IOU leg (skip XRP/MPT), or None: signed-IOU faulty vectors must skip MPT-only pools."""
     for a in amm.assets:
         if isinstance(a, IssuedCurrency):
             return a
@@ -134,8 +104,7 @@ def _iou_leg(amm: AMM) -> IssuedCurrency | None:
 
 
 def _mpt_create_value() -> str:
-    """Integer MPT value for an AMM create leg, modest within the 10000 setup
-    distribution so a controlled holder can always fund it."""
+    """Modest within the 10000 setup distribution so a controlled holder can always fund it."""
     return params.amm_deposit_amount()
 
 
@@ -143,15 +112,7 @@ def _amm_create_mpt_base(
     accounts: dict[str, UserAccount],
     mpt_issuances: list[MPTokenIssuance],
 ) -> tuple[AMMCreate, UserAccount] | None:
-    """Build a valid MPT-paired AMMCreate + its creator. Shared by the valid path
-    and the fuzz faulty vector.
-
-    Primary shape: MPT+XRP (always fundable — XRP leg from amm_xrp_amount, MPT
-    leg from a tradeable issuance the creator is a controlled holder of). ~25%:
-    MPT+MPT from two distinct tradeable issuances whose controlled-holder sets
-    intersect (setup authorizes every holder for every issuance, so the holder
-    set is the intersection). Returns None when no tradeable MPT/holder exists.
-    """
+    """Valid MPT-paired AMMCreate + creator; None when no tradeable MPT/holder exists."""
     tr = _tradeable(mpt_issuances)
     if not tr or not accounts:
         return None
@@ -161,7 +122,7 @@ def _amm_create_mpt_base(
         return None
     mpt_amt1 = _amount_for(MPTCurrency(mpt_issuance_id=mpt1.mpt_issuance_id), _mpt_create_value())
 
-    # ~25%: try MPT+MPT with a second distinct tradeable issuance.
+    # ~25%: MPT+MPT needs a second issuance with an intersecting controlled-holder set.
     others = [m for m in tr if m.mpt_issuance_id != mpt1.mpt_issuance_id]
     if others and random() < 0.25:
         mpt2 = choice(others)
@@ -179,7 +140,6 @@ def _amm_create_mpt_base(
             )
             return base, src
 
-    # MPT+XRP.
     src = accounts[choice(holders1)]
     base = AMMCreate(
         account=src.address,
@@ -211,9 +171,7 @@ async def _amm_create_valid(
 ) -> None:
     if not accounts:
         return
-    # ~35%: build an MPT-paired pool when a tradeable MPT exists. Repeated
-    # same-pair creates hit tecDUPLICATE after the first — fine; the IOU/XRP
-    # majority keeps the success bucket green.
+    # ~35% MPT-paired; same-pair recreates hit tecDUPLICATE; IOU/XRP majority keeps success.
     if _tradeable(mpt_issuances) and random() < 0.35:
         built = _amm_create_mpt_base(accounts, mpt_issuances)
         if built is not None:
@@ -226,7 +184,6 @@ async def _amm_create_valid(
     if not pair:
         return
     asset1, asset2 = pair
-    # Find account that holds the needed IOUs
     needed = [a for a in [asset1, asset2] if not isinstance(a, xrpl.models.XRP)]
     src = _find_account_with_trust_lines(accounts, trust_lines, needed)
     if not src:
@@ -254,9 +211,7 @@ async def _amm_create_valid(
 
 
 def _mpt_xrp_create(account: str, mpt: MPTokenIssuance) -> AMMCreate:
-    """A well-formed MPT+XRP AMMCreate model (valid shape; the FAULT is which
-    issuance/creator is chosen, applied by rippled preclaim). Submitted via the
-    raw path so rippled's own preclaim is what rejects it."""
+    """Well-formed shape; the fault is the issuance/creator choice, left to rippled preclaim."""
     return AMMCreate(
         account=account,
         amount=_amount_for(MPTCurrency(mpt_issuance_id=mpt.mpt_issuance_id), _mpt_create_value()),
@@ -279,9 +234,7 @@ async def _amm_create_faulty(
     ra = _require_auth(mpt_issuances)
     lk = _locked(mpt_issuances)
 
-    # Existing IOU/XRP vectors stay on submit_tx. MPT vectors ride submit_raw /
-    # submit_fuzzed and are only offered when their cohort + a controlled holder
-    # exist.
+    # MPT vectors are only offered when their cohort + a controlled holder exist.
     mutations = [
         "non_existent_asset",
         "same_asset_both",
@@ -300,7 +253,6 @@ async def _amm_create_faulty(
     mutation = choice(mutations)
 
     if mutation == "fuzz":
-        # Generative: corrupt a valid MPT AMMCreate in open-ended ways.
         built = _amm_create_mpt_base(accounts, mpt_issuances)
         if built is None:
             return
@@ -309,11 +261,7 @@ async def _amm_create_faulty(
         return
 
     if mutation == "mpt_no_trade":
-        # CanTrade unset on the MPT leg -> tecNO_PERMISSION. Verified in
-        # AMMCreate.cpp:198-203 (canMPTTradeAndTransfer) -> MPTokenHelpers.cpp
-        # canTrade:590-591 returns tecNO_PERMISSION when lsfMPTCanTrade is unset.
-        # The creator is a controlled holder (funded), so the earlier
-        # tecUNFUNDED_AMM balance check (AMMCreate.cpp:171) is passed first.
+        # CanTrade unset -> tecNO_PERMISSION; creator is funded so the balance check passes first.
         usable = [m for m in nt if _controlled_holders(m, accounts)]
         mpt = choice(usable)
         creator = accounts[choice(_controlled_holders(mpt, accounts))]
@@ -322,11 +270,7 @@ async def _amm_create_faulty(
         return
 
     if mutation == "mpt_require_auth":
-        # require-auth MPT, creator a non-issuer holder never issuer-authorized
-        # -> tecNO_AUTH. Verified in AMMCreate.cpp:109-119 (requireAuth on the
-        # asset, AuthType::Legacy) -> MPTokenHelpers.cpp requireAuth:394-396
-        # (lsfMPTRequireAuth set AND MPToken lacks lsfMPTAuthorized). requireAuth
-        # runs before the canTrade/balance checks, so this is the dominant code.
+        # require-auth MPT, never-authorized holder -> tecNO_AUTH (runs before canTrade/balance).
         usable = [m for m in ra if any(a != m.issuer and a in m.holders for a in accounts)]
         mpt = choice(usable)
         holders = [a for a in _controlled_holders(mpt, accounts) if a != mpt.issuer]
@@ -338,11 +282,7 @@ async def _amm_create_faulty(
         return
 
     if mutation == "mpt_locked":
-        # Globally-locked MPT, creator a controlled holder (funded pre-lock)
-        # -> tecLOCKED (NOT tecFROZEN). Verified in AMMCreate.cpp:122-132
-        # (checkFrozen on the asset) -> TokenHelpers.cpp checkFrozen(MPTIssue):
-        # 96-99 returns tecLOCKED for a frozen/locked MPT. requireAuth passes
-        # first (locked cohort is not require-auth), then checkFrozen fires.
+        # Globally-locked MPT, funded holder -> tecLOCKED not tecFROZEN; checkFrozen after auth.
         usable = [m for m in lk if _controlled_holders(m, accounts)]
         mpt = choice(usable)
         creator = accounts[choice(_controlled_holders(mpt, accounts))]
@@ -393,8 +333,6 @@ async def _amm_create_faulty(
         )
 
     elif mutation == "duplicate_amm":
-        # Try to create an AMM for an asset pair that already exists (tecDUPLICATE).
-        # _amount_for handles XRP/IOU/MPT legs so MPT-paired pools are safe here.
         if not amms:
             return
         amm = choice(amms)
@@ -419,7 +357,6 @@ async def _amm_create_faulty(
         )
 
     else:  # unfunded_create
-        # Create with assets the account doesn't hold (tecUNFUNDED_AMM)
         fake = _fake_iou()
         amount2 = IOUAmount(
             currency=fake.currency,
@@ -628,7 +565,7 @@ async def _amm_deposit_faulty(
         )
 
     elif mutation == "mismatched_flag_fields":
-        # TF_TWO_ASSET but only provide one amount — flag/field mismatch
+        # TF_TWO_ASSET with only one amount
         if not amms:
             return
         amm = choice(amms)
@@ -649,8 +586,7 @@ async def _amm_deposit_faulty(
         amm = choice(amms)
         if len(amm.assets) < 2:
             return
-        # Signed-IOU amount: needs an IOU leg (XRP rejects negative drops at the
-        # codec; xrpl-py has no negative MPTAmount model) — skip MPT-only pools.
+        # Signed-IOU amount needs an IOU leg (no negative MPT/XRP model) — skip MPT-only pools.
         asset = _iou_leg(amm)
         if asset is None:
             return
@@ -853,15 +789,14 @@ async def _amm_withdraw_faulty(
         amm = choice(amms)
         if len(amm.assets) < 2:
             return
-        # Far-overshoot IOU value (within IOU precision, beyond any pool balance);
-        # needs an IOU leg — skip MPT-only pools (10**15 also overflows uint64).
+        # Needs an IOU leg — skip MPT-only pools (10**15 overflows uint64).
         asset = _iou_leg(amm)
         if asset is None:
             return
         amount = IOUAmount(
             currency=asset.currency,
             issuer=asset.issuer,
-            value=str(10**15),  # within IOU precision but far exceeds pool balance
+            value=str(10**15),
         )
         txn = AMMWithdraw(
             account=src.address,
@@ -872,7 +807,7 @@ async def _amm_withdraw_faulty(
         )
 
     elif mutation == "mismatched_flag_fields":
-        # TF_TWO_ASSET but only provide one amount — flag/field mismatch
+        # TF_TWO_ASSET with only one amount
         if not amms:
             return
         amm = choice(amms)
@@ -893,8 +828,7 @@ async def _amm_withdraw_faulty(
         amm = choice(amms)
         if len(amm.assets) < 2:
             return
-        # Signed-IOU amount: needs an IOU leg (XRP rejects negative drops at the
-        # codec; xrpl-py has no negative MPTAmount model) — skip MPT-only pools.
+        # Signed-IOU amount needs an IOU leg (no negative MPT/XRP model) — skip MPT-only pools.
         asset = _iou_leg(amm)
         if asset is None:
             return
@@ -933,9 +867,7 @@ async def _amm_vote_valid(
     if not accounts or not amms:
         return
     amm = choice(amms)
-    # Pick an account that holds the AMM's IOU assets (likely an LP token holder).
-    # Only IOU legs need a trust line; MPT/XRP legs are filtered out so an
-    # MPT-paired pool does not feed an MPTCurrency into the trust-line matcher.
+    # Filter to IOU legs: only those need a trust line, and MPTCurrency must not reach the matcher.
     needed = [a for a in amm.assets if isinstance(a, IssuedCurrency)]
     src = _find_account_with_trust_lines(accounts, trust_lines, needed)
     if not src:
@@ -969,7 +901,7 @@ async def _amm_vote_faulty(
         )
 
     elif mutation == "non_lp_holder_vote":
-        # Vote on a real AMM without holding LP tokens (tecAMM_FAILED)
+        # No LP tokens -> tecAMM_FAILED
         if not amms:
             return
         amm = choice(amms)
@@ -981,7 +913,7 @@ async def _amm_vote_faulty(
         )
 
     else:  # swapped_assets
-        # Vote with asset1/asset2 swapped (tecAMM_INVALID_TOKENS)
+        # asset1/asset2 swapped -> tecAMM_INVALID_TOKENS
         if not amms:
             return
         amm = choice(amms)
@@ -1129,7 +1061,7 @@ async def _amm_bid_faulty(
         )
 
     else:  # non_lp_holder_bid
-        # Bid on a real AMM without holding LP tokens (tecAMM_INVALID_TOKENS)
+        # No LP tokens -> tecAMM_INVALID_TOKENS
         if not amms:
             return
         amm = choice(amms)
@@ -1205,12 +1137,11 @@ async def _amm_delete_faulty(
             asset2=amm.assets[1] if len(amm.assets) > 1 else None,
         )
 
-    else:  # wrong_asset_pair — use real assets but wrong combination
+    else:  # wrong_asset_pair
         if not amms:
             return
         amm = choice(amms)
         fake = _fake_iou()
-        # Swap one real asset with a fake one
         txn = AMMDelete(
             account=src.address,
             asset=amm.assets[0],
