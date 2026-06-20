@@ -1,8 +1,4 @@
-"""Lending Protocol transaction generators for the antithesis workload.
-
-Lending requires a vault to exist first, then a broker is created on that vault,
-then loans are taken against the broker.
-"""
+"""Lending Protocol transaction generators (vault → broker → loan chain)."""
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction import autofill_and_sign
@@ -254,7 +250,6 @@ async def loan_broker_cover_withdraw(
 
 
 def _state_aware_cover_withdraw_amount(broker: LoanBroker) -> str:
-    """Generate a cover withdraw amount informed by tracked cover balance."""
     if broker.cover_balance <= 0:
         return params.loan_cover_deposit_amount()
     strategy = choice(["exact", "half", "small"])
@@ -374,7 +369,7 @@ async def _loan_set_valid(
         payment_interval=pi,
         grace_period=params.loan_grace_period(pi),
     )
-    # LoanSet requires counterparty co-signing: borrower signs, then broker co-signs
+    # LoanSet requires co-signing: borrower signs, then broker co-signs.
     signed = await autofill_and_sign(txn, client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
     response = await xrpl_submit(cosigned.tx, client)
@@ -431,7 +426,7 @@ async def _loan_set_faulty(
             payment_interval=pi,
             grace_period=params.loan_grace_period(pi),
         )
-        # Deliberately skip co-signing — submit with only borrower's signature
+        # Fault: deliberately skip co-signing (borrower signature only).
         await submit_tx("LoanSet", txn, client, borrower.wallet)
 
 
@@ -451,7 +446,7 @@ async def _loan_delete_valid(
 ) -> None:
     if not loans:
         return
-    # Prefer loans with zero principal — loans with debt return tecHAS_OBLIGATIONS
+    # Prefer paid-off loans; loans with debt return tecHAS_OBLIGATIONS.
     paid_off = [ln for ln in loans if ln.principal <= 0 and ln.borrower in accounts]
     loan = choice(paid_off) if paid_off else choice(loans)
     if loan.borrower not in accounts:
@@ -509,14 +504,11 @@ async def loan_manage(
 
 
 def _state_aware_manage_flag(loan: Loan) -> LoanManageFlag:
-    """Pick a contextually appropriate manage flag based on loan state."""
     if loan.is_defaulted:
-        # Already defaulted — try impair/unimpair (likely errors, good for exploration)
+        # Already defaulted: impair/unimpair likely error — good for exploration.
         return choice([LoanManageFlag.TF_LOAN_IMPAIR, LoanManageFlag.TF_LOAN_UNIMPAIR])
     if loan.is_impaired:
-        # Impaired — can unimpair or escalate to default
         return choice([LoanManageFlag.TF_LOAN_UNIMPAIR, LoanManageFlag.TF_LOAN_DEFAULT])
-    # Normal — can impair or default
     return choice([LoanManageFlag.TF_LOAN_IMPAIR, LoanManageFlag.TF_LOAN_DEFAULT])
 
 
@@ -599,7 +591,6 @@ async def loan_pay(
 
 
 def _state_aware_pay_amount(loan: Loan) -> str:
-    """Generate a pay amount informed by tracked loan principal."""
     if loan.principal <= 0:
         return params.loan_pay_amount()
     strategy = choice(["full", "installment", "random"])

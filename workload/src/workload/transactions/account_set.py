@@ -1,8 +1,4 @@
-"""AccountSet transaction generators for the antithesis workload.
-
-Randomly sets/clears account flags that affect trust lines, payments,
-and other operations.
-"""
+"""AccountSet transaction generators: set/clear account flags."""
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import AccountSet, AccountSetAsfFlag
@@ -14,7 +10,7 @@ from workload.submit import submit_tx
 
 log = logging.getLogger(__name__)
 
-# Flags that are interesting for fuzzing trust lines and payments
+# Flags that affect trust lines and payments.
 INTERESTING_FLAGS: list[AccountSetAsfFlag] = [
     AccountSetAsfFlag.ASF_DEFAULT_RIPPLE,
     AccountSetAsfFlag.ASF_REQUIRE_AUTH,
@@ -39,7 +35,6 @@ async def _account_set_valid(accounts: dict[str, UserAccount], client: AsyncJson
     account_id = choice(list(accounts))
     account = accounts[account_id]
     flag = choice(INTERESTING_FLAGS)
-    # Randomly set or clear the flag
     if random() < 0.5:
         txn = AccountSet(account=account.address, set_flag=flag)
     else:

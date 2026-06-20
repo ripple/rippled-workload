@@ -1,7 +1,4 @@
-"""OfferCreate / OfferCancel workload handlers.
-
-Creates DEX offers that trade through AMM pools, and cancels existing offers.
-"""
+"""OfferCreate / OfferCancel workload handlers."""
 
 from __future__ import annotations
 
@@ -26,17 +23,12 @@ def _fake_iou() -> IssuedCurrency:
 
 
 def _non_mpt_amms(amms: list[AMM]) -> list[AMM]:
-    """AMMs with no MPT leg — the generic OfferCreate path trades IOU/XRP
-    pools only; MPT pools are covered by OfferCreateMPT (mpt_dex.py)."""
+    """IOU/XRP-only AMMs; MPT pools are covered by OfferCreateMPT (mpt_dex.py)."""
     return [a for a in amms if not any(isinstance(x, MPTCurrency) for x in a.assets)]
 
 
 def _random_flag() -> int:
-    """Pick a random combination of OfferCreate flags (or no flags).
-
-    XRPL allows combining flags like tfPassive | tfSell. We sample a random
-    subset and OR them together.
-    """
+    """OR together a random subset of OfferCreate flags (XRPL allows combining them)."""
     all_flags = [
         OfferCreateFlag.TF_PASSIVE,
         OfferCreateFlag.TF_SELL,
@@ -60,22 +52,17 @@ def _iou_amount(asset: IssuedCurrency, value: str) -> IOUAmount:
 def _make_offer_amounts(
     amm: AMM,
 ) -> tuple[str | IOUAmount, str | IOUAmount] | None:
-    """Build taker_gets / taker_pays from an AMM's asset pair.
-
-    Randomly picks direction: buy asset1 with asset2, or vice versa.
-    Returns (taker_gets, taker_pays) or None if assets are insufficient.
-    """
+    """Build (taker_gets, taker_pays) from an AMM pair, or None if assets insufficient."""
     if len(amm.assets) < 2:
         return None
     a1, a2 = amm.assets[0], amm.assets[1]
 
-    # Randomly pick direction
     if random() < 0.5:
         get_asset, pay_asset = a1, a2
     else:
         get_asset, pay_asset = a2, a1
 
-    # Build amounts — use small amounts to increase chance of filling
+    # Small amounts raise the chance of filling.
     if isinstance(get_asset, xrpl.models.XRP):
         taker_gets = str(randint(100_000, 10_000_000))  # 0.1-10 XRP in drops
     else:
@@ -94,7 +81,6 @@ def _find_account_for_amm(
     trust_lines: list[TrustLine],
     amm: AMM,
 ) -> UserAccount | None:
-    """Find an account that has trust lines for the AMM's IOU assets."""
     needed_ious = [a for a in amm.assets if isinstance(a, IssuedCurrency)]
     return _find_account_with_trust_lines(accounts, trust_lines, needed_ious)
 
@@ -165,7 +151,6 @@ async def _offer_create_faulty(
         ]
     )
     if mutation == "non_existent_asset":
-        # Offer with a fake IOU nobody has issued
         fake = _fake_iou()
         taker_gets = _iou_amount(fake, str(randint(1, 1_000)))
         taker_pays = str(randint(1_000_000, 100_000_000))
@@ -176,7 +161,7 @@ async def _offer_create_faulty(
         )
 
     elif mutation == "same_asset_both":
-        # Both sides are XRP (tecINSUF_RESERVE_OFFER or malformed)
+        # Both sides XRP → tecINSUF_RESERVE_OFFER or malformed.
         txn = OfferCreate(
             account=src.address,
             taker_gets=str(randint(1_000_000, 100_000_000)),
@@ -184,7 +169,6 @@ async def _offer_create_faulty(
         )
 
     elif mutation == "zero_amount":
-        # Zero taker_gets or taker_pays
         iou_amms = _non_mpt_amms(amms)
         if not iou_amms:
             return
@@ -201,7 +185,7 @@ async def _offer_create_faulty(
         )
 
     elif mutation == "negative_iou_amount":
-        # Negative IOU amount — passes xrpl-py, rejected by rippled
+        # Passes xrpl-py construction; rippled rejects it.
         iou_amms = _non_mpt_amms(amms)
         if not iou_amms:
             return
@@ -218,7 +202,6 @@ async def _offer_create_faulty(
         )
 
     else:  # crossed_offer
-        # Create an offer that crosses itself (same account, opposite direction)
         iou_amms = _non_mpt_amms(amms)
         if not iou_amms:
             return
@@ -227,7 +210,7 @@ async def _offer_create_faulty(
         if not pair:
             return
         taker_gets, taker_pays = pair
-        # Swap to create a self-crossing offer
+        # Swap sides → self-crossing offer.
         txn = OfferCreate(
             account=src.address,
             taker_gets=taker_pays,
@@ -285,17 +268,14 @@ async def _offer_cancel_faulty(
     )
 
     if mutation == "non_existent_sequence":
-        # Cancel an offer that doesn't exist
         txn = OfferCancel(
             account=src.address,
             offer_sequence=randint(900_000, 999_999),
         )
 
     else:  # cancel_others_offer
-        # Submit from src but use a sequence that likely belongs to another
-        # account. Since OfferCancel only cancels the submitter's own offers,
-        # this effectively becomes a non-existent sequence for src — exercising
-        # the "wrong owner" path from the submitter's perspective.
+        # OfferCancel only touches the submitter's own offers, so a foreign
+        # sequence is just a non-existent one from src's view.
         txn = OfferCancel(
             account=src.address,
             offer_sequence=randint(1, 100),

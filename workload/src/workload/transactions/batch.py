@@ -1,11 +1,4 @@
-"""Batch transaction generators for the antithesis workload.
-
-Inner transactions can be any type except Batch, Vault*, and Loan* operations
-(per Batch::disabledTxTypes in Batch.h).
-
-NOTE: When adding a new transaction type to the workload, consider adding it
-to _build_inner() as a batch inner type if it's not in the disabled list.
-"""
+"""Batch transaction generators for the antithesis workload."""
 
 import xrpl.models
 from xrpl.asyncio.account import get_next_valid_seq_number
@@ -42,8 +35,7 @@ _INNER_COMMON: dict[str, object] = {
     "signing_pub_key": "",
 }
 
-# All currently implemented types that are allowed in batch.
-# Excluded: Vault*, Loan* (in Batch::disabledTxTypes), Batch (cannot nest).
+# Excluded: Vault*, Loan* (Batch::disabledTxTypes), Batch (cannot nest).
 _INNER_TYPES: list[str] = [
     "Payment",
     "AccountSet",
@@ -58,7 +50,6 @@ _INNER_TYPES: list[str] = [
 
 
 def _build_inner(src: UserAccount, dst: str, sequence: int) -> Transaction:
-    """Build a random inner transaction for the batch."""
     tx_type = choice(_INNER_TYPES)
     common = {**_INNER_COMMON, "account": src.address, "sequence": sequence}
 

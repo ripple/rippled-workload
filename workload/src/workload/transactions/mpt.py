@@ -78,7 +78,7 @@ async def _mpt_authorize_valid(
     mode = choice(["holder_optin", "issuer_auth"])
 
     if mode == "holder_optin":
-        # Holder self-authorization (opt-in) — works for any MPT
+        # opt-in works for any MPT; issuer_auth needs TF_MPT_REQUIRE_AUTH
         holder = accounts[choice(other_accounts)]
         txn = MPTokenAuthorize(
             account=holder.address,
@@ -86,7 +86,6 @@ async def _mpt_authorize_valid(
         )
         await submit_tx("MPTokenAuthorize", txn, client, holder.wallet)
     else:
-        # Issuer authorizes a holder — only works with TF_MPT_REQUIRE_AUTH
         issuer = accounts[mpt.issuer]
         holder_id = choice(other_accounts)
         txn = MPTokenAuthorize(

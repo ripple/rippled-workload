@@ -24,7 +24,6 @@ from workload.submit import submit_tx
 
 
 def _amount_for_asset(asset: object) -> IOUAmount | MPTAmount | str:
-    """Create an Amount matching the vault's asset type."""
     if isinstance(asset, IssuedCurrency):
         return IOUAmount(
             currency=asset.currency,
@@ -36,14 +35,12 @@ def _amount_for_asset(asset: object) -> IOUAmount | MPTAmount | str:
             mpt_issuance_id=asset.mpt_issuance_id,
             value=params.mpt_amount(),
         )
-    # XRP — return drops as string
     return params.vault_deposit_amount()
 
 
 def _random_asset(
     trust_lines: list[TrustLine], mpt_issuances: list[MPTokenIssuance]
 ) -> IssuedCurrency | MPTCurrency | xrpl.models.XRP:
-    """Pick a random asset: XRP, IOU, or MPT based on available state."""
     roll = random()
     if trust_lines and roll < 0.33:
         tl = choice(trust_lines)
@@ -184,10 +181,8 @@ async def _vault_deposit_faulty(
             return
         vault = choice(vaults)
         if isinstance(vault.asset, xrpl.models.XRP):
-            # Vault is XRP, deposit IOU instead
             amount = IOUAmount(currency="USD", issuer=depositor.address, value=params.iou_amount())
         else:
-            # Vault is IOU/MPT, deposit XRP drops instead
             amount = params.vault_deposit_amount()
         txn = VaultDeposit(
             account=depositor.address,
@@ -209,7 +204,6 @@ async def vault_withdraw(
 
 
 def _state_aware_withdraw_amount(vault: Vault) -> IOUAmount | MPTAmount | str:
-    """Generate a withdraw amount informed by tracked vault balance."""
     if vault.balance <= 0:
         return _amount_for_asset(vault.asset)
     strategy = choice(["exact", "half", "small"])
@@ -361,7 +355,7 @@ async def _vault_delete_valid(
 ) -> None:
     if not vaults:
         return
-    # Prefer vaults with zero balance — non-empty vaults return tecNO_PERMISSION
+    # Non-empty vaults return tecNO_PERMISSION
     empty = [v for v in vaults if v.balance <= 0 and v.owner in accounts]
     vault = choice(empty) if empty else choice(vaults)
     if vault.owner not in accounts:
@@ -414,13 +408,11 @@ async def vault_clawback(
 
 
 def _get_asset_issuer(vault: Vault) -> str | None:
-    """Return the issuer address for the vault's asset, or None for XRP."""
+    """Issuer address for the vault's asset, or None for XRP."""
     if isinstance(vault.asset, IssuedCurrency):
         return vault.asset.issuer
     if isinstance(vault.asset, MPTCurrency):
-        # MPT issuance ID encodes the issuer — but we need the address.
-        # The issuer is stored in the MPTokenIssuance model, but we don't have
-        # that here. For now, return None and let the caller skip.
+        # MPT issuer address not reachable from the issuance ID here; skip.
         return None
     return None
 
@@ -431,14 +423,12 @@ async def _vault_clawback_valid(
     if not vaults:
         return
     # VaultClawback must be submitted by the asset issuer, not the vault owner.
-    # Filter to IOU vaults where the issuer is known and shareholders exist.
     eligible = [v for v in vaults if _get_asset_issuer(v) in accounts and v.shareholders]
     if not eligible:
         return
     vault = choice(eligible)
     issuer_address = _get_asset_issuer(vault)
     issuer = accounts[issuer_address]
-    # Pick a known shareholder (someone who actually deposited)
     holder = choice(list(vault.shareholders))
     txn = VaultClawback(
         account=issuer.address,
@@ -470,7 +460,7 @@ async def _vault_clawback_faulty(
             holder=holder,
             amount=_amount_for_asset(vault.asset),
         )
-    else:  # clawback_self — owner == holder
+    else:  # clawback_self
         txn = VaultClawback(
             account=owner.address,
             vault_id=vault.vault_id,

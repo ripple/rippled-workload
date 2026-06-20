@@ -1,15 +1,4 @@
-"""Transaction registry — single source of truth for all transaction types.
-
-Every transaction type is defined here with its:
-- name: assertion name (used in TX_TYPES, workload::seen, etc.)
-- path: HTTP endpoint path
-- handler: async function to call
-- args: lambda taking Workload, returning args tuple for handler
-- state_updater: optional (workload, tx_json, meta) callback for WS listener
-
-To add a new transaction type: add one entry to REGISTRY below.
-app.py, assertions.py, and ws_listener.py all read from this.
-"""
+"""Transaction registry — single source of truth for all transaction types."""
 
 from __future__ import annotations
 
@@ -19,7 +8,6 @@ if TYPE_CHECKING:
     from workload.app import Workload
 
 # ── State updater helpers ────────────────────────────────────────────
-# Each handles a validated tesSUCCESS by updating workload tracking lists.
 import xrpl.models
 from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
@@ -142,10 +130,7 @@ def _on_trust_set(w: Workload, tx: dict, meta: dict) -> None:
 def _parse_asset(
     raw: dict | str,
 ) -> IssuedCurrency | MPTCurrency | xrpl.models.XRP:
-    """Parse an Asset field from a transaction JSON into an xrpl-py model.
-
-    A plain string (e.g. an XRP drops amount) maps to XRP.
-    """
+    """A plain string (e.g. an XRP drops amount) maps to XRP."""
     if not isinstance(raw, dict):
         return xrpl.models.XRP()
     if "mpt_issuance_id" in raw:
@@ -170,7 +155,6 @@ def _on_vault_delete(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _extract_amount(tx: dict) -> int:
-    """Extract integer amount from a transaction's Amount field (drops or IOU/MPT value)."""
     amt = tx.get("Amount", "0")
     if isinstance(amt, str):
         return int(amt)
@@ -237,7 +221,7 @@ def _on_nftoken_cancel_offer(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
-    # mpt_issuance_id is at the top level of meta (like nftoken_id for NFTs)
+    # mpt_issuance_id is at meta top level, like nftoken_id for NFTs
     mpt_id = meta.get("mpt_issuance_id")
     if mpt_id:
         flags = tx.get("Flags", 0)
@@ -247,7 +231,7 @@ def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
             can_trade=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRADE)),
             can_transfer=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER)),
             require_auth=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH)),
-            # lock state is set later by setup, not at create
+            # lock state set later by setup, not at create
             locked=False,
         )
         w.mpt_issuances.append(issuance)
@@ -257,8 +241,8 @@ def _on_mpt_authorize(w: Workload, tx: dict, meta: dict) -> None:
     mpt_id = tx.get("MPTokenIssuanceID")
     if not mpt_id:
         return
-    # Holder self-opt-in: the submitter holds. Issuer-authorizes-holder mode:
-    # the Holder field names the account that now holds an MPToken.
+    # Holder self-opt-in: submitter holds. Issuer-authorizes mode: Holder field
+    # names the account that now holds.
     held = tx.get("Holder") or tx.get("Account", "")
     if not held:
         return
@@ -296,8 +280,7 @@ def _on_credential_delete(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _on_credential_accept(w: Workload, tx: dict, meta: dict) -> None:
-    # CredentialAccept sets lsfAccepted on the credential (a ModifiedNode, no
-    # created/deleted id). The subject is the submitting account.
+    # ModifiedNode only (no created/deleted id); subject is the submitter.
     issuer = tx.get("Issuer", "")
     subject = tx.get("Account", "")
     cred_type = tx.get("CredentialType", "")
@@ -316,8 +299,6 @@ def _on_ticket_create(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _parse_accepted_credentials(tx: dict) -> list[tuple[str, str]]:
-    """Extract (issuer, credential_type) pairs from a PermissionedDomainSet's
-    AcceptedCredentials array."""
     pairs: list[tuple[str, str]] = []
     for entry in tx.get("AcceptedCredentials", []):
         cred = entry.get("Credential", entry)
@@ -338,7 +319,7 @@ def _on_domain_set(w: Workload, tx: dict, meta: dict) -> None:
             )
         )
         return
-    # Update to an existing domain (ModifiedNode): refresh accepted credentials.
+    # ModifiedNode: refresh accepted credentials on existing domain.
     existing_id = tx.get("DomainID")
     if existing_id:
         for d in w.domains:
@@ -416,7 +397,7 @@ def _on_loan_manage(w: Workload, tx: dict, meta: dict) -> None:
     if not loan:
         return
     flags = tx.get("Flags", 0)
-    # TF_LOAN_DEFAULT = 0x00010000, TF_LOAN_IMPAIR = 0x00020000, TF_LOAN_UNIMPAIR = 0x00040000
+    # TF_LOAN_DEFAULT=0x00010000, TF_LOAN_IMPAIR=0x00020000, TF_LOAN_UNIMPAIR=0x00040000
     if flags & 0x00010000:
         loan.is_defaulted = True
     if flags & 0x00020000:
@@ -442,7 +423,7 @@ def _on_channel_create(w: Workload, tx: dict, meta: dict) -> None:
     if not channel_id:
         return
     tx_hash = tx.get("hash", "")
-    # Update placeholder channel_id with real ledger ID
+    # Replace placeholder channel_id (tx hash) with real ledger ID
     for ch in w.payment_channels:
         if ch.channel_id == tx_hash:
             ch.channel_id = channel_id
@@ -459,12 +440,11 @@ def _on_channel_create(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _on_channel_fund(w: Workload, tx: dict, meta: dict) -> None:
-    # Fund doesn't create/delete — just adds XRP to existing channel
+    # Fund neither creates nor deletes a channel — nothing to track.
     pass
 
 
 def _on_channel_claim(w: Workload, tx: dict, meta: dict) -> None:
-    # If the channel was closed by this claim, remove it
     deleted_id = _extract_deleted_id(meta, "PayChannel")
     if deleted_id:
         w.payment_channels[:] = [ch for ch in w.payment_channels if ch.channel_id != deleted_id]
@@ -475,12 +455,11 @@ def _on_check_create(w: Workload, tx: dict, meta: dict) -> None:
     if not check_id:
         return
     tx_hash = tx.get("hash", "")
-    # Update the placeholder check_id (tx hash) with real ledger check_id
+    # Replace placeholder check_id (tx hash) with real ledger check_id
     for c in w.checks:
         if c.check_id == tx_hash:
             c.check_id = check_id
             return
-    # If not found optimistically, add it
     w.checks.append(
         Check(
             check_id=check_id,
@@ -504,18 +483,16 @@ def _on_check_cancel(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _on_escrow_create(w: Workload, tx: dict, meta: dict) -> None:
-    """Confirm escrow creation — match by owner+sequence and keep fulfillment."""
+    # Escrow already appended optimistically by handler (keeps fulfillment);
+    # confirm by owner+sequence, only re-add as fallback.
     escrow_id = _extract_created_id(meta, "Escrow")
     if not escrow_id:
         return
     owner = tx.get("Account", "")
     seq = tx.get("Sequence", 0)
-    # The Escrow was already appended optimistically by escrow_create handler
-    # with sequence = tx sequence. Just confirm it exists.
     for e in w.escrows:
         if e.owner == owner and e.sequence == seq:
             return
-    # If not found (edge case), add without fulfillment
     w.escrows.append(
         Escrow(
             owner=owner,
@@ -546,7 +523,6 @@ def _on_escrow_cancel(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _on_did_set(w: Workload, tx: dict, meta: dict) -> None:
-    """Track DID in w.dids (idempotent)."""
     account = tx.get("Account", "")
     if not account:
         return
@@ -555,7 +531,6 @@ def _on_did_set(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _on_did_delete(w: Workload, tx: dict, meta: dict) -> None:
-    """Remove DID from w.dids."""
     account = tx.get("Account", "")
     w.dids[:] = [d for d in w.dids if d.account != account]
 
@@ -564,9 +539,8 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
     source = tx.get("Account", "")
     delegate_addr = tx.get("Authorize", "")
     perms_raw = tx.get("Permissions", [])
-    # Only keep permission values that are transaction type names;
-    # GranularPermission values (e.g. "TrustlineAuthorize") will never
-    # match a tx_type in maybe_delegate, so filter them out.
+    # GranularPermission values (e.g. "TrustlineAuthorize") never match a
+    # tx_type in maybe_delegate, so keep only tx-type-name permissions.
     tx_type_names = set(TX_TYPES)
     permissions = []
     for p in perms_raw:
@@ -575,7 +549,6 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
             permissions.append(pv)
     if not permissions:
         return
-    # Replace existing delegation from same source to same delegate
     w.delegates[:] = [
         d for d in w.delegates if not (d.source == source and d.delegate_address == delegate_addr)
     ]
@@ -591,14 +564,12 @@ def _on_delegate_set(w: Workload, tx: dict, meta: dict) -> None:
 def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
     amm_id = _extract_created_id(meta, "AMM")
     if amm_id:
-        # Parse both assets from the AMMCreate transaction. Use _parse_asset so
-        # MPT amounts (dict with mpt_issuance_id, no currency) are tracked too.
+        # _parse_asset so MPT amounts (dict, no currency) are tracked too.
         asset1_raw = tx.get("Amount", {})
         asset2_raw = tx.get("Amount2", {})
         assets = [
             _parse_asset(raw) for raw in (asset1_raw, asset2_raw) if isinstance(raw, (dict, str))
         ]
-        # Extract LP token from created AMM node
         lp_token = []
         for node in meta.get("AffectedNodes", []):
             created = node.get("CreatedNode", {})
@@ -614,7 +585,7 @@ def _on_amm_create(w: Workload, tx: dict, meta: dict) -> None:
 def _on_amm_delete(w: Workload, tx: dict, meta: dict) -> None:
     amm_id = _extract_deleted_id(meta, "AMM")
     if amm_id:
-        # Match by asset pair — the deleter can be anyone, not just the creator.
+        # Match by asset pair — deleter can be anyone, not just the creator.
         tx_assets = {_parse_asset(tx.get("Asset", {})), _parse_asset(tx.get("Asset2", {}))}
         w.amms[:] = [a for a in w.amms if set(a.assets) != tx_assets]
 
@@ -632,20 +603,16 @@ def _on_offer_create(w: Workload, tx: dict, meta: dict) -> None:
 
 
 def _on_offer_cancel(w: Workload, tx: dict, meta: dict) -> None:
-    """Remove an explicitly cancelled offer from state.
-
-    NOTE: offers also disappear via fill and expiry, which don't trigger
-    this handler. Stale entries will accumulate in w.offers — the cancel-valid
-    path may pick already-gone offers and get tecNO_OFFER. This is acceptable
-    for fuzzing purposes (exercises error paths).
-    """
+    # Offers also vanish via fill/expiry (no handler), so stale entries
+    # accumulate; cancel-valid may then pick a gone offer (tecNO_OFFER), which
+    # is acceptable — it exercises error paths.
     deleted_id = _extract_deleted_id(meta, "Offer")
     if deleted_id:
         w.offers[:] = [o for o in w.offers if o.get("offer_id") != deleted_id]
 
 
 # ── Registry ─────────────────────────────────────────────────────────
-# (name, path, handler, args_fn, state_updater_or_None)
+# (name, path, handler, args_fn, state_updater | None)
 
 REGISTRY = [
     (
@@ -901,9 +868,8 @@ REGISTRY = [
         _on_offer_cancel,
     ),
     # ── Permissioned DEX (featurePermissionedDEX) ────────────────────
-    # Synthetic assertion names; on-ledger TransactionType stays OfferCreate /
-    # Payment. State is tracked by the real-type updaters (_on_offer_create),
-    # and ws_listener fires the matching tx_result for the buckets below.
+    # Synthetic names; on-ledger type stays OfferCreate/Payment. Real-type
+    # updaters track state; ws_listener fires tx_result for these buckets.
     (
         "OfferCreateDomain",
         "/offer/create/domain/random",
@@ -933,9 +899,8 @@ REGISTRY = [
         None,
     ),
     # ── MPT-on-DEX (XLS-82) ──────────────────────────────────────────
-    # Synthetic assertion name; on-ledger TransactionType stays OfferCreate.
-    # State is tracked by the real-type updater (_on_offer_create), and
-    # ws_listener fires the matching tx_result for the buckets below.
+    # Synthetic name; on-ledger type stays OfferCreate. Real-type updater
+    # tracks state; ws_listener fires tx_result for these buckets.
     (
         "OfferCreateMPT",
         "/offer/create/mpt/random",
@@ -943,9 +908,8 @@ REGISTRY = [
         lambda w: (w.accounts, w.mpt_issuances, w.client),
         None,
     ),
-    # PaymentMPT: a Payment carrying an MPT. Synthetic name; on-ledger type is
-    # Payment (no state updater — Payment has none). ws_listener fires the
-    # matching tx_result when a validated Payment carries an MPT leg.
+    # PaymentMPT: synthetic name; on-ledger type is Payment (no updater).
+    # ws_listener fires tx_result when a validated Payment carries an MPT leg.
     (
         "PaymentMPT",
         "/payment/mpt/random",
@@ -1116,6 +1080,5 @@ REGISTRY = [
     ),
 ]
 
-# Derived views for consumers
 TX_TYPES = [name for name, *_ in REGISTRY]
 STATE_UPDATERS = {name: updater for name, _, _, _, updater in REGISTRY if updater}

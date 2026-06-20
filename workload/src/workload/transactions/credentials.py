@@ -1,4 +1,4 @@
-"""Credential transaction generators for the antithesis workload."""
+"""Credential transaction generators."""
 
 import time
 

@@ -46,8 +46,7 @@ class Workload:
         self.checks = []
         self.payment_channels = []
         self.offers: list[dict] = []
-        # Addresses used by setup (gateways, vault creators, etc.) — never delete these.
-        # Populated by run_setup().
+        # Setup addresses (gateways, vault creators, etc.) — never delete; populated by run_setup().
         self.protected_accounts: set[str] = set()
         self.deleted_vault_ids: list[str] = []
         self.deleted_broker_ids: list[str] = []
@@ -104,10 +103,7 @@ class Workload:
         logger.info("Workload initialized after %ss", int(time.time() - self.start_time))
 
     def load_initial_accounts(self, accounts_json: Path) -> None:
-        """Load pre-generated accounts from a JSON file.
-
-        Expects format: [{"address": "r...", "seed": "s..."}, ...]
-        """
+        """Load pre-generated accounts from JSON: [{"address": "r...", "seed": "s..."}, ...]."""
         logger.info(f"Loading accounts from {accounts_json}")
         accounts = json.loads(accounts_json.read_text())
         default_algo = CryptoAlgorithm[
@@ -119,12 +115,7 @@ class Workload:
         logger.info(f"Loaded {len(self.accounts)} accounts")
 
     def wait_for_network(self, xrpld: str) -> None:
-        """Wait for xrpld to be stably synced (multiple consecutive checks).
-
-        A single 'full' response can be a transient moment during validator
-        convergence. Requiring consecutive successes ensures the snapshot
-        taken after setup_complete() captures a stable network state.
-        """
+        """Require consecutive sync checks — a single 'full' can be transient during convergence."""
         timeout = self.config["xrpld"]["timeout"]
         wait_start = time.time()
         required_consecutive = 3
@@ -146,8 +137,6 @@ class Workload:
 
 
 def _make_endpoint(path: str, name: str, handler_fn: Callable, args_fn: Callable) -> Callable:
-    """Create an endpoint handler with standardized error handling."""
-
     async def endpoint(w: Workload = Depends(get_workload)):
         try:
             return await handler_fn(*args_fn(w))
@@ -198,7 +187,7 @@ def create_app(workload: Workload) -> FastAPI:
 
         lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
         ready["value"] = True
-        yield  # app runs here, shutdown after yield
+        yield
 
         ws_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -215,7 +204,6 @@ def create_app(workload: Workload) -> FastAPI:
     def get_workload():
         return workload
 
-    # Register all transaction endpoints from the registry
     for name, path, handler_fn, args_fn, _ in REGISTRY:
         app.get(path)(_make_endpoint(path, name, handler_fn, args_fn))
 

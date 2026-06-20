@@ -67,8 +67,6 @@ class UserAccount(Account):
 
 @dataclass
 class Delegate:
-    """A delegation relationship: source granted delegate_address permission."""
-
     source: str
     delegate_address: str
     permissions: list[str]  # TransactionType values e.g. ["Payment", "TrustSet"]
@@ -76,7 +74,7 @@ class Delegate:
 
 @dataclass
 class DID:
-    """A DID ledger entry attached to an account (XLS-72)."""
+    """DID ledger entry attached to an account (XLS-72)."""
 
     account: str
 
@@ -109,9 +107,7 @@ class Vault:
 class PermissionedDomain:
     owner: str
     domain_id: str
-    # Accepted credentials as (issuer, credential_type) pairs. An account is a
-    # domain member if it is the owner or holds an accepted credential matching
-    # one of these pairs (see permissioned_dex._domain_members).
+    # (issuer, credential_type) pairs; member = owner or holder of a matching accepted credential.
     accepted_credentials: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -153,8 +149,6 @@ class Loan:
 
 @dataclass
 class Escrow:
-    """An active escrow on the ledger."""
-
     owner: str
     destination: str
     sequence: int
@@ -166,8 +160,6 @@ class Escrow:
 
 @dataclass
 class Check:
-    """An active check on the ledger."""
-
     check_id: str
     creator: str
     destination: str
@@ -176,8 +168,6 @@ class Check:
 
 @dataclass
 class PaymentChannel:
-    """An active payment channel on the ledger."""
-
     channel_id: str
     source: str
     destination: str

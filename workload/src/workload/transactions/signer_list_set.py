@@ -1,12 +1,4 @@
-"""SignerListSet workload handler.
-
-SignerListSet configures multi-signing on an account.  A signer list
-defines which accounts can co-sign transactions and the quorum needed.
-Setting signer_quorum=0 with no entries deletes the list.
-
-This is a NON_DELEGABLE transaction — delegation is blocked by the
-XRPL protocol itself.
-"""
+"""SignerListSet handler (NON_DELEGABLE): signer_quorum=0 with no entries deletes the list."""
 
 from __future__ import annotations
 
@@ -42,7 +34,6 @@ async def _signer_list_set_valid(
     action = choice(["set", "remove"])
 
     if action == "set":
-        # Pick 2-5 unique signers (not self)
         others = [a for a in acct_list if a.address != src.address]
         count = min(randint(2, 5), len(others))
         signers = sample(others, count)
@@ -64,7 +55,6 @@ async def _signer_list_set_valid(
             signer_entries=entries,
         )
     else:
-        # Delete the signer list
         txn = SignerListSet(
             account=src.address,
             signer_quorum=0,
@@ -90,7 +80,6 @@ async def _signer_list_set_faulty(
     )
 
     if mutation == "fake_signers":
-        # Many non-existent signer accounts
         count = randint(2, 8)
         entries = [
             SignerEntry(account=params.fake_account(), signer_weight=1) for _ in range(count)
@@ -109,7 +98,6 @@ async def _signer_list_set_faulty(
             ],
         )
     else:  # high_quorum_fake_signers
-        # Quorum equals total weight — hard to meet
         count = randint(3, 8)
         entries = [
             SignerEntry(account=params.fake_account(), signer_weight=1) for _ in range(count)

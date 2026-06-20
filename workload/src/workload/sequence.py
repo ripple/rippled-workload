@@ -1,9 +1,4 @@
-"""Per-account sequence tracker for fire-and-forget transaction submission.
-
-Prevents tefPAST_SEQ cascades when multiple transactions from the same account
-are submitted before the ledger closes. Lazily fetches the starting sequence
-from the ledger, then increments in-memory for subsequent calls.
-"""
+"""Per-account sequence tracker; prevents tefPAST_SEQ cascades in fire-and-forget submission."""
 
 from __future__ import annotations
 
@@ -23,11 +18,7 @@ class SequenceTracker:
         self._seqs: dict[str, int] = {}
 
     async def next_seq(self, address: str) -> int:
-        """Return the next sequence for this account and advance the counter.
-
-        First call per account fetches from the ledger via RPC.
-        Subsequent calls return the in-memory counter (no RPC).
-        """
+        """Return the next sequence and advance; first call per account hits RPC."""
         if address not in self._seqs:
             seq = await get_next_valid_seq_number(address, self._client)
             self._seqs[address] = seq
@@ -37,13 +28,9 @@ class SequenceTracker:
         return seq
 
     def advance(self, address: str, by: int) -> None:
-        """Bump the tracked sequence by an extra ``by`` (no-op if untracked).
-
-        Needed for TicketCreate: it advances the account root Sequence by
-        ``TicketCount + 1`` (it is the only transaction that increases Sequence
-        by more than one). ``next_seq`` already added the +1 for the tx itself,
-        so callers pass ``by = TicketCount`` after submitting a TicketCreate to
-        keep a reused account's counter aligned with the ledger."""
+        """Bump tracked sequence by ``by`` (no-op if untracked). For TicketCreate:
+        it advances Sequence by TicketCount + 1 but next_seq only added the +1,
+        so callers pass ``by = TicketCount`` to keep a reused account aligned."""
         if address in self._seqs:
             self._seqs[address] += by
 

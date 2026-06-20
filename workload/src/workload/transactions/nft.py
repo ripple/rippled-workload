@@ -59,6 +59,7 @@ async def _nftoken_mint_faulty(
     acct_list = list(accounts.values())
     src = choice(acct_list)
     # Set issuer to another account that hasn't authorized us → tecNO_PERMISSION
+    # issuer hasn't authorized src as minter → tecNO_PERMISSION
     other = choice([a for a in acct_list if a.address != src.address])
     txn = NFTokenMint(
         account=src.address,
@@ -225,7 +226,7 @@ async def _nftoken_cancel_offer_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    # Cancel a non-existent offer → tecOBJECT_NOT_FOUND from rippled
+    # Non-existent offer → tecOBJECT_NOT_FOUND.
     txn = NFTokenCancelOffer(
         account=src.address,
         nftoken_offers=[params.fake_id()],

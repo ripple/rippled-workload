@@ -1,24 +1,4 @@
-"""Generative, schema-agnostic mutation for ``_faulty`` transaction paths.
-
-True fuzzing for the faulty path: instead of a fixed menu of predicted faults,
-take a VALID transaction dict and apply random, open-ended mutations that keep
-it encodable and validly signed — so it reaches rippled's preflight / preclaim /
-doApply (where bugs live), not just the binary parser.
-
-Used via ``submit_fuzzed()`` from ``_faulty`` handlers, ALONGSIDE the curated
-mutations (curated guarantees named TER-code coverage and encodes known-bug
-knowledge; this finds the unknown-unknowns). Auth / sequence / fee fields are
-left intact so the transaction authenticates and gets past the cheap rejects.
-
-All randomness flows through ``workload.randoms`` so Antithesis explores the
-mutation space, and every fuzzed submission emits a ``workload::fuzz`` event
-recording the exact operators applied for reproducible triage.
-
-Boundary: fuzz only mutates or drops EXISTING fields, never adds new ones.
-New-sfield injection and type-confusion-via-unknown-field are out of scope by
-design — adding fields the model didn't emit would break encoding, and keeping
-the blob encodable (so it reaches the transactor) is the whole point.
-"""
+"""Generative mutation for ``_faulty`` paths: corrupt a valid tx dict, kept encodable+signed."""
 
 from __future__ import annotations
 
@@ -32,8 +12,8 @@ from workload import params
 from workload.randoms import choice, randint, random
 from workload.submit import submit_raw
 
-# Fields left intact: mutating these yields shallow auth / sequence / fee
-# rejects instead of reaching the transactor logic we want to fuzz.
+# Left intact: mutating these yields shallow auth/sequence/fee rejects instead
+# of reaching the transactor logic we want to fuzz.
 _PROTECTED = {
     "TransactionType",
     "Account",
@@ -105,11 +85,8 @@ async def submit_fuzzed(
     client: AsyncJsonRpcClient,
     wallet: Wallet,
 ) -> dict | None:
-    """Apply ``fuzz_mutate`` to a valid ``base`` and submit via the raw path.
-
-    Emits ``workload::fuzz`` with the operators applied + engine_result. If a
-    hostile shape can't be serialized, emits ``workload::fuzz_skipped`` and
-    returns None — never raises (faulty paths must not).
+    """Fuzz a valid ``base`` and submit raw. Never raises (faulty paths must not):
+    an unserializable shape emits ``workload::fuzz_skipped`` and returns None.
     """
     ops: list[str] = []
 

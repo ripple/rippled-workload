@@ -1,14 +1,4 @@
-"""EscrowCreate / EscrowFinish / EscrowCancel workload handlers.
-
-Supports three escrow flavours:
-- Time-only: finish_after + cancel_after, no crypto-condition
-- Condition-only: crypto-condition, no time constraints
-- Time + condition: both time gates and crypto-condition
-
-State tracking keeps (owner, destination, sequence, condition, fulfillment,
-finish_after, cancel_after) so EscrowFinish and EscrowCancel can reference
-live escrows.
-"""
+"""EscrowCreate / EscrowFinish / EscrowCancel workload handlers."""
 
 from __future__ import annotations
 
@@ -47,7 +37,6 @@ async def _escrow_create_valid(
 
     amount = params.escrow_amount()
 
-    # Pick escrow flavour
     flavour = choice(["time_only", "condition_only", "time_and_condition"])
 
     condition = None
@@ -75,11 +64,8 @@ async def _escrow_create_valid(
     )
     result = await submit_tx("EscrowCreate", txn, client, src.wallet)
 
-    # Optimistically track the escrow with its fulfillment so
-    # EscrowFinish can use it later.  Sequence comes from autofill.
-    # Only track when the submit response indicates the tx will likely
-    # apply — otherwise the entry leaks forever and downstream Finish/Cancel
-    # picks dead escrows.
+    # Track only when the submit will likely apply, else the entry leaks and
+    # Finish/Cancel pick dead escrows.
     engine = result.get("engine_result", "") if result else ""
     if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
         tx_json = result.get("tx_json", result)
@@ -115,7 +101,6 @@ async def _escrow_create_faulty(
         ]
     )
     if mutation == "past_cancel_after":
-        # cancel_after in the past
         past = params._ripple_now() - randint(100, 10_000)
         txn = EscrowCreate(
             account=src.address,
@@ -131,7 +116,7 @@ async def _escrow_create_faulty(
             cancel_after=params.escrow_finish_after() + 600,
         )
     elif mutation == "bad_condition_hex":
-        # Malformed condition — valid hex but not a valid crypto-condition
+        # Valid hex but not a valid crypto-condition.
         bad_cond = params.fake_id()
         txn = EscrowCreate(
             account=src.address,
@@ -140,7 +125,7 @@ async def _escrow_create_faulty(
             condition=bad_cond,
             cancel_after=params.escrow_finish_after() + 600,
         )
-    else:  # no_time_no_condition — escrow with no finish/cancel/condition
+    else:  # no_time_no_condition
         txn = EscrowCreate(
             account=src.address,
             amount=params.escrow_amount(),
@@ -172,7 +157,7 @@ async def _escrow_finish_valid(
         return
 
     escrow = choice(escrows)
-    # Anyone can finish an escrow (not just owner/destination)
+    # Anyone can finish an escrow.
     src = choice(list(accounts.values()))
 
     txn = EscrowFinish(
@@ -207,7 +192,7 @@ async def _escrow_finish_faulty(
             offer_sequence=randint(900_000, 999_999),
         )
     elif mutation == "wrong_fulfillment":
-        # Valid condition/fulfillment pair but mismatched
+        # Two valid pairs, deliberately mismatched.
         cond, _ = params.escrow_condition_pair()
         _, wrong_ful = params.escrow_condition_pair()
         txn = EscrowFinish(
@@ -218,7 +203,6 @@ async def _escrow_finish_faulty(
             fulfillment=wrong_ful,
         )
     else:  # wrong_owner
-        # Non-existent owner
         txn = EscrowFinish(
             account=src.address,
             owner=params.fake_account(),
@@ -249,13 +233,12 @@ async def _escrow_cancel_valid(
     if not escrows:
         return
 
-    # Prefer escrows with cancel_after set
     cancellable = [e for e in escrows if e.cancel_after is not None]
     if not cancellable:
         return
 
     escrow = choice(cancellable)
-    # Anyone can cancel an expired escrow
+    # Anyone can cancel an expired escrow.
     src = choice(list(accounts.values()))
 
     txn = EscrowCancel(
@@ -293,7 +276,7 @@ async def _escrow_cancel_faulty(
             owner=params.fake_account(),
             offer_sequence=randint(1, 100),
         )
-    else:  # cancel_non_cancellable — try to cancel with wrong sequence
+    else:  # cancel_non_cancellable
         txn = EscrowCancel(
             account=src.address,
             owner=src.address,

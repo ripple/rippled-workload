@@ -1,12 +1,4 @@
-"""PaymentChannelCreate / PaymentChannelFund / PaymentChannelClaim handlers.
-
-A payment channel is a unidirectional XRP flow from source → destination.
-The source pre-funds the channel, and the destination claims from it.
-Either side can request closure subject to a settle delay.
-
-State tracking keeps (channel_id, source, destination, amount, settle_delay)
-so Fund and Claim can reference live channels.
-"""
+"""PaymentChannelCreate / PaymentChannelFund / PaymentChannelClaim handlers."""
 
 from __future__ import annotations
 
@@ -45,7 +37,6 @@ async def _channel_create_valid(
 
     acct_list = list(accounts.values())
     src = choice(acct_list)
-    # Destination must differ from source
     dst = choice([a for a in acct_list if a.address != src.address])
 
     amount = params.channel_amount()
@@ -60,10 +51,8 @@ async def _channel_create_valid(
     )
     result = await submit_tx("PaymentChannelCreate", txn, client, src.wallet)
 
-    # Optimistically track — real channel_id replaces the tx_hash placeholder
-    # via the state updater on validation.  Skip the optimistic insert when
-    # the submit response already indicates the tx won't apply, so we don't
-    # leak dead channels into Fund/Claim handlers.
+    # Track only when the submit will likely apply (state updater later swaps
+    # the tx_hash placeholder for the real channel_id), else dead channels leak.
     engine = result.get("engine_result", "") if result else ""
     if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
         tx_json = result.get("tx_json", result)
@@ -157,7 +146,7 @@ async def _channel_fund_valid(
         return
 
     channel = choice(payment_channels)
-    # Only the source can fund a channel
+    # Only the source can fund a channel.
     src = accounts.get(channel.source)
     if not src:
         return
@@ -200,7 +189,7 @@ async def _channel_fund_faulty(
             channel=params.fake_id(),
             amount="0",
         )
-    else:  # non_owner_fund — random account tries to fund
+    else:  # non_owner_fund
         txn = PaymentChannelFund(
             account=src.address,
             channel=params.fake_id(),
@@ -232,7 +221,7 @@ async def _channel_claim_valid(
         return
 
     channel = choice(payment_channels)
-    # Source or destination can submit a claim
+    # Source or destination can submit a claim.
     claimer_addr = choice([channel.source, channel.destination])
     claimer = accounts.get(claimer_addr)
     if not claimer:
@@ -267,7 +256,6 @@ async def _channel_claim_faulty(
             channel=params.fake_id(),
         )
     elif mutation == "excessive_balance":
-        # Claim more than the channel holds
         txn = PaymentChannelClaim(
             account=src.address,
             channel=params.fake_id(),

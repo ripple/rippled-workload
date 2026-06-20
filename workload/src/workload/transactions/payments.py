@@ -1,4 +1,4 @@
-"""Payment transaction generators for the antithesis workload."""
+"""Payment transaction generators."""
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
@@ -33,7 +33,6 @@ async def _payment_random_valid(
     src_address, dst = sample(list(accounts), 2)
     src = accounts[src_address]
 
-    # Pick asset type from available options
     options = ["xrp"]
     if trust_lines:
         options.append("iou")

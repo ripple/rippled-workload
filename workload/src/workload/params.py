@@ -1,50 +1,35 @@
-"""Centralized random parameter generators for workload transactions.
-
-Every tunable transaction parameter lives here. Call these functions
-at the point of use — never cache the return value.
-"""
+"""Centralized random parameter generators; call at point of use, never cache."""
 
 from workload.randoms import choice, randint, random
 
 
 # ── Fuzzing ──────────────────────────────────────────────────────────
 def should_send_faulty() -> bool:
-    """Let Antithesis decide whether to bypass precondition checks
-    and send a deliberately invalid transaction."""
     return random() < 0.01
 
 
 def fake_account() -> str:
-    """Generate a valid-format but non-existent XRPL account address."""
     from xrpl.wallet import Wallet
 
     return Wallet.create().address
 
 
 def fake_id() -> str:
-    """Generate a random 64-char hex string (fake object ID)."""
     return bytes(randint(0, 255) for _ in range(32)).hex().upper()
 
 
 def fake_mpt_id() -> str:
-    """Generate a valid-format but nonexistent MPTokenIssuanceID.
-
-    An MPTokenIssuanceID is 192-bit (24 bytes = 48 hex chars): a 4-byte
-    sequence concatenated with the 20-byte issuer account. Distinct from
-    ``fake_id()``, which returns 64-hex (256-bit) object/ledger-entry IDs.
-    """
+    """MPTokenIssuanceID is 24 bytes (4-byte seq + 20-byte issuer), unlike fake_id's 32."""
     return bytes(randint(0, 255) for _ in range(24)).hex().upper()
 
 
 # ── Fees ─────────────────────────────────────────────────────────────
 def fee() -> str:
-    """Transaction fee in drops."""
     return str(randint(10, 100))
 
 
 # ── Payments ─────────────────────────────────────────────────────────
 def payment_amount() -> str:
-    """Payment amount in drops."""
     return str(randint(1_000, 10_000_000))
 
 
@@ -53,34 +38,28 @@ CURRENCY_CODES = ["USD", "EUR", "GBP", "JPY", "BTC", "ETH", "XAU", "CNY"]
 
 
 def currency_code() -> str:
-    """Random 3-letter currency code."""
     return choice(CURRENCY_CODES)
 
 
 def trustline_limit() -> str:
-    """Trust line limit value. Ranges from 0 to 100k to overlap with
-    typical IOU payment amounts (1-10k), ensuring we hit limit violations."""
+    """Range overlaps IOU amounts (1-10k) to hit limit violations."""
     return str(randint(0, 100_000))
 
 
 def iou_amount() -> str:
-    """IOU payment amount (value, not drops)."""
     return str(randint(1, 10_000))
 
 
 # ── Offers / DEX ─────────────────────────────────────────────────────
 def offer_xrp_drops() -> str:
-    """XRP amount in drops for a DEX offer leg (0.1-10 XRP)."""
     return str(randint(100_000, 10_000_000))
 
 
 def offer_iou_value() -> str:
-    """IOU value for a DEX offer leg."""
     return str(randint(1, 50))
 
 
 def mpt_offer_value() -> str:
-    """Small MPT amount for a DEX offer leg (MPT value is an integer string)."""
     return str(randint(1, 1000))
 
 
@@ -90,106 +69,94 @@ def nft_taxon() -> int:
 
 
 def nft_transfer_fee() -> int:
-    """Transfer fee in 1/10th basis points (0-50000 = 0-50%)."""
+    """1/10th basis points (0-50000 = 0-50%)."""
     return randint(0, 50000)
 
 
 def nft_memo() -> str:
-    """Human-readable memo string (not yet hex-encoded)."""
     return f"nft-memo-{randint(0, 1_000_000)}"
 
 
 def nft_offer_amount() -> str:
-    """Amount in drops for NFToken offers."""
     return str(randint(1_000, 10_000_000))
 
 
 # ── Tickets ──────────────────────────────────────────────────────────
 def ticket_count() -> int:
-    """1-250 tickets per TicketCreate."""
+    """1-250 per TicketCreate."""
     return randint(1, 250)
 
 
 # ── Batch ────────────────────────────────────────────────────────────
 def batch_size() -> int:
-    """Number of inner transactions in a batch (min 2 per xrpl-py, max 8 per rippled)."""
+    """Min 2 per xrpl-py, max 8 per rippled."""
     return randint(2, 8)
 
 
 def batch_inner_amount() -> str:
-    """Amount for each inner batch transaction in drops."""
     return str(randint(1_000, 10_000_000))
 
 
 # ── Credentials ──────────────────────────────────────────────────────
 def credential_type() -> str:
-    """Random hex-encoded credential type (1-64 bytes → 2-128 hex chars)."""
+    """1-64 bytes per spec."""
     length = randint(1, 64)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 def credential_uri() -> str:
-    """Random hex-encoded URI for credentials (max 256 hex chars = 128 bytes)."""
+    """Max 128 bytes per spec."""
     length = randint(5, 128)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 def credential_expiration_offset() -> int:
-    """Seconds from now until credential expires."""
     return randint(3600, 86400 * 30)  # 1 hour to 30 days
 
 
 # ── Vaults ───────────────────────────────────────────────────────────
 def vault_deposit_amount() -> str:
-    """Deposit amount in drops for vaults."""
     return str(randint(1_000_000, 100_000_000))
 
 
 def vault_withdraw_amount() -> str:
-    """Withdraw amount in drops for vaults."""
     return str(randint(100_000, 50_000_000))
 
 
 def vault_data() -> str:
-    """Random hex-encoded vault metadata (up to 256 bytes → 512 hex chars)."""
+    """Max 256 bytes per spec."""
     length = randint(1, 256)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 def vault_assets_maximum() -> str:
-    """Maximum vault capacity in drops."""
     return str(randint(100_000_000, 10_000_000_000))
 
 
 # ── Permissioned Domains ─────────────────────────────────────────────
 def domain_credential_count() -> int:
-    """Number of accepted credentials in a permissioned domain (1-10)."""
+    """1-10 accepted credentials per domain."""
     return randint(1, 10)
 
 
 def zero_domain_id() -> str:
-    """All-zero 64-char DomainID. Malformed per rippled — preflight temMALFORMED
-    when fixCleanup3_2_0 is enabled, otherwise exercises the zero-key domain read
-    / accountInDomain zero-guard. xrpl-py accepts it (64 hex chars)."""
+    """All-zero DomainID: temMALFORMED under fixCleanup3_2_0; xrpl-py accepts it."""
     return "0" * 64
 
 
 def should_update_domain() -> bool:
-    """Whether PermissionedDomainSet updates an existing domain (modify path)
-    rather than creating a new one."""
     return random() < 0.3
 
 
 # ── NFToken Modify ───────────────────────────────────────────────────
 def nft_uri() -> str:
-    """Random hex-encoded URI for NFTs (max 512 hex chars = 256 bytes)."""
+    """Max 256 bytes per spec."""
     length = randint(5, 256)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 # ── MPToken ──────────────────────────────────────────────────────────
 def mpt_amount() -> str:
-    """MPT payment/transfer amount."""
     return str(randint(1, 10_000))
 
 
@@ -199,65 +166,59 @@ def mpt_maximum_amount() -> str:
 
 
 def mpt_metadata() -> str:
-    """Random hex-encoded MPToken metadata (max 1024 bytes)."""
+    """Max 1024 bytes per spec."""
     length = randint(1, 1024)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 # ── AMM ─────────────────────────────────────────────────────────────
 def amm_trading_fee() -> int:
-    """Trading fee in 1/100,000th (0-1000 = 0-1%)."""
+    """1/100,000th (0-1000 = 0-1%)."""
     return randint(0, 1000)
 
 
 def amm_deposit_amount() -> str:
-    """AMM deposit amount for IOU tokens (within typical 10k balance)."""
+    """Within typical 10k balance."""
     return str(randint(100, 5_000))
 
 
 def amm_withdraw_amount() -> str:
-    """AMM withdrawal amount for IOU tokens."""
     return str(randint(100, 50_000))
 
 
 def amm_lp_token_amount() -> str:
-    """LP token amount for deposits/withdrawals/bids."""
     return str(randint(1, 10_000))
 
 
 def amm_bid_min() -> str:
-    """Minimum bid price for auction slot."""
     return str(randint(1, 1_000))
 
 
 def amm_bid_max() -> str:
-    """Maximum bid price for auction slot."""
     return str(randint(1_000, 10_000))
 
 
 def amm_vote_fee() -> int:
-    """Fee value for AMM vote (0-1000)."""
     return randint(0, 1000)
 
 
 def amm_xrp_amount() -> str:
-    """XRP amount in drops for AMM pools."""
     return str(randint(10_000_000, 1_000_000_000))
 
 
 # ── Lending Protocol ─────────────────────────────────────────────────
 def loan_broker_management_fee_rate() -> int:
-    """1/10th basis point fee (0-10000 = 0-10%)."""
+    """1/10th basis point (0-10000 = 0-10%)."""
     return randint(0, 10000)
 
 
 def loan_broker_cover_rate_minimum() -> int:
-    """1/10th basis point cover rate (0-100000 = 0-100%)."""
+    """1/10th basis point (0-100000 = 0-100%)."""
     return randint(0, 100000)
 
 
 def loan_broker_cover_rate_liquidation() -> int:
-    """1/10th basis point liquidation rate (0-100000 = 0-100%)."""
+    """1/10th basis point (0-100000 = 0-100%)."""
     return randint(0, 100000)
 
 
@@ -266,43 +227,39 @@ def loan_broker_debt_maximum() -> str:
 
 
 def loan_broker_data() -> str:
-    """Random hex-encoded broker metadata (max 256 bytes)."""
+    """Max 256 bytes per spec."""
     length = randint(1, 256)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 def loan_principal() -> str:
-    """Loan principal amount in drops."""
     return str(randint(100_000, 50_000_000))
 
 
 def loan_interest_rate() -> int:
-    """Annualized interest rate in 1/10th basis points (0-100000 = 0-100%)."""
+    """1/10th basis points (0-100000 = 0-100%)."""
     return randint(0, 100000)
 
 
 def loan_payment_total() -> int:
-    """Total number of loan payments."""
     return randint(1, 24)
 
 
 def loan_payment_interval() -> int:
-    """Seconds between payments (min 60)."""
+    """Min 60."""
     return randint(60, 86400)
 
 
 def loan_grace_period(payment_interval: int) -> int:
-    """Seconds after due date before default (min 60, max ≤ payment_interval)."""
+    """Min 60, max ≤ payment_interval."""
     return randint(60, max(60, payment_interval))
 
 
 def loan_cover_deposit_amount() -> str:
-    """First loss capital deposit in drops."""
     return str(randint(100_000, 10_000_000))
 
 
 def loan_pay_amount() -> str:
-    """Loan payment amount in drops."""
     return str(randint(10_000, 5_000_000))
 
 
@@ -311,7 +268,6 @@ RIPPLE_EPOCH_OFFSET = 946_684_800
 
 
 def escrow_amount() -> str:
-    """Escrow amount in drops (0.1-50 XRP)."""
     return str(randint(100_000, 50_000_000))
 
 
@@ -322,26 +278,19 @@ def _ripple_now() -> int:
 
 
 def escrow_finish_after() -> int:
-    """Ripple timestamp a short time in the future (1-120s)."""
     return _ripple_now() + randint(1, 120)
 
 
 def escrow_cancel_after(finish_after: int) -> int:
-    """Ripple timestamp after finish_after (3-600s later)."""
     return finish_after + randint(3, 600)
 
 
 def escrow_condition_pair() -> tuple[str, str]:
-    """Generate a PREIMAGE-SHA-256 crypto-condition (condition, fulfillment) pair.
-
-    Returns (condition_hex, fulfillment_hex) where both are uppercased hex strings.
-    """
+    """PREIMAGE-SHA-256 (condition_hex, fulfillment_hex), both uppercased."""
     import hashlib
 
     preimage = bytes(randint(0, 255) for _ in range(32))
-    # Fulfillment: DER-encoded PREIMAGE-SHA-256
     fulfillment_bytes = bytes([0xA0, len(preimage) + 2, 0x80, len(preimage)]) + preimage
-    # Condition: type 0 (preimage), SHA-256 fingerprint, max fulfillment length
     fingerprint = hashlib.sha256(preimage).digest()
     condition_bytes = (
         bytes([0xA0, 0x25, 0x80, 0x20]) + fingerprint + bytes([0x81, 0x01, len(preimage)])
@@ -353,12 +302,11 @@ def escrow_condition_pair() -> tuple[str, str]:
 
 
 def check_send_max() -> str:
-    """Check send_max in drops (1-100 XRP)."""
     return str(randint(1_000_000, 100_000_000))
 
 
 def check_cash_amount(send_max: str) -> str:
-    """Cash amount ≤ send_max."""
+    """≤ send_max."""
     max_val = int(send_max)
     return str(randint(1, max_val))
 
@@ -367,22 +315,19 @@ def check_cash_amount(send_max: str) -> str:
 
 
 def channel_amount() -> str:
-    """Payment channel amount in drops (1-100 XRP)."""
     return str(randint(1_000_000, 100_000_000))
 
 
 def channel_settle_delay() -> int:
-    """Settle delay in seconds (60-3600)."""
     return randint(60, 3600)
 
 
 def channel_fund_amount() -> str:
-    """Additional XRP to add to a channel in drops (0.1-10 XRP)."""
     return str(randint(100_000, 10_000_000))
 
 
 def channel_claim_balance(channel_amount: str) -> str:
-    """Claim balance ≤ channel amount."""
+    """≤ channel amount."""
     max_val = int(channel_amount)
     return str(randint(1, max_val))
 
@@ -391,12 +336,12 @@ def channel_claim_balance(channel_amount: str) -> str:
 
 
 def clawback_iou_amount() -> str:
-    """IOU clawback value (1-1000, within typical 10k holder balance)."""
+    """Within typical 10k holder balance."""
     return str(randint(1, 1_000))
 
 
 def clawback_mpt_amount() -> str:
-    """MPT clawback value (1-1000, within typical 10k holder balance)."""
+    """Within typical 10k holder balance."""
     return str(randint(1, 1_000))
 
 
@@ -406,16 +351,12 @@ _HEX_CHARS = "0123456789ABCDEF"
 
 
 def did_hex_field() -> str:
-    """Random even-length hex string, max 256 hex chars (128 bytes).
-
-    Used for DID ``uri``, ``data``, and ``did_document`` fields.
-    """
+    """Even-length hex, max 128 bytes; for DID uri/data/did_document."""
     r = random()
     if r < 0.80:
         n = randint(1, 32)
     elif r < 0.95:
         n = randint(33, 100)
     else:
-        n = randint(101, 128)  # near the 256-hex-char / 128-byte limit
-    # n is number of BYTES; each byte = 2 hex chars → always even length
+        n = randint(101, 128)  # near the 128-byte limit
     return "".join(choice(_HEX_CHARS) for _ in range(n * 2))

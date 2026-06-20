@@ -1,12 +1,4 @@
-"""CheckCreate / CheckCash / CheckCancel workload handlers.
-
-A Check is a deferred payment: the creator authorises up to `send_max` to be
-pulled by the destination.  The destination cashes it for an exact `amount` or
-a flexible `deliver_min`.  Either party (or anyone after expiration) can cancel.
-
-State tracking keeps (check_id, creator, destination, send_max) so
-CheckCash and CheckCancel can reference live checks.
-"""
+"""CheckCreate / CheckCash / CheckCancel workload handlers."""
 
 from __future__ import annotations
 
@@ -52,13 +44,11 @@ async def _check_create_valid(
     )
     result = await submit_tx("CheckCreate", txn, client, src.wallet)
 
-    # Optimistically track — check_id comes from state updater,
-    # but we store a placeholder so CheckCash/Cancel have entries.
-    # Skip when the tx won't apply, so the placeholder doesn't leak.
+    # Track only when the submit will likely apply (state updater later swaps
+    # the hash placeholder for the real check_id), else the placeholder leaks.
     engine = result.get("engine_result", "") if result else ""
     if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
         tx_json = result.get("tx_json", result)
-        # check_id = hash of the tx; the real one comes from meta
         check_id = tx_json.get("hash", "")
         if check_id:
             checks.append(
@@ -95,7 +85,6 @@ async def _check_create_faulty(
             send_max="0",
         )
     elif mutation == "self_destination":
-        # Create check to self (may or may not be valid depending on config)
         txn = CheckCreate(
             account=src.address,
             destination=src.address,
@@ -141,12 +130,11 @@ async def _check_cash_valid(
         return
 
     check = choice(checks)
-    # Only the destination can cash a check
+    # Only the destination can cash a check.
     dst = accounts.get(check.destination)
     if not dst:
         return
 
-    # Randomly use exact amount or deliver_min
     use_exact = choice([True, False])
     cash_amount = params.check_cash_amount(check.send_max)
 
@@ -194,7 +182,7 @@ async def _check_cash_faulty(
             check_id=params.fake_id(),
             amount="0",
         )
-    else:  # non_destination_cash — wrong account cashes
+    else:  # non_destination_cash
         txn = CheckCash(
             account=src.address,
             check_id=params.fake_id(),
@@ -226,7 +214,7 @@ async def _check_cancel_valid(
         return
 
     check = choice(checks)
-    # Creator or destination can cancel; pick one
+    # Creator or destination can cancel.
     canceller_addr = choice([check.creator, check.destination])
     canceller = accounts.get(canceller_addr)
     if not canceller:
@@ -259,7 +247,7 @@ async def _check_cancel_faulty(
             account=src.address,
             check_id=params.fake_id(),
         )
-    else:  # cancel_others_check — random account tries to cancel
+    else:  # cancel_others_check
         txn = CheckCancel(
             account=src.address,
             check_id=params.fake_id(),
