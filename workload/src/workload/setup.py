@@ -441,11 +441,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 lockable.locked = True
     summary["mpt_lock"] = lock_count
 
-    # ── 7. Vaults: mix of XRP, IOU, and MPT assets ───────────────────
+    # ── 7. Vaults: 4 XRP (loan brokers), 2 IOU, 2 MPT ────────────────
     vault_txns = []
-    for i in range(min(7, max(0, len(accs) - 10))):
+    for i in range(min(8, max(0, len(accs) - 10))):
         src = accs[10 + i]
-        if i < 3:
+        if i < 4:
             vault_txns.append(
                 (
                     "VaultCreate",
@@ -457,7 +457,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                     src.wallet,
                 )
             )
-        elif i < 5:
+        elif i < 6:
             gw_idx, currencies = _GATEWAYS[0]
             if gw_idx < len(accs):
                 vault_txns.append(
@@ -475,7 +475,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 )
         else:
             if workload.mpt_issuances:
-                mpt_idx = min(i - 5, len(workload.mpt_issuances) - 1)
+                mpt_idx = min(i - 6, len(workload.mpt_issuances) - 1)
                 vault_txns.append(
                     (
                         "VaultCreate",
@@ -728,9 +728,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         summary["domains"] = 0
 
     # ── 12. Loan brokers (4th has no loans — for cover withdraw) ─────
+    # XRP vaults only: setup loans/cover are XRP, owners always hold enough.
     await asyncio.sleep(3)
     broker_txns = []
-    for vault in workload.vaults[:4]:
+    xrp_vaults = [v for v in workload.vaults if isinstance(v.asset, xrpl.models.XRP)]
+    for vault in xrp_vaults[:4]:
         if vault.owner not in workload.accounts:
             continue
         owner = workload.accounts[vault.owner]
@@ -752,32 +754,17 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     # ── 12b. Broker cover deposits ───────────────────────────────────
     await _wait_for_state(workload.loan_brokers, summary["loan_brokers"], "loan_brokers")
     cover_txns = []
-    vault_by_id = {v.vault_id: v for v in workload.vaults}
     for broker in workload.loan_brokers[:4]:
         if broker.owner not in workload.accounts:
             continue
         owner = workload.accounts[broker.owner]
-        broker_vault = vault_by_id.get(broker.vault_id)
-        asset = broker_vault.asset if broker_vault else None
-        if isinstance(asset, IssuedCurrency):
-            amount = IssuedCurrencyAmount(
-                currency=asset.currency,
-                issuer=asset.issuer,
-                value=_IOU_DISTRIBUTION_AMOUNT,
-            )
-        elif isinstance(asset, MPTCurrency):
-            amount = MPTAmount(
-                mpt_issuance_id=asset.mpt_issuance_id, value=_MPT_DISTRIBUTION_AMOUNT
-            )
-        else:
-            amount = _COVER_DEPOSIT
         cover_txns.append(
             (
                 "LoanBrokerCoverDeposit",
                 LoanBrokerCoverDeposit(
                     account=owner.address,
                     loan_broker_id=broker.loan_broker_id,
-                    amount=amount,
+                    amount=_COVER_DEPOSIT,
                 ),
                 owner.wallet,
             )
