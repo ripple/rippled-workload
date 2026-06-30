@@ -1,16 +1,7 @@
 {
   "languages": {
     "Python": {
-      "language_servers": ["pyright", "ruff"]
-    }
-  },
-  "lsp": {
-    "pyright": {
-      "settings": {
-        "python": {
-          "pythonPath": "workload/.venv/bin/python"
-        }
-      }
+      "language_servers": ["basedpyright", "ruff"]
     }
   }
 }

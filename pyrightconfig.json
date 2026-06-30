@@ -1,0 +1,5 @@
+{
+  "venvPath": "workload",
+  "venv": ".venv",
+  "typeCheckingMode": "standard"
+}
