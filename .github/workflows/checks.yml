@@ -9,7 +9,7 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
       - name: imports + endpoints
         run: nix develop --command bash -c "scripts/check-imports && scripts/check-endpoints"
