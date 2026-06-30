@@ -19,11 +19,12 @@ A code change that affects structure, conventions, submission patterns, assertio
 One-liner messages, like the existing history. No AI Co-Authored-By lines (human co-authors fine).
 
 ## Before pushing
+With the devshell active (direnv auto-loads it; else `nix develop`):
 ```bash
-nix develop --command bash -c "scripts/check-imports && scripts/check-endpoints"
-nix develop --command bash -c "cd workload && ruff check src/workload/ && ruff format --check src/workload/ && mypy && basedpyright src/workload"
+check-imports && check-endpoints
+cd workload && ruff check src/workload/ && ruff format --check src/workload/ && mypy && basedpyright src/workload
 ```
-Type annotations on all functions. Line length 100. Both type checkers must pass (CI runs them via `.github/workflows/checks.yml`):
+Type annotations on all functions. Line length 100. Both type checkers must pass (CI in `.github/workflows/checks.yml` runs the same, wrapped in `nix develop --command`):
 - **basedpyright** — the xrpl-aware gate; resolves xrpl-py via its `py.typed` (config: `pyrightconfig.json`, `venvPath=workload`, `typeCheckingMode=standard`). Zed uses it as the editor LSP.
 - **mypy** — complementary flow/annotation check (no-any-return, unbound, missing annotations); xrpl resolves as `Any` (`ignore_missing_imports`, config in `workload/pyproject.toml`).
 

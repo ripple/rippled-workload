@@ -4,8 +4,9 @@ Antithesis workload generator for rippled fuzzing. FastAPI server emits random X
 
 ## Setup
 
+`direnv allow` once — `.envrc` auto-loads the flake devshell (Python, uv, ruff, mypy, basedpyright, `scripts/` on PATH) on every `cd` into the tree, and `uv sync`s the venv. Without direnv, prefix commands with `nix develop --command` (what CI does). With the env active:
+
 ```bash
-nix develop        # or direnv via .envrc
 check-imports      # imports resolve (~2s)
 check-endpoints    # endpoints register (~3s)
 ```
