@@ -3,6 +3,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from typing import Any
 
 from workload import logger
 
@@ -10,7 +11,7 @@ from workload import logger
 def make_request(url: str, command: dict) -> bytes | None:
     payload = bytes(json.dumps(command), encoding="utf-8")
     try:
-        response = urllib.request.urlopen(url, data=payload).read()
+        response: bytes = urllib.request.urlopen(url, data=payload).read()
     except urllib.error.HTTPError:
         logger.debug("Bad response from %s", url)
     except urllib.error.URLError:
@@ -19,15 +20,15 @@ def make_request(url: str, command: dict) -> bytes | None:
         logger.debug("xrpld is not running")
     else:
         return response
+    return None
 
 
-def get_server_info(url: str, params: list[str] | None = None) -> dict[str, dict]:
+def get_server_info(url: str, params: list[str] | None = None) -> dict[str, Any]:
     response = make_request(url, {"method": "server_info"})
-    if response:
-        server_info_result = json.loads(response)["result"]["info"]
-        server_info = {p: server_info_result[p] for p in params} if params else server_info_result
-        # logger.debug(f"{params or 'Full'} server_info:\n{json.dumps(server_info, indent=2)}")
-    return server_info
+    if not response:
+        return {}
+    info: dict[str, Any] = json.loads(response)["result"]["info"]
+    return {p: info[p] for p in params} if params else info
 
 
 def is_xrpld_synced(url: str) -> bool:
@@ -35,15 +36,9 @@ def is_xrpld_synced(url: str) -> bool:
     try:
         if server_info := get_server_info(url, ["complete_ledgers", "server_state"]):
             complete_ledgers, server_state = server_info.values()
-            synced = (
-                complete_ledgers != "empty" and server_state == "full"
-            )  # if not custom net, check real validator
-            # TODO: get last ledger, wait a bit, do it again to insure increasing
+            synced = complete_ledgers != "empty" and server_state == "full"
         else:
             logger.info("Received no server_info from %s", url)
-            logger.error("No server_info returned")
-    except UnboundLocalError:
-        logger.debug("no server_info, xrpld not running yet?")
     except Exception:
         logger.exception("Couldn't get server_info")
     return synced

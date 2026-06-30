@@ -1,11 +1,14 @@
 """Permissioned Domain transaction generators for the antithesis workload."""
 
+from collections.abc import Callable
+
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import (
     PermissionedDomainDelete,
     PermissionedDomainSet,
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
+from xrpl.wallet import Wallet
 
 from workload import params
 from workload.fuzz import submit_fuzzed
@@ -49,7 +52,7 @@ def _domain_set_base(
     accounts: dict[str, UserAccount],
     domains: list[PermissionedDomain],
     credentials: list[Credential],
-) -> tuple[PermissionedDomainSet, object]:
+) -> tuple[PermissionedDomainSet, Wallet]:
     """Valid PermissionedDomainSet (create/update an owned domain) + wallet."""
     accepted = _accepted_from_real_credentials(credentials) or _accepted_random(accounts)
     own_domains = [d for d in domains if d.owner in accounts]
@@ -106,7 +109,7 @@ async def _permissioned_domain_set_faulty(
 
     issuer = src.address
     domain_id = None
-    mutate = None
+    mutate: Callable[[dict], None] | None = None
 
     if mutation == "fake_issuer":
         # Credential issuer that does not exist -> tecNO_ISSUER.
@@ -128,7 +131,7 @@ async def _permissioned_domain_set_faulty(
         def _cred(ctype: str) -> dict:
             return {"Credential": {"Issuer": src.address, "CredentialType": ctype}}
 
-        def mutate(d: dict) -> None:
+        def _mutate(d: dict) -> None:
             if mutation == "empty_credentials":  # temARRAY_EMPTY
                 d["AcceptedCredentials"] = []
             elif mutation == "too_many_credentials":  # temARRAY_TOO_LARGE (>10 distinct)
@@ -136,6 +139,8 @@ async def _permissioned_domain_set_faulty(
             else:  # duplicate_credentials -> temMALFORMED (two identical (issuer, type))
                 ctype = params.credential_type()
                 d["AcceptedCredentials"] = [_cred(ctype), _cred(ctype)]
+
+        mutate = _mutate
 
     # Base is a valid model; mutate (when set) injects the malformed array post-serialization.
     base = PermissionedDomainSet(
@@ -162,7 +167,7 @@ async def permissioned_domain_delete(
 
 def _domain_delete_base(
     accounts: dict[str, UserAccount], domains: list[PermissionedDomain]
-) -> tuple[PermissionedDomainDelete, object] | None:
+) -> tuple[PermissionedDomainDelete, Wallet] | None:
     """Valid PermissionedDomainDelete (owner deletes own domain) + wallet."""
     if not domains:
         return None

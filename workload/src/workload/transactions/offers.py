@@ -62,16 +62,17 @@ def _make_offer_amounts(
     else:
         get_asset, pay_asset = a2, a1
 
+    # Offers are non-MPT: the non-XRP leg is always an issued currency.
     # Small amounts raise the chance of filling.
-    if isinstance(get_asset, xrpl.models.XRP):
-        taker_gets = str(randint(100_000, 10_000_000))  # 0.1-10 XRP in drops
-    else:
+    if isinstance(get_asset, IssuedCurrency):
         taker_gets = _iou_amount(get_asset, str(randint(1, 50)))
-
-    if isinstance(pay_asset, xrpl.models.XRP):
-        taker_pays = str(randint(100_000, 10_000_000))
     else:
+        taker_gets = str(randint(100_000, 10_000_000))  # 0.1-10 XRP in drops
+
+    if isinstance(pay_asset, IssuedCurrency):
         taker_pays = _iou_amount(pay_asset, str(randint(1, 50)))
+    else:
+        taker_pays = str(randint(100_000, 10_000_000))
 
     return taker_gets, taker_pays
 
@@ -176,6 +177,8 @@ async def _offer_create_faulty(
         if len(amm.assets) < 2:
             return
         a2 = amm.assets[1] if isinstance(amm.assets[0], xrpl.models.XRP) else amm.assets[0]
+        if not isinstance(a2, IssuedCurrency):
+            return
         taker_gets = "0"
         taker_pays = _iou_amount(a2, str(randint(1, 1_000)))
         txn = OfferCreate(
@@ -193,6 +196,8 @@ async def _offer_create_faulty(
         if len(amm.assets) < 2:
             return
         a2 = amm.assets[1] if isinstance(amm.assets[0], xrpl.models.XRP) else amm.assets[0]
+        if not isinstance(a2, IssuedCurrency):
+            return
         taker_gets = str(randint(1_000_000, 100_000_000))
         taker_pays = _iou_amount(a2, "-1")
         txn = OfferCreate(

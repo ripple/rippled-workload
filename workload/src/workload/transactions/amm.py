@@ -2,7 +2,7 @@
 
 import xrpl.models
 from xrpl.asyncio.clients import AsyncJsonRpcClient
-from xrpl.models import IssuedCurrency
+from xrpl.models import AuthAccount, IssuedCurrency
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.amounts import MPTAmount
 from xrpl.models.currencies import MPTCurrency
@@ -14,7 +14,6 @@ from xrpl.models.transactions import (
     AMMVote,
     AMMWithdraw,
 )
-from xrpl.models.transactions.amm_bid import AuthAccount
 from xrpl.models.transactions.amm_deposit import AMMDepositFlag
 from xrpl.models.transactions.amm_withdraw import AMMWithdrawFlag
 
@@ -175,8 +174,8 @@ async def _amm_create_valid(
     if _tradeable(mpt_issuances) and random() < 0.35:
         built = _amm_create_mpt_base(accounts, mpt_issuances)
         if built is not None:
-            base, src = built
-            await submit_tx("AMMCreate", base, client, src.wallet)
+            base, mpt_src = built
+            await submit_tx("AMMCreate", base, client, mpt_src.wallet)
             return
     if not trust_lines:
         return
@@ -541,7 +540,7 @@ async def _amm_deposit_faulty(
         txn = AMMDeposit(
             account=src.address,
             asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+            asset2=amm.assets[1],
             amount=amount,
             flags=AMMDepositFlag.TF_SINGLE_ASSET,
         )
@@ -559,7 +558,7 @@ async def _amm_deposit_faulty(
         txn = AMMDeposit(
             account=src.address,
             asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+            asset2=amm.assets[1],
             amount=amount,
             flags=AMMDepositFlag.TF_SINGLE_ASSET,
         )
@@ -778,7 +777,7 @@ async def _amm_withdraw_faulty(
         txn = AMMWithdraw(
             account=src.address,
             asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+            asset2=amm.assets[1],
             amount=amount,
             flags=AMMWithdrawFlag.TF_SINGLE_ASSET,
         )
@@ -875,7 +874,7 @@ async def _amm_vote_valid(
     txn = AMMVote(
         account=src.address,
         asset=amm.assets[0],
-        asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+        asset2=amm.assets[1],
         trading_fee=params.amm_vote_fee(),
     )
     await submit_tx("AMMVote", txn, client, src.wallet)
@@ -908,7 +907,7 @@ async def _amm_vote_faulty(
         txn = AMMVote(
             account=src.address,
             asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+            asset2=amm.assets[1],
             trading_fee=params.amm_vote_fee(),
         )
 
@@ -1022,7 +1021,7 @@ async def _amm_bid_faulty(
         txn = AMMBid(
             account=src.address,
             asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+            asset2=amm.assets[1],
             bid_min=bid_amt,
         )
 
@@ -1104,7 +1103,7 @@ async def _amm_delete_valid(
     txn = AMMDelete(
         account=src.address,
         asset=amm.assets[0],
-        asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+        asset2=amm.assets[1],
     )
     await submit_tx("AMMDelete", txn, client, src.wallet)
 
@@ -1134,7 +1133,7 @@ async def _amm_delete_faulty(
         txn = AMMDelete(
             account=src.address,
             asset=amm.assets[0],
-            asset2=amm.assets[1] if len(amm.assets) > 1 else None,
+            asset2=amm.assets[1],
         )
 
     else:  # wrong_asset_pair

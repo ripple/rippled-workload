@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from workload.app import Workload
@@ -103,7 +104,8 @@ def _extract_created_id(meta: dict, entry_type: str) -> str | None:
     for node in meta.get("AffectedNodes", []):
         created = node.get("CreatedNode", {})
         if created.get("LedgerEntryType") == entry_type:
-            return created.get("LedgerIndex")
+            idx = created.get("LedgerIndex")
+            return idx if isinstance(idx, str) else None
     return None
 
 
@@ -111,7 +113,8 @@ def _extract_deleted_id(meta: dict, entry_type: str) -> str | None:
     for node in meta.get("AffectedNodes", []):
         deleted = node.get("DeletedNode", {})
         if deleted.get("LedgerEntryType") == entry_type:
-            return deleted.get("LedgerIndex")
+            idx = deleted.get("LedgerIndex")
+            return idx if isinstance(idx, str) else None
     return None
 
 
@@ -614,7 +617,13 @@ def _on_offer_cancel(w: Workload, tx: dict, meta: dict) -> None:
 # ── Registry ─────────────────────────────────────────────────────────
 # (name, path, handler, args_fn, state_updater | None)
 
-REGISTRY = [
+Handler = Callable[..., Awaitable[Any]]
+# Param is the Workload, but typing it as such forces resolution through the
+# app↔registry import cycle (mypy has-type); Any keeps the lambdas checkable.
+ArgsFn = Callable[[Any], tuple[Any, ...]]
+StateUpdater = Callable[["Workload", dict, dict], None]
+
+REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
     (
         "NFTokenMint",
         "/nft/mint/random",

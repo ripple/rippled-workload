@@ -13,7 +13,7 @@ def short_address(address: str) -> str:
 
 @dataclass
 class NFT:
-    owner: UserAccount
+    owner: str  # account address
     nftoken_id: str
 
 
@@ -30,7 +30,7 @@ class Account:
     wallet: Wallet
     address: str = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.address = self.wallet.address
 
     def __str__(self) -> str:

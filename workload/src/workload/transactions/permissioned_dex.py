@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.currencies import IssuedCurrency
 from xrpl.models.transactions import OfferCreate, Payment
 from xrpl.models.transactions.offer_create import OfferCreateFlag
+from xrpl.wallet import Wallet
 
 from workload import params
 from workload.fuzz import submit_fuzzed
@@ -108,7 +111,7 @@ def _domain_offer_base(
     amms: list[AMM],
     *,
     hybrid: bool,
-) -> tuple[OfferCreate, object] | None:
+) -> tuple[OfferCreate, Wallet] | None:
     """Valid domain offer (member trades XRP for a gateway IOU) + wallet."""
     picked = _pick_domain_with_members(domains, accounts, credentials, minimum=1)
     if not picked:
@@ -165,7 +168,7 @@ async def _domain_offer_faulty(
         return
     taker_pays = IOUAmount(currency=iou.currency, issuer=iou.issuer, value=params.offer_iou_value())
     flags = int(OfferCreateFlag.TF_HYBRID) if hybrid else 0
-    mutate = None
+    mutate: Callable[[dict], None] | None = None
 
     mutations = ["not_in_domain", "fake_domain", "zero_domain", "ioc_killed", "fuzz"]
     if hybrid:
@@ -213,8 +216,10 @@ async def _domain_offer_faulty(
         domain_id = picked[0].domain_id if picked else params.fake_id()
         account = choice(list(accounts.values()))
 
-        def mutate(d: dict) -> None:
+        def _mutate(d: dict) -> None:
             d.pop("DomainID", None)
+
+        mutate = _mutate
 
     base = OfferCreate(
         account=account.address,
@@ -244,7 +249,7 @@ def _domain_payment_base(
     accounts: dict[str, UserAccount],
     domains: list[PermissionedDomain],
     credentials: list[Credential],
-) -> tuple[Payment, object] | None:
+) -> tuple[Payment, Wallet] | None:
     """Direct XRP payment between two in-domain members + wallet; shared by valid and fuzz."""
     picked = _pick_domain_with_members(domains, accounts, credentials, minimum=2)
     if not picked:

@@ -1,0 +1,22 @@
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: imports + endpoints
+        run: nix develop --command bash -c "scripts/check-imports && scripts/check-endpoints"
+      - name: lint + types
+        run: |
+          nix develop --command bash -c "cd workload && \
+            ruff check src/workload/ && \
+            ruff format --check src/workload/ && \
+            mypy && \
+            basedpyright src/workload"

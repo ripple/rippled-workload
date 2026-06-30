@@ -32,17 +32,27 @@ async def _did_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcC
     src = choice(list(accounts.values()))
 
     if random() < 0.10:
-        # Partial clear: keep one field, clear the rest.
+        # Partial clear: keep one field, clear the rest (empty string clears).
         keep_field = choice(["uri", "data", "did_document"])
         all_fields = {"uri": "", "data": "", "did_document": ""}
         all_fields[keep_field] = params.did_hex_field()
-        txn = DIDSet(account=src.address, **all_fields)
+        txn = DIDSet(
+            account=src.address,
+            uri=all_fields["uri"],
+            data=all_fields["data"],
+            did_document=all_fields["did_document"],
+        )
         await submit_tx("DIDSet", txn, client, src.wallet)
         return
 
     combo = choice(VALID_FIELD_COMBOS)
     fields = {f: params.did_hex_field() for f in combo}
-    txn = DIDSet(account=src.address, **fields)
+    txn = DIDSet(
+        account=src.address,
+        uri=fields.get("uri"),
+        data=fields.get("data"),
+        did_document=fields.get("did_document"),
+    )
     await submit_tx("DIDSet", txn, client, src.wallet)
 
 
@@ -70,7 +80,13 @@ async def _did_set_faulty(accounts: dict[str, UserAccount], client: AsyncJsonRpc
     elif mutation == "single_empty_field":
         src = choice(list(accounts.values()))
         field = choice(["uri", "data", "did_document"])
-        txn = DIDSet(account=src.address, **{field: ""})
+        empty = {field: ""}
+        txn = DIDSet(
+            account=src.address,
+            uri=empty.get("uri"),
+            data=empty.get("data"),
+            did_document=empty.get("did_document"),
+        )
         await submit_tx("DIDSet", txn, client, src.wallet)
 
 

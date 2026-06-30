@@ -1,16 +1,16 @@
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import uvicorn
 from antithesis import lifecycle
 from antithesis._internal import _HANDLER
 from antithesis.assertions import always, reachable, unreachable
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.constants import CryptoAlgorithm, XRPLException
 from xrpl.wallet import Wallet
@@ -19,7 +19,24 @@ from workload import logger
 from workload.assertions import register_assertions
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
-from workload.models import UserAccount
+from workload.models import (
+    AMM,
+    DID,
+    NFT,
+    Check,
+    Credential,
+    Delegate,
+    Escrow,
+    Loan,
+    LoanBroker,
+    MPTokenIssuance,
+    NFTOffer,
+    PaymentChannel,
+    PermissionedDomain,
+    TrustLine,
+    UserAccount,
+    Vault,
+)
 from workload.transactions import REGISTRY
 from workload.transactions.tickets import check_ticket_coverage
 
@@ -27,32 +44,28 @@ from workload.transactions.tickets import check_ticket_coverage
 class Workload:
     def __init__(self, conf: dict[str, Any]):
         self.config = conf
-        self.accounts = {}
-        self.gateways = []
-        self.amms = []
-        self.nfts = []
-        self.nft_offers = []
-        self.currencies = []
-        self.trust_lines = []
-        self.credentials = []
-        self.vaults = []
-        self.domains = []
-        self.mpt_issuances = []
-        self.delegates = []
-        self.dids = []
-        self.loan_brokers = []
-        self.loans = []
-        self.escrows = []
-        self.checks = []
-        self.payment_channels = []
+        self.accounts: dict[str, UserAccount] = {}
+        self.amms: list[AMM] = []
+        self.nfts: list[NFT] = []
+        self.nft_offers: list[NFTOffer] = []
+        self.trust_lines: list[TrustLine] = []
+        self.credentials: list[Credential] = []
+        self.vaults: list[Vault] = []
+        self.domains: list[PermissionedDomain] = []
+        self.mpt_issuances: list[MPTokenIssuance] = []
+        self.delegates: list[Delegate] = []
+        self.dids: list[DID] = []
+        self.loan_brokers: list[LoanBroker] = []
+        self.loans: list[Loan] = []
+        self.escrows: list[Escrow] = []
+        self.checks: list[Check] = []
+        self.payment_channels: list[PaymentChannel] = []
         self.offers: list[dict] = []
         # Setup addresses (gateways, vault creators, etc.) — never delete; populated by run_setup().
         self.protected_accounts: set[str] = set()
         self.deleted_vault_ids: list[str] = []
         self.deleted_broker_ids: list[str] = []
         self.deleted_loan_ids: list[str] = []
-        self.funding_wallet: Wallet = None
-        self.failures = []
         self.currency_codes = conf["currencies"]["codes"]
         self.default_balance = conf["accounts"]["default_balance"]
         self.start_time = time.time()
@@ -137,7 +150,7 @@ class Workload:
 
 
 def _make_endpoint(path: str, name: str, handler_fn: Callable, args_fn: Callable) -> Callable:
-    async def endpoint(w: Workload = Depends(get_workload)):
+    async def endpoint(w: Workload = Depends(get_workload)) -> Any:
         try:
             return await handler_fn(*args_fn(w))
         except (XRPLException, httpx.TimeoutException) as e:
@@ -153,8 +166,8 @@ def _make_endpoint(path: str, name: str, handler_fn: Callable, args_fn: Callable
     return endpoint
 
 
-# Module-level ref needed by _make_endpoint's Depends
-get_workload = None
+def get_workload(request: Request) -> Workload:
+    return cast(Workload, request.app.state.workload)
 
 
 def create_app(workload: Workload) -> FastAPI:
@@ -169,7 +182,7 @@ def create_app(workload: Workload) -> FastAPI:
     ready = {"value": False}
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from workload.setup import run_setup
 
         ws_task = asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
@@ -194,15 +207,11 @@ def create_app(workload: Workload) -> FastAPI:
             await ws_task
 
     app = FastAPI(lifespan=lifespan)
+    app.state.workload = workload
 
     @app.get("/ready")
     def _ready() -> Response:
         return Response(status_code=200 if ready["value"] else 503)
-
-    global get_workload
-
-    def get_workload():
-        return workload
 
     for name, path, handler_fn, args_fn, _ in REGISTRY:
         app.get(path)(_make_endpoint(path, name, handler_fn, args_fn))

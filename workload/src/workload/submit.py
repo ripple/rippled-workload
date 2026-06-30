@@ -53,13 +53,13 @@ async def submit_tx(
             _delegates,
             _accounts,
         )
-        if delegate_addr is not None:
+        if delegate_addr is not None and delegate_wallet is not None:
             txn = txn.__replace__(delegate=delegate_addr)
             wallet = delegate_wallet
 
     signed = await autofill_and_sign(txn, client, wallet)
     response = await submit(signed, client)
-    result = response.result
+    result: dict = response.result
     tx_submitted(name, txn, result)
     return result
 
@@ -88,6 +88,6 @@ async def submit_raw(
     serialized = encode_for_signing(tx_dict)
     tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
     response = await client.request(SubmitOnly(tx_blob=encode(tx_dict)))
-    result = response.result
+    result: dict = response.result
     tx_submitted(name, tx_dict, result)
     return result
