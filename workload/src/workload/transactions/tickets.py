@@ -27,12 +27,14 @@ from xrpl.models.transactions.nftoken_mint import NFTokenMintFlag
 from xrpl.models.transactions.offer_create import OfferCreateFlag
 from xrpl.models.transactions.signer_list_set import SignerEntry
 from xrpl.models.transactions.transaction import Memo
+from xrpl.wallet import Wallet
 
 from workload import params
 from workload.assertions import tx_submitted
+from workload.fuzz import submit_fuzzed
 from workload.models import AMM, Credential, PermissionedDomain, UserAccount
 from workload.randoms import choice
-from workload.submit import submit_tx
+from workload.submit import submit_raw, submit_tx
 from workload.transactions.permissioned_dex import _amm_iou, _domain_members
 
 # ── Ticket-eligible transaction builders ─────────────────────────────
@@ -263,23 +265,44 @@ async def ticket_create(accounts: dict[str, UserAccount], client: AsyncJsonRpcCl
     return await _ticket_create_valid(accounts, client)
 
 
+def _ticket_create_base(
+    accounts: dict[str, UserAccount],
+) -> tuple[xrpl.models.TicketCreate, Wallet] | None:
+    """Valid TicketCreate + wallet; shared by valid and fuzz."""
+    if not accounts:
+        return None
+    account = accounts[choice(list(accounts))]
+    txn = xrpl.models.TicketCreate(account=account.address, ticket_count=params.ticket_count())
+    return txn, account.wallet
+
+
 async def _ticket_create_valid(
     accounts: dict[str, UserAccount], client: AsyncJsonRpcClient
 ) -> None:
-    account_id = choice(list(accounts))
-    account = accounts[account_id]
-    ticket_count = params.ticket_count()
-    txn = xrpl.models.TicketCreate(
-        account=account.address,
-        ticket_count=ticket_count,
-    )
-    await submit_tx("TicketCreate", txn, client, account.wallet)
+    built = _ticket_create_base(accounts)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("TicketCreate", txn, client, wallet)
 
 
 async def _ticket_create_faulty(
     accounts: dict[str, UserAccount], client: AsyncJsonRpcClient
 ) -> None:
-    pass  # TODO: fault injection
+    built = _ticket_create_base(accounts)
+    if built is None:
+        return
+    base, wallet = built
+
+    if choice(["zero_count", "fuzz"]) == "fuzz":
+        await submit_fuzzed("TicketCreate", base, client, wallet)
+        return
+
+    # zero_count: TicketCount 0 -> temINVALID_COUNT (xrpl-py forbids it at construction).
+    def _mutate(d: dict) -> None:
+        d["TicketCount"] = 0
+
+    await submit_raw("TicketCreate", base, client, wallet, _mutate)
 
 
 # ── Use ──────────────────────────────────────────────────────────────
@@ -293,7 +316,7 @@ async def ticket_use(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _ticket_use_faulty(accounts, client)
+        return await _ticket_use_faulty(accounts, domains, credentials, amms, client)
     return await _ticket_use_valid(accounts, domains, credentials, amms, client)
 
 
@@ -336,5 +359,45 @@ async def _ticket_use_valid(
     await submit_tx(tx_type, txn, client, src.wallet)
 
 
-async def _ticket_use_faulty(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
-    pass  # TODO: fault injection
+async def _ticket_use_faulty(
+    accounts: dict[str, UserAccount],
+    domains: list[PermissionedDomain],
+    credentials: list[Credential],
+    amms: list[AMM],
+    client: AsyncJsonRpcClient,
+) -> None:
+    accounts_with_tickets = [(addr, acc) for addr, acc in accounts.items() if acc.tickets]
+    if not accounts_with_tickets:
+        return
+    src_addr, src = choice(accounts_with_tickets)
+    ticket_sequence = choice(list(src.tickets))
+    other_accounts = [a for a in accounts if a != src_addr]
+    if not other_accounts:
+        return
+    dst = choice(other_accounts)
+    common = {"account": src.address, "sequence": 0, "ticket_sequence": ticket_sequence}
+
+    # Consumed on a tec apply; optimistic discard mirrors the valid path.
+    src.tickets.discard(ticket_sequence)
+
+    if choice(["overdraw", "fuzz"]) == "fuzz":
+        ctx = TicketCtx(
+            src=src,
+            dst=dst,
+            common=common,
+            accounts=accounts,
+            domains=domains,
+            credentials=credentials,
+            amms=amms,
+        )
+        base = _TICKET_BUILDERS[choice(list(_TICKET_BUILDERS))](ctx)
+        if base is None:
+            return
+        await submit_fuzzed("TicketUse", base, client, src.wallet)
+        return
+
+    # overdraw: a ticketed Payment that overdraws -> tecUNFUNDED_PAYMENT. It validates with
+    # TicketSequence set, so ws_listener attributes the failure to the TicketUse bucket.
+    txn = Payment(destination=dst, amount="10000000000000", **common)
+    tx_submitted("TicketUse", txn)
+    await submit_tx("Payment", txn, client, src.wallet)

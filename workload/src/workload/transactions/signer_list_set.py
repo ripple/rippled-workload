@@ -5,8 +5,10 @@ from __future__ import annotations
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import SignerListSet
 from xrpl.models.transactions.signer_list_set import SignerEntry
+from xrpl.wallet import Wallet
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import UserAccount
 from workload.randoms import choice, randint, sample
 from workload.submit import submit_tx
@@ -21,12 +23,12 @@ async def signer_list_set(
     return await _signer_list_set_valid(accounts, client)
 
 
-async def _signer_list_set_valid(
+def _signer_list_set_base(
     accounts: dict[str, UserAccount],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[SignerListSet, Wallet] | None:
+    """Valid SignerListSet (set a multisign list, or remove it) + wallet."""
     if len(accounts) < 3:
-        return
+        return None
 
     acct_list = list(accounts.values())
     src = choice(acct_list)
@@ -60,7 +62,18 @@ async def _signer_list_set_valid(
             signer_quorum=0,
         )
 
-    await submit_tx("SignerListSet", txn, client, src.wallet)
+    return txn, src.wallet
+
+
+async def _signer_list_set_valid(
+    accounts: dict[str, UserAccount],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _signer_list_set_base(accounts)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("SignerListSet", txn, client, wallet)
 
 
 async def _signer_list_set_faulty(
@@ -73,11 +86,20 @@ async def _signer_list_set_faulty(
 
     mutation = choice(
         [
+            "fuzz",
             "fake_signers",
             "single_fake_signer",
             "high_quorum_fake_signers",
         ]
     )
+
+    if mutation == "fuzz":
+        built = _signer_list_set_base(accounts)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("SignerListSet", base, client, wallet)
+        return
 
     if mutation == "fake_signers":
         count = randint(2, 8)

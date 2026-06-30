@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(dirname "$0")/../workload"
+
+echo "Checking generative-fuzz coverage of _faulty handlers..."
+uv run python -c "
+import ast
+import pathlib
+
+# Faulty handlers that legitimately cannot ride submit_fuzzed (which single-signs
+# via submit_raw). Keep this set tiny and justified.
+EXCLUDED = {
+    '_loan_set_faulty',  # LoanSet dual co-signs; a single-wallet fuzz only hits auth rejects.
+}
+
+tx_dir = pathlib.Path('src/workload/transactions')
+missing: list[str] = []
+for path in sorted(tx_dir.glob('*.py')):
+    tree = ast.parse(path.read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef) or not node.name.endswith('_faulty'):
+            continue
+        if node.name in EXCLUDED:
+            continue
+        calls = {
+            n.func.id
+            for n in ast.walk(node)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        if 'submit_fuzzed' not in calls:
+            missing.append(f'{path.name}::{node.name}')
+
+if missing:
+    print(f'FAILED: {len(missing)} _faulty handler(s) missing a submit_fuzzed branch:')
+    for m in missing:
+        print(f'  {m}')
+    print('Add a \"fuzz\" choice (see CLAUDE.md) or, if it cannot be fuzzed, add it to EXCLUDED.')
+    exit(1)
+print('All _faulty handlers wire generative fuzz OK')
+"

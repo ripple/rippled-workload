@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import EscrowCancel, EscrowCreate, EscrowFinish
+from xrpl.wallet import Wallet
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import Escrow, UserAccount
 from workload.randoms import choice, randint
 from workload.submit import submit_tx
@@ -23,13 +25,16 @@ async def escrow_create(
     return await _escrow_create_valid(accounts, escrows, client)
 
 
-async def _escrow_create_valid(
+def _escrow_create_base(
     accounts: dict[str, UserAccount],
-    escrows: list[Escrow],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[EscrowCreate, Wallet, str | None] | None:
+    """Valid EscrowCreate + wallet + fulfillment; shared by valid and fuzz.
+
+    Fulfillment is one-way-derived from the condition and unrecoverable from the
+    txn, so it rides alongside for the valid path's escrow tracking.
+    """
     if not accounts:
-        return
+        return None
 
     acct_list = list(accounts.values())
     src = choice(acct_list)
@@ -62,7 +67,19 @@ async def _escrow_create_valid(
         cancel_after=cancel_after,
         condition=condition,
     )
-    result = await submit_tx("EscrowCreate", txn, client, src.wallet)
+    return txn, src.wallet, fulfillment
+
+
+async def _escrow_create_valid(
+    accounts: dict[str, UserAccount],
+    escrows: list[Escrow],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _escrow_create_base(accounts)
+    if built is None:
+        return
+    txn, wallet, fulfillment = built
+    result = await submit_tx("EscrowCreate", txn, client, wallet)
 
     # Track only when the submit will likely apply, else the entry leaks and
     # Finish/Cancel pick dead escrows.
@@ -73,13 +90,13 @@ async def _escrow_create_valid(
         if seq:
             escrows.append(
                 Escrow(
-                    owner=src.address,
-                    destination=dst.address,
+                    owner=txn.account,
+                    destination=txn.destination,
                     sequence=seq,
-                    condition=condition,
+                    condition=txn.condition,
                     fulfillment=fulfillment,
-                    finish_after=finish_after,
-                    cancel_after=cancel_after,
+                    finish_after=txn.finish_after,
+                    cancel_after=txn.cancel_after,
                 )
             )
 
@@ -94,12 +111,21 @@ async def _escrow_create_faulty(
 
     mutation = choice(
         [
+            "fuzz",
             "past_cancel_after",
             "non_existent_destination",
             "bad_condition_hex",
             "no_time_no_condition",
         ]
     )
+    if mutation == "fuzz":
+        built = _escrow_create_base(accounts)
+        if built is None:
+            return
+        base, wallet, _ = built
+        await submit_fuzzed("EscrowCreate", base, client, wallet)
+        return
+
     if mutation == "past_cancel_after":
         past = params._ripple_now() - randint(100, 10_000)
         txn = EscrowCreate(
@@ -144,17 +170,17 @@ async def escrow_finish(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _escrow_finish_faulty(accounts, client)
+        return await _escrow_finish_faulty(accounts, escrows, client)
     return await _escrow_finish_valid(accounts, escrows, client)
 
 
-async def _escrow_finish_valid(
+def _escrow_finish_base(
     accounts: dict[str, UserAccount],
     escrows: list[Escrow],
-    client: AsyncJsonRpcClient,
-) -> None:
-    if not escrows:
-        return
+) -> tuple[EscrowFinish, Wallet] | None:
+    """Valid EscrowFinish of a tracked escrow + wallet; shared by valid and fuzz."""
+    if not escrows or not accounts:
+        return None
 
     escrow = choice(escrows)
     # Anyone can finish an escrow.
@@ -167,11 +193,24 @@ async def _escrow_finish_valid(
         condition=escrow.condition,
         fulfillment=escrow.fulfillment,
     )
-    await submit_tx("EscrowFinish", txn, client, src.wallet)
+    return txn, src.wallet
+
+
+async def _escrow_finish_valid(
+    accounts: dict[str, UserAccount],
+    escrows: list[Escrow],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _escrow_finish_base(accounts, escrows)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("EscrowFinish", txn, client, wallet)
 
 
 async def _escrow_finish_faulty(
     accounts: dict[str, UserAccount],
+    escrows: list[Escrow],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
@@ -180,11 +219,20 @@ async def _escrow_finish_faulty(
 
     mutation = choice(
         [
+            "fuzz",
             "non_existent_sequence",
             "wrong_fulfillment",
             "wrong_owner",
         ]
     )
+    if mutation == "fuzz":
+        built = _escrow_finish_base(accounts, escrows)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("EscrowFinish", base, client, wallet)
+        return
+
     if mutation == "non_existent_sequence":
         txn = EscrowFinish(
             account=src.address,
@@ -221,21 +269,21 @@ async def escrow_cancel(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _escrow_cancel_faulty(accounts, client)
+        return await _escrow_cancel_faulty(accounts, escrows, client)
     return await _escrow_cancel_valid(accounts, escrows, client)
 
 
-async def _escrow_cancel_valid(
+def _escrow_cancel_base(
     accounts: dict[str, UserAccount],
     escrows: list[Escrow],
-    client: AsyncJsonRpcClient,
-) -> None:
-    if not escrows:
-        return
+) -> tuple[EscrowCancel, Wallet] | None:
+    """Valid EscrowCancel of a cancellable escrow + wallet; shared by valid and fuzz."""
+    if not escrows or not accounts:
+        return None
 
     cancellable = [e for e in escrows if e.cancel_after is not None]
     if not cancellable:
-        return
+        return None
 
     escrow = choice(cancellable)
     # Anyone can cancel an expired escrow.
@@ -246,11 +294,24 @@ async def _escrow_cancel_valid(
         owner=escrow.owner,
         offer_sequence=escrow.sequence,
     )
-    await submit_tx("EscrowCancel", txn, client, src.wallet)
+    return txn, src.wallet
+
+
+async def _escrow_cancel_valid(
+    accounts: dict[str, UserAccount],
+    escrows: list[Escrow],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _escrow_cancel_base(accounts, escrows)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("EscrowCancel", txn, client, wallet)
 
 
 async def _escrow_cancel_faulty(
     accounts: dict[str, UserAccount],
+    escrows: list[Escrow],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
@@ -259,11 +320,20 @@ async def _escrow_cancel_faulty(
 
     mutation = choice(
         [
+            "fuzz",
             "non_existent_sequence",
             "wrong_owner",
             "cancel_non_cancellable",
         ]
     )
+    if mutation == "fuzz":
+        built = _escrow_cancel_base(accounts, escrows)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("EscrowCancel", base, client, wallet)
+        return
+
     if mutation == "non_existent_sequence":
         txn = EscrowCancel(
             account=src.address,

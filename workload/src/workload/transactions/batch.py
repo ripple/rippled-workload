@@ -16,15 +16,15 @@ from xrpl.models.transactions import (
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 from xrpl.models.transactions.transaction import Memo, Transaction
+from xrpl.wallet import Wallet
 
-from workload import logging, params
+from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import UserAccount
 from workload.randoms import choice, sample
 from workload.submit import submit_tx
 
-log = logging.getLogger(__name__)
-
-# TODO: ASF_AUTHORIZED_NFTOKEN_MINTER excluded — requires nftoken_minter field (AXRT-118)
+# ASF_AUTHORIZED_NFTOKEN_MINTER excluded — requires the nftoken_minter field.
 _BATCH_SAFE_FLAGS: list[AccountSetAsfFlag] = [
     f for f in AccountSetAsfFlag if f != AccountSetAsfFlag.ASF_AUTHORIZED_NFTOKEN_MINTER
 ]
@@ -110,21 +110,31 @@ async def batch_random(accounts: dict[str, UserAccount], client: AsyncJsonRpcCli
     return await _batch_random_valid(accounts, client)
 
 
-async def _batch_random_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
+async def _batch_base(
+    accounts: dict[str, UserAccount], client: AsyncJsonRpcClient
+) -> tuple[Batch, Wallet] | None:
+    """Valid single-account Batch + wallet; shared by valid and fuzz."""
+    if len(accounts) < 2:
+        return None
     src_address, dst = sample(list(accounts), 2)
     sequence = await get_next_valid_seq_number(src_address, client)
     src = accounts[src_address]
-    num_txns = params.batch_size()
-
-    inner_txns = [_build_inner(src, dst, sequence + idx + 1) for idx in range(num_txns)]
-
+    inner_txns = [_build_inner(src, dst, sequence + idx + 1) for idx in range(params.batch_size())]
     batch_txn = Batch(
         account=src.address,
         flags=choice(list(BatchFlag)),
         raw_transactions=inner_txns,
         sequence=sequence,
     )
-    await submit_tx("Batch", batch_txn, client, src.wallet)
+    return batch_txn, src.wallet
+
+
+async def _batch_random_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
+    built = await _batch_base(accounts, client)
+    if built is None:
+        return
+    batch_txn, wallet = built
+    await submit_tx("Batch", batch_txn, client, wallet)
 
 
 async def _batch_random_faulty(
@@ -132,6 +142,17 @@ async def _batch_random_faulty(
 ) -> None:
     if len(accounts) < 2:
         return
+
+    # Single-account batch: submit_raw single-signs correctly (only multi-account
+    # batches need BatchSigners), so fuzzing the outer dict reaches Batch preflight.
+    if choice(["overdraw_all_or_nothing", "fuzz"]) == "fuzz":
+        built = await _batch_base(accounts, client)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("Batch", base, client, wallet)
+        return
+
     src_address, dst = sample(list(accounts), 2)
     sequence = await get_next_valid_seq_number(src_address, client)
     src = accounts[src_address]

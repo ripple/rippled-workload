@@ -10,14 +10,13 @@ from xrpl.models.transactions.delegate_set import (
 from xrpl.models.transactions.types import TransactionType
 from xrpl.wallet import Wallet
 
-from workload import logging, params
+from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import UserAccount
 from workload.randoms import choice, randint, sample
 from workload.submit import submit_tx
 
 DELEGABLE_TX_TYPES = [t for t in TransactionType if t not in NON_DELEGABLE_TRANSACTIONS]
-
-log = logging.getLogger(__name__)
 
 
 async def delegate_set(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
@@ -26,7 +25,12 @@ async def delegate_set(accounts: dict[str, UserAccount], client: AsyncJsonRpcCli
     return await _delegate_set_valid(accounts, client)
 
 
-async def _delegate_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
+def _delegate_set_base(
+    accounts: dict[str, UserAccount],
+) -> tuple[DelegateSet, Wallet] | None:
+    """Valid DelegateSet (grant a delegate a random permission set) + wallet."""
+    if len(accounts) < 2:
+        return None
     src_id, delegate_id = sample(list(accounts), 2)
     src = accounts[src_id]
     perm_type = choice(["granular", "transaction_type", "mixed"])
@@ -44,7 +48,15 @@ async def _delegate_set_valid(accounts: dict[str, UserAccount], client: AsyncJso
         authorize=delegate_id,
         permissions=permissions,
     )
-    await submit_tx("DelegateSet", txn, client, src.wallet)
+    return txn, src.wallet
+
+
+async def _delegate_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
+    built = _delegate_set_base(accounts)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("DelegateSet", txn, client, wallet)
 
 
 async def _delegate_set_faulty(
@@ -54,11 +66,20 @@ async def _delegate_set_faulty(
         return
     mutation = choice(
         [
+            "fuzz",
             "non_existent_authorize",
             "empty_permissions",
             "non_owner_submission",
         ]
     )
+    if mutation == "fuzz":
+        built = _delegate_set_base(accounts)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("DelegateSet", base, client, wallet)
+        return
+
     if mutation == "non_existent_authorize":
         src = choice(list(accounts.values()))
         all_perms = list(GranularPermission)

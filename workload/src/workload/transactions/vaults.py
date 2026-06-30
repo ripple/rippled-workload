@@ -14,8 +14,10 @@ from xrpl.models.transactions import (
     VaultSet,
     VaultWithdraw,
 )
+from xrpl.wallet import Wallet
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import MPTokenIssuance, TrustLine, UserAccount, Vault
 from workload.randoms import choice, randint, random
 from workload.submit import submit_tx
@@ -70,15 +72,14 @@ async def vault_create(
     return await _vault_create_valid(accounts, vaults, trust_lines, mpt_issuances, client)
 
 
-async def _vault_create_valid(
+def _vault_create_base(
     accounts: dict[str, UserAccount],
-    vaults: list[Vault],
     trust_lines: list[TrustLine],
     mpt_issuances: list[MPTokenIssuance],
-    client: AsyncJsonRpcClient,
-) -> None:
-    src_address = choice(list(accounts))
-    src = accounts[src_address]
+) -> tuple[VaultCreate, Wallet] | None:
+    if not accounts:
+        return None
+    src = accounts[choice(list(accounts))]
     asset = _random_asset(trust_lines, mpt_issuances)
     txn = VaultCreate(
         account=src.address,
@@ -86,7 +87,21 @@ async def _vault_create_valid(
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
-    await submit_tx("VaultCreate", txn, client, src.wallet)
+    return txn, src.wallet
+
+
+async def _vault_create_valid(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    trust_lines: list[TrustLine],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _vault_create_base(accounts, trust_lines, mpt_issuances)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("VaultCreate", txn, client, wallet)
 
 
 async def _vault_create_faulty(
@@ -100,7 +115,14 @@ async def _vault_create_faulty(
         return
     src = choice(list(accounts.values()))
     asset = _random_asset(trust_lines, mpt_issuances)
-    mutation = choice(["zero_max", "oversized_data", "xrp_with_issuer"])
+    mutation = choice(["fuzz", "zero_max", "oversized_data", "xrp_with_issuer"])
+    if mutation == "fuzz":
+        built = _vault_create_base(accounts, trust_lines, mpt_issuances)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("VaultCreate", base, client, wallet)
+        return
     if mutation == "zero_max":
         txn = VaultCreate(
             account=src.address,
@@ -141,20 +163,29 @@ async def vault_deposit(
     return await _vault_deposit_valid(accounts, vaults, client)
 
 
-async def _vault_deposit_valid(
-    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
-) -> None:
-    if not vaults:
-        return
+def _vault_deposit_base(
+    accounts: dict[str, UserAccount], vaults: list[Vault]
+) -> tuple[VaultDeposit, Wallet] | None:
+    if not vaults or not accounts:
+        return None
     vault = choice(vaults)
-    depositor_id = choice(list(accounts))
-    depositor = accounts[depositor_id]
+    depositor = accounts[choice(list(accounts))]
     txn = VaultDeposit(
         account=depositor.address,
         vault_id=vault.vault_id,
         amount=_amount_for_asset(vault.asset),
     )
-    await submit_tx("VaultDeposit", txn, client, depositor.wallet)
+    return txn, depositor.wallet
+
+
+async def _vault_deposit_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
+    built = _vault_deposit_base(accounts, vaults)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("VaultDeposit", txn, client, wallet)
 
 
 async def _vault_deposit_faulty(
@@ -163,7 +194,14 @@ async def _vault_deposit_faulty(
     if not accounts:
         return
     depositor = choice(list(accounts.values()))
-    mutation = choice(["fake_vault", "zero_amount", "mismatched_asset"])
+    mutation = choice(["fuzz", "fake_vault", "zero_amount", "mismatched_asset"])
+    if mutation == "fuzz":
+        built = _vault_deposit_base(accounts, vaults)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("VaultDeposit", base, client, wallet)
+        return
     if mutation == "fake_vault":
         if not vaults:
             return
@@ -222,21 +260,31 @@ def _state_aware_withdraw_amount(vault: Vault) -> IOUAmount | MPTAmount | str:
     return str(amount)
 
 
-async def _vault_withdraw_valid(
-    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
-) -> None:
+def _vault_withdraw_base(
+    accounts: dict[str, UserAccount], vaults: list[Vault]
+) -> tuple[VaultWithdraw, Wallet] | None:
     if not vaults:
-        return
+        return None
     vault = choice(vaults)
     if vault.owner not in accounts:
-        return
+        return None
     owner = accounts[vault.owner]
     txn = VaultWithdraw(
         account=owner.address,
         vault_id=vault.vault_id,
         amount=_state_aware_withdraw_amount(vault),
     )
-    await submit_tx("VaultWithdraw", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _vault_withdraw_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
+    built = _vault_withdraw_base(accounts, vaults)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("VaultWithdraw", txn, client, wallet)
 
 
 async def _vault_withdraw_faulty(
@@ -245,7 +293,14 @@ async def _vault_withdraw_faulty(
     if not accounts or not vaults:
         return
     vault = choice(vaults)
-    mutation = choice(["fake_vault", "non_owner", "overdraw"])
+    mutation = choice(["fuzz", "fake_vault", "non_owner", "overdraw"])
+    if mutation == "fuzz":
+        built = _vault_withdraw_base(accounts, vaults)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("VaultWithdraw", base, client, wallet)
+        return
     if mutation == "overdraw":
         if vault.owner not in accounts:
             return
@@ -295,14 +350,14 @@ async def vault_set(
     return await _vault_set_valid(accounts, vaults, client)
 
 
-async def _vault_set_valid(
-    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
-) -> None:
+def _vault_set_base(
+    accounts: dict[str, UserAccount], vaults: list[Vault]
+) -> tuple[VaultSet, Wallet] | None:
     if not vaults:
-        return
+        return None
     vault = choice(vaults)
     if vault.owner not in accounts:
-        return
+        return None
     owner = accounts[vault.owner]
     txn = VaultSet(
         account=owner.address,
@@ -310,7 +365,17 @@ async def _vault_set_valid(
         assets_maximum=params.vault_assets_maximum(),
         data=params.vault_data(),
     )
-    await submit_tx("VaultSet", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _vault_set_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
+    built = _vault_set_base(accounts, vaults)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("VaultSet", txn, client, wallet)
 
 
 async def _vault_set_faulty(
@@ -319,7 +384,14 @@ async def _vault_set_faulty(
     if not accounts or not vaults:
         return
     vault = choice(vaults)
-    mutation = choice(["fake_vault", "non_owner"])
+    mutation = choice(["fuzz", "fake_vault", "non_owner"])
+    if mutation == "fuzz":
+        built = _vault_set_base(accounts, vaults)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("VaultSet", base, client, wallet)
+        return
     if mutation == "fake_vault":
         if vault.owner not in accounts:
             return
@@ -356,22 +428,32 @@ async def vault_delete(
     return await _vault_delete_valid(accounts, vaults, client)
 
 
-async def _vault_delete_valid(
-    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
-) -> None:
+def _vault_delete_base(
+    accounts: dict[str, UserAccount], vaults: list[Vault]
+) -> tuple[VaultDelete, Wallet] | None:
     if not vaults:
-        return
+        return None
     # Non-empty vaults return tecNO_PERMISSION
     empty = [v for v in vaults if v.balance <= 0 and v.owner in accounts]
     vault = choice(empty) if empty else choice(vaults)
     if vault.owner not in accounts:
-        return
+        return None
     owner = accounts[vault.owner]
     txn = VaultDelete(
         account=owner.address,
         vault_id=vault.vault_id,
     )
-    await submit_tx("VaultDelete", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _vault_delete_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
+    built = _vault_delete_base(accounts, vaults)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("VaultDelete", txn, client, wallet)
 
 
 async def _vault_delete_faulty(
@@ -380,7 +462,14 @@ async def _vault_delete_faulty(
     if not accounts or not vaults:
         return
     vault = choice(vaults)
-    mutation = choice(["fake_vault", "non_owner"])
+    mutation = choice(["fuzz", "fake_vault", "non_owner"])
+    if mutation == "fuzz":
+        built = _vault_delete_base(accounts, vaults)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("VaultDelete", base, client, wallet)
+        return
     if mutation == "fake_vault":
         if vault.owner not in accounts:
             return
@@ -424,23 +513,23 @@ def _get_asset_issuer(vault: Vault) -> str | None:
     return None
 
 
-async def _vault_clawback_valid(
-    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
-) -> None:
+def _vault_clawback_base(
+    accounts: dict[str, UserAccount], vaults: list[Vault]
+) -> tuple[VaultClawback, Wallet] | None:
     if not vaults:
-        return
+        return None
     # VaultClawback must be submitted by the asset issuer, not the vault owner.
     eligible = [v for v in vaults if _get_asset_issuer(v) in accounts and v.shareholders]
     if not eligible:
-        return
+        return None
     vault = choice(eligible)
     issuer_address = _get_asset_issuer(vault)
     if issuer_address is None:
-        return
+        return None
     issuer = accounts[issuer_address]
     amount = _clawback_amount(vault.asset)
     if amount is None:
-        return
+        return None
     holder = choice(list(vault.shareholders))
     txn = VaultClawback(
         account=issuer.address,
@@ -448,7 +537,17 @@ async def _vault_clawback_valid(
         holder=holder,
         amount=amount,
     )
-    await submit_tx("VaultClawback", txn, client, issuer.wallet)
+    return txn, issuer.wallet
+
+
+async def _vault_clawback_valid(
+    accounts: dict[str, UserAccount], vaults: list[Vault], client: AsyncJsonRpcClient
+) -> None:
+    built = _vault_clawback_base(accounts, vaults)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("VaultClawback", txn, client, wallet)
 
 
 async def _vault_clawback_faulty(
@@ -463,7 +562,14 @@ async def _vault_clawback_faulty(
     amount = _clawback_amount(vault.asset)
     if amount is None:
         return
-    mutation = choice(["fake_vault", "clawback_self"])
+    mutation = choice(["fuzz", "fake_vault", "clawback_self"])
+    if mutation == "fuzz":
+        built = _vault_clawback_base(accounts, vaults)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("VaultClawback", base, client, wallet)
+        return
     if mutation == "fake_vault":
         other_accounts = [a for a in accounts if a != vault.owner]
         if not other_accounts:

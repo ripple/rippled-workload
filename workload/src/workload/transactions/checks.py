@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import CheckCancel, CheckCash, CheckCreate
+from xrpl.wallet import Wallet
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import Check, UserAccount
 from workload.randoms import choice, randint
 from workload.submit import submit_tx
@@ -23,13 +25,12 @@ async def check_create(
     return await _check_create_valid(accounts, checks, client)
 
 
-async def _check_create_valid(
+def _check_create_base(
     accounts: dict[str, UserAccount],
-    checks: list[Check],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[CheckCreate, Wallet] | None:
+    """Valid CheckCreate + wallet; shared by valid and fuzz."""
     if not accounts:
-        return
+        return None
 
     acct_list = list(accounts.values())
     src = choice(acct_list)
@@ -42,7 +43,19 @@ async def _check_create_valid(
         destination=dst.address,
         send_max=send_max,
     )
-    result = await submit_tx("CheckCreate", txn, client, src.wallet)
+    return txn, src.wallet
+
+
+async def _check_create_valid(
+    accounts: dict[str, UserAccount],
+    checks: list[Check],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _check_create_base(accounts)
+    if built is None:
+        return
+    txn, wallet = built
+    result = await submit_tx("CheckCreate", txn, client, wallet)
 
     # Track only when the submit will likely apply (state updater later swaps
     # the hash placeholder for the real check_id), else the placeholder leaks.
@@ -50,13 +63,14 @@ async def _check_create_valid(
     if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
         tx_json = result.get("tx_json", result)
         check_id = tx_json.get("hash", "")
-        if check_id:
+        # The base always builds an XRP-drops str send_max; narrow for Check.send_max.
+        if check_id and isinstance(txn.send_max, str):
             checks.append(
                 Check(
                     check_id=check_id,
-                    creator=src.address,
-                    destination=dst.address,
-                    send_max=send_max,
+                    creator=txn.account,
+                    destination=txn.destination,
+                    send_max=txn.send_max,
                 )
             )
 
@@ -71,12 +85,20 @@ async def _check_create_faulty(
 
     mutation = choice(
         [
+            "fuzz",
             "zero_send_max",
             "self_destination",
             "non_existent_destination",
             "past_expiration",
         ]
     )
+    if mutation == "fuzz":
+        built = _check_create_base(accounts)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("CheckCreate", base, client, wallet)
+        return
 
     if mutation == "zero_send_max":
         txn = CheckCreate(
@@ -117,28 +139,27 @@ async def check_cash(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _check_cash_faulty(accounts, client)
+        return await _check_cash_faulty(accounts, checks, client)
     return await _check_cash_valid(accounts, checks, client)
 
 
-async def _check_cash_valid(
+def _check_cash_base(
     accounts: dict[str, UserAccount],
     checks: list[Check],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[CheckCash, Wallet] | None:
+    """Valid CheckCash of a tracked check + wallet; shared by valid and fuzz."""
     if not checks:
-        return
+        return None
 
     check = choice(checks)
     # Only the destination can cash a check.
     dst = accounts.get(check.destination)
     if not dst:
-        return
+        return None
 
-    use_exact = choice([True, False])
     cash_amount = params.check_cash_amount(check.send_max)
 
-    if use_exact:
+    if choice([True, False]):
         txn = CheckCash(
             account=dst.address,
             check_id=check.check_id,
@@ -150,12 +171,24 @@ async def _check_cash_valid(
             check_id=check.check_id,
             deliver_min=cash_amount,
         )
+    return txn, dst.wallet
 
-    await submit_tx("CheckCash", txn, client, dst.wallet)
+
+async def _check_cash_valid(
+    accounts: dict[str, UserAccount],
+    checks: list[Check],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _check_cash_base(accounts, checks)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("CheckCash", txn, client, wallet)
 
 
 async def _check_cash_faulty(
     accounts: dict[str, UserAccount],
+    checks: list[Check],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
@@ -164,11 +197,19 @@ async def _check_cash_faulty(
 
     mutation = choice(
         [
+            "fuzz",
             "fake_check_id",
             "zero_amount",
             "non_destination_cash",
         ]
     )
+    if mutation == "fuzz":
+        built = _check_cash_base(accounts, checks)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("CheckCash", base, client, wallet)
+        return
 
     if mutation == "fake_check_id":
         txn = CheckCash(
@@ -201,8 +242,30 @@ async def check_cancel(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _check_cancel_faulty(accounts, client)
+        return await _check_cancel_faulty(accounts, checks, client)
     return await _check_cancel_valid(accounts, checks, client)
+
+
+def _check_cancel_base(
+    accounts: dict[str, UserAccount],
+    checks: list[Check],
+) -> tuple[CheckCancel, Wallet] | None:
+    """Valid CheckCancel of a tracked check + wallet; shared by valid and fuzz."""
+    if not checks:
+        return None
+
+    check = choice(checks)
+    # Creator or destination can cancel.
+    canceller_addr = choice([check.creator, check.destination])
+    canceller = accounts.get(canceller_addr)
+    if not canceller:
+        return None
+
+    txn = CheckCancel(
+        account=canceller.address,
+        check_id=check.check_id,
+    )
+    return txn, canceller.wallet
 
 
 async def _check_cancel_valid(
@@ -210,25 +273,16 @@ async def _check_cancel_valid(
     checks: list[Check],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not checks:
+    built = _check_cancel_base(accounts, checks)
+    if built is None:
         return
-
-    check = choice(checks)
-    # Creator or destination can cancel.
-    canceller_addr = choice([check.creator, check.destination])
-    canceller = accounts.get(canceller_addr)
-    if not canceller:
-        return
-
-    txn = CheckCancel(
-        account=canceller.address,
-        check_id=check.check_id,
-    )
-    await submit_tx("CheckCancel", txn, client, canceller.wallet)
+    txn, wallet = built
+    await submit_tx("CheckCancel", txn, client, wallet)
 
 
 async def _check_cancel_faulty(
     accounts: dict[str, UserAccount],
+    checks: list[Check],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
@@ -237,10 +291,18 @@ async def _check_cancel_faulty(
 
     mutation = choice(
         [
+            "fuzz",
             "fake_check_id",
             "cancel_others_check",
         ]
     )
+    if mutation == "fuzz":
+        built = _check_cancel_base(accounts, checks)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("CheckCancel", base, client, wallet)
+        return
 
     if mutation == "fake_check_id":
         txn = CheckCancel(

@@ -385,17 +385,17 @@ async def amm_deposit(
     return await _amm_deposit_valid(accounts, amms, client)
 
 
-async def _amm_deposit_valid(
+def _amm_deposit_base(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[AMMDeposit, UserAccount] | None:
+    """Valid AMMDeposit + depositor; None when no two-asset AMM exists."""
     if not accounts or not amms:
-        return
+        return None
     amm = choice(amms)
     src = choice(list(accounts.values()))
     if len(amm.assets) < 2:
-        return
+        return None
     asset1, asset2 = amm.assets[0], amm.assets[1]
     mode = choice(
         [
@@ -433,7 +433,7 @@ async def _amm_deposit_valid(
 
     elif mode == "lp_token":
         if not amm.lp_token:
-            return
+            return None
         lp = amm.lp_token[0]
         lp_out = IOUAmount(
             currency=lp.currency,
@@ -450,7 +450,7 @@ async def _amm_deposit_valid(
 
     elif mode == "one_asset_lp_token":
         if not amm.lp_token:
-            return
+            return None
         lp = amm.lp_token[0]
         a = choice([asset1, asset2])
         amount = _amount_for(a, params.amm_deposit_amount())
@@ -493,6 +493,18 @@ async def _amm_deposit_valid(
             flags=AMMDepositFlag.TF_TWO_ASSET_IF_EMPTY,
         )
 
+    return txn, src
+
+
+async def _amm_deposit_valid(
+    accounts: dict[str, UserAccount],
+    amms: list[AMM],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _amm_deposit_base(accounts, amms)
+    if built is None:
+        return
+    txn, src = built
     await submit_tx("AMMDeposit", txn, client, src.wallet)
 
 
@@ -506,6 +518,7 @@ async def _amm_deposit_faulty(
     src = choice(list(accounts.values()))
     mutation = choice(
         [
+            "fuzz",
             "non_existent_amm",
             "zero_deposit",
             "wrong_asset",
@@ -513,6 +526,14 @@ async def _amm_deposit_faulty(
             "negative_amount",
         ]
     )
+
+    if mutation == "fuzz":
+        built = _amm_deposit_base(accounts, amms)
+        if built is None:
+            return
+        base, depositor = built
+        await submit_fuzzed("AMMDeposit", base, client, depositor.wallet)
+        return
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
@@ -614,17 +635,17 @@ async def amm_withdraw(
     return await _amm_withdraw_valid(accounts, amms, client)
 
 
-async def _amm_withdraw_valid(
+def _amm_withdraw_base(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[AMMWithdraw, UserAccount] | None:
+    """Valid AMMWithdraw + withdrawer; None when no two-asset AMM exists."""
     if not accounts or not amms:
-        return
+        return None
     amm = choice(amms)
     src = choice(list(accounts.values()))
     if len(amm.assets) < 2:
-        return
+        return None
     asset1, asset2 = amm.assets[0], amm.assets[1]
     mode = choice(
         [
@@ -651,7 +672,7 @@ async def _amm_withdraw_valid(
 
     elif mode == "lp_token":
         if not amm.lp_token:
-            return
+            return None
         lp = amm.lp_token[0]
         lp_in = IOUAmount(
             currency=lp.currency,
@@ -699,7 +720,7 @@ async def _amm_withdraw_valid(
 
     elif mode == "one_asset_lp_token":
         if not amm.lp_token:
-            return
+            return None
         lp = amm.lp_token[0]
         a = choice([asset1, asset2])
         amount = _amount_for(a, params.amm_withdraw_amount())
@@ -730,6 +751,18 @@ async def _amm_withdraw_valid(
             flags=AMMWithdrawFlag.TF_LIMIT_LP_TOKEN,
         )
 
+    return txn, src
+
+
+async def _amm_withdraw_valid(
+    accounts: dict[str, UserAccount],
+    amms: list[AMM],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _amm_withdraw_base(accounts, amms)
+    if built is None:
+        return
+    txn, src = built
     await submit_tx("AMMWithdraw", txn, client, src.wallet)
 
 
@@ -743,6 +776,7 @@ async def _amm_withdraw_faulty(
     src = choice(list(accounts.values()))
     mutation = choice(
         [
+            "fuzz",
             "non_existent_amm",
             "zero_withdrawal",
             "overdraw",
@@ -750,6 +784,14 @@ async def _amm_withdraw_faulty(
             "negative_amount",
         ]
     )
+
+    if mutation == "fuzz":
+        built = _amm_withdraw_base(accounts, amms)
+        if built is None:
+            return
+        base, withdrawer = built
+        await submit_fuzzed("AMMWithdraw", base, client, withdrawer.wallet)
+        return
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
@@ -853,8 +895,31 @@ async def amm_vote(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _amm_vote_faulty(accounts, amms, client)
+        return await _amm_vote_faulty(accounts, amms, trust_lines, client)
     return await _amm_vote_valid(accounts, amms, trust_lines, client)
+
+
+def _amm_vote_base(
+    accounts: dict[str, UserAccount],
+    amms: list[AMM],
+    trust_lines: list[TrustLine],
+) -> tuple[AMMVote, UserAccount] | None:
+    """Valid AMMVote + voter holding the needed trust lines; None when none qualifies."""
+    if not accounts or not amms:
+        return None
+    amm = choice(amms)
+    # Filter to IOU legs: only those need a trust line, and MPTCurrency must not reach the matcher.
+    needed = [a for a in amm.assets if isinstance(a, IssuedCurrency)]
+    src = _find_account_with_trust_lines(accounts, trust_lines, needed)
+    if not src:
+        return None
+    txn = AMMVote(
+        account=src.address,
+        asset=amm.assets[0],
+        asset2=amm.assets[1],
+        trading_fee=params.amm_vote_fee(),
+    )
+    return txn, src
 
 
 async def _amm_vote_valid(
@@ -863,32 +928,31 @@ async def _amm_vote_valid(
     trust_lines: list[TrustLine],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not accounts or not amms:
+    built = _amm_vote_base(accounts, amms, trust_lines)
+    if built is None:
         return
-    amm = choice(amms)
-    # Filter to IOU legs: only those need a trust line, and MPTCurrency must not reach the matcher.
-    needed = [a for a in amm.assets if isinstance(a, IssuedCurrency)]
-    src = _find_account_with_trust_lines(accounts, trust_lines, needed)
-    if not src:
-        return
-    txn = AMMVote(
-        account=src.address,
-        asset=amm.assets[0],
-        asset2=amm.assets[1],
-        trading_fee=params.amm_vote_fee(),
-    )
+    txn, src = built
     await submit_tx("AMMVote", txn, client, src.wallet)
 
 
 async def _amm_vote_faulty(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
+    trust_lines: list[TrustLine],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice(["non_existent_amm", "non_lp_holder_vote", "swapped_assets"])
+    mutation = choice(["fuzz", "non_existent_amm", "non_lp_holder_vote", "swapped_assets"])
+
+    if mutation == "fuzz":
+        built = _amm_vote_base(accounts, amms, trust_lines)
+        if built is None:
+            return
+        base, voter = built
+        await submit_fuzzed("AMMVote", base, client, voter.wallet)
+        return
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
@@ -941,16 +1005,16 @@ async def amm_bid(
     return await _amm_bid_valid(accounts, amms, client)
 
 
-async def _amm_bid_valid(
+def _amm_bid_base(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[AMMBid, UserAccount] | None:
+    """Valid AMMBid + bidder; None when no two-asset AMM with LP tokens exists."""
     if not accounts or not amms:
-        return
+        return None
     amm = choice(amms)
     if not amm.lp_token or len(amm.assets) < 2:
-        return
+        return None
     src = choice(list(accounts.values()))
     lp = amm.lp_token[0]
     mode = choice(["basic_bid", "bid_with_auth_accounts"])
@@ -979,6 +1043,18 @@ async def _amm_bid_valid(
             auth_accounts=auth_accounts,
         )
 
+    return txn, src
+
+
+async def _amm_bid_valid(
+    accounts: dict[str, UserAccount],
+    amms: list[AMM],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _amm_bid_base(accounts, amms)
+    if built is None:
+        return
+    txn, src = built
     await submit_tx("AMMBid", txn, client, src.wallet)
 
 
@@ -992,6 +1068,7 @@ async def _amm_bid_faulty(
     src = choice(list(accounts.values()))
     mutation = choice(
         [
+            "fuzz",
             "non_existent_amm",
             "zero_bid",
             "bid_min_exceeds_max",
@@ -999,6 +1076,14 @@ async def _amm_bid_faulty(
             "non_lp_holder_bid",
         ]
     )
+
+    if mutation == "fuzz":
+        built = _amm_bid_base(accounts, amms)
+        if built is None:
+            return
+        base, bidder = built
+        await submit_fuzzed("AMMBid", base, client, bidder.wallet)
+        return
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()
@@ -1091,20 +1176,34 @@ async def amm_delete(
     return await _amm_delete_valid(accounts, amms, client)
 
 
-async def _amm_delete_valid(
+def _amm_delete_base(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[AMMDelete, UserAccount] | None:
+    """Valid AMMDelete + submitter; None when no two-asset AMM exists."""
     if not accounts or not amms:
-        return
+        return None
     amm = choice(amms)
+    if len(amm.assets) < 2:
+        return None
     src = choice(list(accounts.values()))
     txn = AMMDelete(
         account=src.address,
         asset=amm.assets[0],
         asset2=amm.assets[1],
     )
+    return txn, src
+
+
+async def _amm_delete_valid(
+    accounts: dict[str, UserAccount],
+    amms: list[AMM],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _amm_delete_base(accounts, amms)
+    if built is None:
+        return
+    txn, src = built
     await submit_tx("AMMDelete", txn, client, src.wallet)
 
 
@@ -1116,7 +1215,15 @@ async def _amm_delete_faulty(
     if not accounts:
         return
     src = choice(list(accounts.values()))
-    mutation = choice(["non_existent_amm", "non_empty_amm", "wrong_asset_pair"])
+    mutation = choice(["fuzz", "non_existent_amm", "non_empty_amm", "wrong_asset_pair"])
+
+    if mutation == "fuzz":
+        built = _amm_delete_base(accounts, amms)
+        if built is None:
+            return
+        base, submitter = built
+        await submit_fuzzed("AMMDelete", base, client, submitter.wallet)
+        return
 
     if mutation == "non_existent_amm":
         fake = _fake_iou()

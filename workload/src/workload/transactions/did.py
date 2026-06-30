@@ -2,8 +2,10 @@
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import DIDDelete, DIDSet
+from xrpl.wallet import Wallet
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import DID, UserAccount
 from workload.randoms import choice, random, sample
 from workload.submit import submit_tx
@@ -28,7 +30,10 @@ async def did_set(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) 
     return await _did_set_valid(accounts, client)
 
 
-async def _did_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
+def _did_set_base(accounts: dict[str, UserAccount]) -> tuple[DIDSet, Wallet] | None:
+    """Valid DIDSet (partial clear or field combo) + wallet; shared by valid and fuzz."""
+    if not accounts:
+        return None
     src = choice(list(accounts.values()))
 
     if random() < 0.10:
@@ -42,8 +47,7 @@ async def _did_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcC
             data=all_fields["data"],
             did_document=all_fields["did_document"],
         )
-        await submit_tx("DIDSet", txn, client, src.wallet)
-        return
+        return txn, src.wallet
 
     combo = choice(VALID_FIELD_COMBOS)
     fields = {f: params.did_hex_field() for f in combo}
@@ -53,7 +57,15 @@ async def _did_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcC
         data=fields.get("data"),
         did_document=fields.get("did_document"),
     )
-    await submit_tx("DIDSet", txn, client, src.wallet)
+    return txn, src.wallet
+
+
+async def _did_set_valid(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
+    built = _did_set_base(accounts)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("DIDSet", txn, client, wallet)
 
 
 async def _did_set_faulty(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
@@ -64,8 +76,16 @@ async def _did_set_faulty(accounts: dict[str, UserAccount], client: AsyncJsonRpc
             "non_owner_submission",
             "invalid_flags",
             "single_empty_field",
+            "fuzz",
         ]
     )
+    if mutation == "fuzz":
+        built = _did_set_base(accounts)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("DIDSet", base, client, wallet)
+        return
     if mutation == "non_owner_submission":
         accounts_list = list(accounts.values())
         if len(accounts_list) < 2:
@@ -101,17 +121,28 @@ async def did_delete(
     return await _did_delete_valid(accounts, dids, client)
 
 
+def _did_delete_base(
+    accounts: dict[str, UserAccount], dids: list[DID]
+) -> tuple[DIDDelete, Wallet] | None:
+    """Valid DIDDelete (owner deletes own DID) + wallet; shared by valid and fuzz."""
+    if not dids:
+        return None
+    target = choice(dids)
+    if target.account not in accounts:
+        return None
+    owner = accounts[target.account]
+    txn = DIDDelete(account=owner.address)
+    return txn, owner.wallet
+
+
 async def _did_delete_valid(
     accounts: dict[str, UserAccount], dids: list[DID], client: AsyncJsonRpcClient
 ) -> None:
-    if not dids:
+    built = _did_delete_base(accounts, dids)
+    if built is None:
         return
-    target = choice(dids)
-    if target.account not in accounts:
-        return
-    owner = accounts[target.account]
-    txn = DIDDelete(account=owner.address)
-    await submit_tx("DIDDelete", txn, client, owner.wallet)
+    txn, wallet = built
+    await submit_tx("DIDDelete", txn, client, wallet)
 
 
 async def _did_delete_faulty(
@@ -124,8 +155,16 @@ async def _did_delete_faulty(
             "delete_no_did",
             "non_owner_submission",
             "invalid_flags",
+            "fuzz",
         ]
     )
+    if mutation == "fuzz":
+        built = _did_delete_base(accounts, dids)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("DIDDelete", base, client, wallet)
+        return
     accounts_list = list(accounts.values())
     if mutation == "delete_no_did":
         did_owners = {d.account for d in dids}

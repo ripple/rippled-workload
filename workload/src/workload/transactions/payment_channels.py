@@ -8,8 +8,10 @@ from xrpl.models.transactions import (
     PaymentChannelCreate,
     PaymentChannelFund,
 )
+from xrpl.wallet import Wallet
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import PaymentChannel, UserAccount
 from workload.randoms import choice, randint
 from workload.submit import submit_tx
@@ -27,44 +29,50 @@ async def channel_create(
     return await _channel_create_valid(accounts, payment_channels, client)
 
 
+def _channel_create_base(
+    accounts: dict[str, UserAccount],
+) -> tuple[PaymentChannelCreate, Wallet] | None:
+    """Valid PaymentChannelCreate (src -> distinct dst) + wallet; shared by valid and fuzz."""
+    if len(accounts) < 2:
+        return None
+    acct_list = list(accounts.values())
+    src = choice(acct_list)
+    dst = choice([a for a in acct_list if a.address != src.address])
+    txn = PaymentChannelCreate(
+        account=src.address,
+        destination=dst.address,
+        amount=params.channel_amount(),
+        settle_delay=params.channel_settle_delay(),
+        public_key=src.wallet.public_key,
+    )
+    return txn, src.wallet
+
+
 async def _channel_create_valid(
     accounts: dict[str, UserAccount],
     payment_channels: list[PaymentChannel],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if len(accounts) < 2:
+    built = _channel_create_base(accounts)
+    if built is None:
         return
-
-    acct_list = list(accounts.values())
-    src = choice(acct_list)
-    dst = choice([a for a in acct_list if a.address != src.address])
-
-    amount = params.channel_amount()
-    settle_delay = params.channel_settle_delay()
-
-    txn = PaymentChannelCreate(
-        account=src.address,
-        destination=dst.address,
-        amount=amount,
-        settle_delay=settle_delay,
-        public_key=src.wallet.public_key,
-    )
-    result = await submit_tx("PaymentChannelCreate", txn, client, src.wallet)
+    txn, wallet = built
+    result = await submit_tx("PaymentChannelCreate", txn, client, wallet)
 
     # Track only when the submit will likely apply (state updater later swaps
     # the tx_hash placeholder for the real channel_id), else dead channels leak.
     engine = result.get("engine_result", "") if result else ""
-    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
+    if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ") and isinstance(txn.amount, str):
         tx_json = result.get("tx_json", result)
         tx_hash = tx_json.get("hash", "")
         if tx_hash:
             payment_channels.append(
                 PaymentChannel(
                     channel_id=tx_hash,
-                    source=src.address,
-                    destination=dst.address,
-                    amount=amount,
-                    settle_delay=settle_delay,
+                    source=txn.account,
+                    destination=txn.destination,
+                    amount=txn.amount,
+                    settle_delay=txn.settle_delay,
                 )
             )
 
@@ -83,8 +91,17 @@ async def _channel_create_faulty(
             "self_destination",
             "non_existent_destination",
             "past_cancel_after",
+            "fuzz",
         ]
     )
+
+    if mutation == "fuzz":
+        built = _channel_create_base(accounts)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("PaymentChannelCreate", base, client, wallet)
+        return
 
     if mutation == "zero_amount":
         txn = PaymentChannelCreate(
@@ -133,8 +150,28 @@ async def channel_fund(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _channel_fund_faulty(accounts, client)
+        return await _channel_fund_faulty(accounts, payment_channels, client)
     return await _channel_fund_valid(accounts, payment_channels, client)
+
+
+def _channel_fund_base(
+    accounts: dict[str, UserAccount],
+    payment_channels: list[PaymentChannel],
+) -> tuple[PaymentChannelFund, Wallet] | None:
+    """Valid PaymentChannelFund (source funds own channel) + wallet; shared by valid and fuzz."""
+    if not payment_channels:
+        return None
+    channel = choice(payment_channels)
+    # Only the source can fund a channel.
+    src = accounts.get(channel.source)
+    if not src:
+        return None
+    txn = PaymentChannelFund(
+        account=src.address,
+        channel=channel.channel_id,
+        amount=params.channel_fund_amount(),
+    )
+    return txn, src.wallet
 
 
 async def _channel_fund_valid(
@@ -142,27 +179,16 @@ async def _channel_fund_valid(
     payment_channels: list[PaymentChannel],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not payment_channels:
+    built = _channel_fund_base(accounts, payment_channels)
+    if built is None:
         return
-
-    channel = choice(payment_channels)
-    # Only the source can fund a channel.
-    src = accounts.get(channel.source)
-    if not src:
-        return
-
-    add_amount = params.channel_fund_amount()
-
-    txn = PaymentChannelFund(
-        account=src.address,
-        channel=channel.channel_id,
-        amount=add_amount,
-    )
-    await submit_tx("PaymentChannelFund", txn, client, src.wallet)
+    txn, wallet = built
+    await submit_tx("PaymentChannelFund", txn, client, wallet)
 
 
 async def _channel_fund_faulty(
     accounts: dict[str, UserAccount],
+    payment_channels: list[PaymentChannel],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
@@ -174,8 +200,17 @@ async def _channel_fund_faulty(
             "fake_channel",
             "zero_amount",
             "non_owner_fund",
+            "fuzz",
         ]
     )
+
+    if mutation == "fuzz":
+        built = _channel_fund_base(accounts, payment_channels)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("PaymentChannelFund", base, client, wallet)
+        return
 
     if mutation == "fake_channel":
         txn = PaymentChannelFund(
@@ -208,8 +243,28 @@ async def channel_claim(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _channel_claim_faulty(accounts, client)
+        return await _channel_claim_faulty(accounts, payment_channels, client)
     return await _channel_claim_valid(accounts, payment_channels, client)
+
+
+def _channel_claim_base(
+    accounts: dict[str, UserAccount],
+    payment_channels: list[PaymentChannel],
+) -> tuple[PaymentChannelClaim, Wallet] | None:
+    """Valid PaymentChannelClaim (source or destination claims) + wallet; shared by valid+fuzz."""
+    if not payment_channels:
+        return None
+    channel = choice(payment_channels)
+    # Source or destination can submit a claim.
+    claimer_addr = choice([channel.source, channel.destination])
+    claimer = accounts.get(claimer_addr)
+    if not claimer:
+        return None
+    txn = PaymentChannelClaim(
+        account=claimer.address,
+        channel=channel.channel_id,
+    )
+    return txn, claimer.wallet
 
 
 async def _channel_claim_valid(
@@ -217,25 +272,16 @@ async def _channel_claim_valid(
     payment_channels: list[PaymentChannel],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not payment_channels:
+    built = _channel_claim_base(accounts, payment_channels)
+    if built is None:
         return
-
-    channel = choice(payment_channels)
-    # Source or destination can submit a claim.
-    claimer_addr = choice([channel.source, channel.destination])
-    claimer = accounts.get(claimer_addr)
-    if not claimer:
-        return
-
-    txn = PaymentChannelClaim(
-        account=claimer.address,
-        channel=channel.channel_id,
-    )
-    await submit_tx("PaymentChannelClaim", txn, client, claimer.wallet)
+    txn, wallet = built
+    await submit_tx("PaymentChannelClaim", txn, client, wallet)
 
 
 async def _channel_claim_faulty(
     accounts: dict[str, UserAccount],
+    payment_channels: list[PaymentChannel],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
@@ -247,8 +293,17 @@ async def _channel_claim_faulty(
             "fake_channel",
             "excessive_balance",
             "wrong_claimer",
+            "fuzz",
         ]
     )
+
+    if mutation == "fuzz":
+        built = _channel_claim_base(accounts, payment_channels)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("PaymentChannelClaim", base, client, wallet)
+        return
 
     if mutation == "fake_channel":
         txn = PaymentChannelClaim(

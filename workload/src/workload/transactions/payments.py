@@ -4,13 +4,13 @@ from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.amounts import MPTAmount
 from xrpl.models.transactions import Payment
+from xrpl.wallet import Wallet
 
-from workload import logging, params
+from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import MPTokenIssuance, TrustLine, UserAccount
-from workload.randoms import choice, sample
+from workload.randoms import choice, randint, sample
 from workload.submit import submit_tx
-
-log = logging.getLogger(__name__)
 
 
 async def payment_random(
@@ -24,12 +24,14 @@ async def payment_random(
     return await _payment_random_valid(accounts, trust_lines, mpt_issuances, client)
 
 
-async def _payment_random_valid(
+def _payment_random_base(
     accounts: dict[str, UserAccount],
     trust_lines: list[TrustLine],
     mpt_issuances: list[MPTokenIssuance],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[Payment, Wallet] | None:
+    """Valid Payment (XRP/IOU/MPT) + wallet; shared by valid and fuzz."""
+    if len(accounts) < 2:
+        return None
     src_address, dst = sample(list(accounts), 2)
     src = accounts[src_address]
 
@@ -47,12 +49,21 @@ async def _payment_random_valid(
     else:
         amount = params.payment_amount()
 
-    payment_txn = Payment(
-        account=src.address,
-        amount=amount,
-        destination=dst,
-    )
-    await submit_tx("Payment", payment_txn, client, src.wallet)
+    txn = Payment(account=src.address, amount=amount, destination=dst)
+    return txn, src.wallet
+
+
+async def _payment_random_valid(
+    accounts: dict[str, UserAccount],
+    trust_lines: list[TrustLine],
+    mpt_issuances: list[MPTokenIssuance],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _payment_random_base(accounts, trust_lines, mpt_issuances)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("Payment", txn, client, wallet)
 
 
 def _iou_amount(trust_lines: list[TrustLine]) -> IOUAmount:
@@ -79,4 +90,40 @@ async def _payment_random_faulty(
     mpt_issuances: list[MPTokenIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
-    pass  # TODO: fault injection
+    if len(accounts) < 2:
+        return
+    src_address, dst = sample(list(accounts), 2)
+    src = accounts[src_address]
+
+    mutation = choice(
+        [
+            "overdraw_xrp",
+            "underfund_new_account",
+            "fuzz",
+        ]
+    )
+    if mutation == "fuzz":
+        built = _payment_random_base(accounts, trust_lines, mpt_issuances)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("Payment", base, client, wallet)
+        return
+
+    if mutation == "overdraw_xrp":
+        # Send far more XRP than any funded account holds -> tecUNFUNDED_PAYMENT.
+        txn = Payment(
+            account=src.address,
+            amount=str(randint(10**17, 10**18)),
+            destination=dst,
+        )
+
+    else:  # underfund_new_account
+        # Pay a brand-new account less than the base reserve -> tecNO_DST_INSUF_XRP.
+        txn = Payment(
+            account=src.address,
+            amount=str(randint(1, 1_000)),
+            destination=params.fake_account(),
+        )
+
+    await submit_tx("Payment", txn, client, src.wallet)
