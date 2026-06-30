@@ -15,6 +15,7 @@ xrpld.log
 __pycache__/
 *.py[cod]
 .venv/
+.direnv/
 uv.lock
 pip-log.txt
 logs
