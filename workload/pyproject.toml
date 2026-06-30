@@ -25,6 +25,15 @@ workload = "workload.app:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.mypy]
+python_version = "3.13"
+files = ["src/workload"]
+warn_redundant_casts = true
+warn_unused_ignores = true
+# basedpyright is the xrpl-aware type gate (xrpl-py ships py.typed); mypy is the
+# complementary flow/annotation checker, so third-party types resolve as Any here.
+ignore_missing_imports = true
+
 # [tool.uv.sources]
 # xrpl-py = { path = "../../xrpl-py" }
 # legleux-generate-ledger = { path = "../../generate_ledger"}

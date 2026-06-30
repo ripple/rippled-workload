@@ -21,6 +21,7 @@
               pkgs.uv
               pkgs.ruff
               pkgs.mypy
+              pkgs.basedpyright
             ];
 
             shellHook = ''

@@ -39,6 +39,7 @@ from xrpl.models.transactions import (
     Payment,
     PermissionedDomainSet,
     TicketCreate,
+    Transaction,
     TrustSet,
     VaultCreate,
     VaultDeposit,
@@ -102,7 +103,7 @@ async def _wait_for_state(
 
 async def _submit_batch(
     name: str,
-    txns: list[tuple[str, object, Wallet]],
+    txns: list[tuple[str, Transaction, Wallet]],
     client: AsyncJsonRpcClient,
     seq: SequenceTracker,
 ) -> int:
@@ -519,9 +520,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     summary["vault_deposits"] = await _submit_batch("vault_deposits", deposit_txns, client, seq)
 
     # ── 7c. Non-owner deposits into IOU vaults (for clawback) ────────
-    iou_vaults = [v for v in workload.vaults if isinstance(v.asset, IssuedCurrency)]
     holder_deposit_txns = []
-    for vault in iou_vaults:
+    for vault in workload.vaults:
+        asset = vault.asset
+        if not isinstance(asset, IssuedCurrency):
+            continue
         for holder_idx in list(_HOLDER_RANGE)[:3]:
             if holder_idx >= len(accs):
                 continue
@@ -533,7 +536,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         account=holder.address,
                         vault_id=vault.vault_id,
                         amount=IssuedCurrencyAmount(
-                            currency=vault.asset.currency, issuer=vault.asset.issuer, value="1000"
+                            currency=asset.currency, issuer=asset.issuer, value="1000"
                         ),
                     ),
                     holder.wallet,
@@ -754,16 +757,17 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         if broker.owner not in workload.accounts:
             continue
         owner = workload.accounts[broker.owner]
-        vault = vault_by_id.get(broker.vault_id)
-        if vault and isinstance(vault.asset, IssuedCurrency):
+        broker_vault = vault_by_id.get(broker.vault_id)
+        asset = broker_vault.asset if broker_vault else None
+        if isinstance(asset, IssuedCurrency):
             amount = IssuedCurrencyAmount(
-                currency=vault.asset.currency,
-                issuer=vault.asset.issuer,
+                currency=asset.currency,
+                issuer=asset.issuer,
                 value=_IOU_DISTRIBUTION_AMOUNT,
             )
-        elif vault and isinstance(vault.asset, MPTCurrency):
+        elif isinstance(asset, MPTCurrency):
             amount = MPTAmount(
-                mpt_issuance_id=vault.asset.mpt_issuance_id, value=_MPT_DISTRIBUTION_AMOUNT
+                mpt_issuance_id=asset.mpt_issuance_id, value=_MPT_DISTRIBUTION_AMOUNT
             )
         else:
             amount = _COVER_DEPOSIT

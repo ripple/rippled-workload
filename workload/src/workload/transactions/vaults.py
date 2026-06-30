@@ -38,6 +38,12 @@ def _amount_for_asset(asset: object) -> IOUAmount | MPTAmount | str:
     return params.vault_deposit_amount()
 
 
+def _clawback_amount(asset: object) -> IOUAmount | MPTAmount | None:
+    """VaultClawback amount — IOU/MPT only (XRP vaults can't be clawed back)."""
+    amount = _amount_for_asset(asset)
+    return None if isinstance(amount, str) else amount
+
+
 def _random_asset(
     trust_lines: list[TrustLine], mpt_issuances: list[MPTokenIssuance]
 ) -> IssuedCurrency | MPTCurrency | xrpl.models.XRP:
@@ -410,7 +416,8 @@ async def vault_clawback(
 def _get_asset_issuer(vault: Vault) -> str | None:
     """Issuer address for the vault's asset, or None for XRP."""
     if isinstance(vault.asset, IssuedCurrency):
-        return vault.asset.issuer
+        issuer: str = vault.asset.issuer
+        return issuer
     if isinstance(vault.asset, MPTCurrency):
         # MPT issuer address not reachable from the issuance ID here; skip.
         return None
@@ -428,13 +435,18 @@ async def _vault_clawback_valid(
         return
     vault = choice(eligible)
     issuer_address = _get_asset_issuer(vault)
+    if issuer_address is None:
+        return
     issuer = accounts[issuer_address]
+    amount = _clawback_amount(vault.asset)
+    if amount is None:
+        return
     holder = choice(list(vault.shareholders))
     txn = VaultClawback(
         account=issuer.address,
         vault_id=vault.vault_id,
         holder=holder,
-        amount=_amount_for_asset(vault.asset),
+        amount=amount,
     )
     await submit_tx("VaultClawback", txn, client, issuer.wallet)
 
@@ -448,6 +460,9 @@ async def _vault_clawback_faulty(
     if vault.owner not in accounts:
         return
     owner = accounts[vault.owner]
+    amount = _clawback_amount(vault.asset)
+    if amount is None:
+        return
     mutation = choice(["fake_vault", "clawback_self"])
     if mutation == "fake_vault":
         other_accounts = [a for a in accounts if a != vault.owner]
@@ -458,13 +473,13 @@ async def _vault_clawback_faulty(
             account=owner.address,
             vault_id=params.fake_id(),
             holder=holder,
-            amount=_amount_for_asset(vault.asset),
+            amount=amount,
         )
     else:  # clawback_self
         txn = VaultClawback(
             account=owner.address,
             vault_id=vault.vault_id,
             holder=owner.address,
-            amount=_amount_for_asset(vault.asset),
+            amount=amount,
         )
     await submit_tx("VaultClawback", txn, client, owner.wallet)

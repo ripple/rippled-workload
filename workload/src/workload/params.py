@@ -11,7 +11,8 @@ def should_send_faulty() -> bool:
 def fake_account() -> str:
     from xrpl.wallet import Wallet
 
-    return Wallet.create().address
+    address: str = Wallet.create().address
+    return address
 
 
 def fake_id() -> str:

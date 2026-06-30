@@ -137,7 +137,7 @@ async def _batch_random_faulty(
     src = accounts[src_address]
 
     # Mix valid + overdraw inner payments in ALL_OR_NOTHING → batch fails
-    inner_txns = [
+    inner_txns: list[Transaction] = [
         Payment(
             amount=("1000000" if idx < 2 else "10000000000000"),
             destination=dst,

@@ -8,6 +8,7 @@ from xrpl.models.transactions.delegate_set import (
     Permission,
 )
 from xrpl.models.transactions.types import TransactionType
+from xrpl.wallet import Wallet
 
 from workload import logging, params
 from workload.models import UserAccount
@@ -109,7 +110,7 @@ def maybe_delegate(
     src_address: str,
     delegates: list,
     accounts: dict[str, UserAccount],
-) -> tuple[str | None, object | None]:
+) -> tuple[str | None, Wallet | None]:
     """Pick a delegate for tx_type on behalf of src_address, or (None, None)."""
     from workload.randoms import random as _random
 

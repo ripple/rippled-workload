@@ -2,6 +2,7 @@
 
 from antithesis.assertions import assert_raw
 from antithesis.lifecycle import send_event
+from xrpl.models import Transaction
 
 _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
@@ -178,14 +179,16 @@ def assert_no_internal_error_submit(name: str, result: dict) -> None:
     )
 
 
-def tx_submitted(name: str, txn: object = None, result: dict | None = None) -> None:
+def tx_submitted(
+    name: str, txn: Transaction | dict | None = None, result: dict | None = None
+) -> None:
     """Passing the /submit response triggers the submit-time tef* check."""
     details: dict[str, str] = {"tx_type": name}
     if txn is not None:
         try:
             # Accept an xrpl-py model or an already-serialized dict (raw-submit
             # path passes the mutated dict directly).
-            raw = txn.to_xrpl() if hasattr(txn, "to_xrpl") else txn
+            raw = txn.to_xrpl() if isinstance(txn, Transaction) else txn
             details["account"] = raw.get("Account", "")
             details["sequence"] = str(raw.get("Sequence", ""))
             details.update(_extract_object_ids(raw))
