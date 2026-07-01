@@ -20,14 +20,28 @@ _RIPPLED_INTERNAL_ERRORS = (
     "tecINVARIANT_FAILED",
 )
 
-# Types whose faulty handler never produces a non-tesSUCCESS, so failure can't
-# be met:
-# - SignerListSet: fake AccountIDs accepted (rippled doesn't verify listed
-#   accounts exist); mutations stay within weight bounds.
-# - MPTokenIssuanceCreate: no _faulty handler — always a valid create.
+# Types whose faulty handler never reliably produces a tec. The failure bucket is
+# fed only by ledger-entering results, so tem*/tef* (preflight) and tesSUCCESS
+# no-ops don't satisfy it — they feed seen + the submit-time internal-error check.
+# Generative fuzz mostly yields tem*/tef*, so it doesn't lift these out of the set.
+# - SignerListSet: fake AccountIDs are accepted as phantom accounts; quorum/weights
+#   stay in bounds, so every curated vector reaches tesSUCCESS.
+# - MPTokenIssuanceCreate: a fresh issuance from a funded account succeeds; curated
+#   vectors + fuzz are tem-only (the reserve/dir tecs need an exhausted account).
+# - AccountSet: every malformation is preflight tem (bad TransferRate/TickSize,
+#   set==clear flag); the lone tec (tecNO_PERMISSION) comes from OTHER txns.
+# - SetRegularKey: self-key is temBAD_REGKEY; a fake (unfunded) key just succeeds.
+# - TrustSet: self-trust is temDST_IS_SRC; no tec is reachable with funded accounts.
+# - TicketCreate: bad count is temINVALID_COUNT; reserve tecs need an exhausted account.
+# - NFTokenCancelOffer: canceling an unknown offer id is a tesSUCCESS no-op.
 _NO_FAILURE_TYPES = {
     "SignerListSet",
     "MPTokenIssuanceCreate",
+    "AccountSet",
+    "SetRegularKey",
+    "TrustSet",
+    "TicketCreate",
+    "NFTokenCancelOffer",
 }
 
 # Types that effectively never succeed in this test environment:

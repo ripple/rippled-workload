@@ -7,14 +7,15 @@ Antithesis workload generator for rippled fuzzing. FastAPI server emits random X
 `direnv allow` once — `.envrc` auto-loads the flake devshell (Python, uv, ruff, mypy, basedpyright, `scripts/` on PATH) on every `cd` into the tree, and `uv sync`s the venv. Without direnv, prefix commands with `nix develop --command` (what CI does). With the env active:
 
 ```bash
-check-imports      # imports resolve (~2s)
-check-endpoints    # endpoints register (~3s)
+check-imports        # imports resolve (~2s)
+check-endpoints      # endpoints register (~3s)
+check-fuzz-coverage  # every _faulty wires generative fuzz (~2s)
 ```
 
 ## Add a transaction type
 
 1. `params.py` — parameter generators for every randomizable field.
-2. `transactions/<name>.py` — dispatch + `_valid` + `_faulty`:
+2. `transactions/<name>.py` — dispatch + `_valid` + `_faulty`, sharing a `_<name>_base()` builder. `_faulty` MUST include a `"fuzz"` choice (see Generative fuzzing) plus ≥1 curated tec vector:
    ```python
    async def escrow_create(accounts, escrows, client):
        if params.should_send_faulty():
@@ -28,7 +29,7 @@ check-endpoints    # endpoints register (~3s)
 7. `scripts/check-endpoints` — add the endpoint path to `expected`.
 8. `transactions/tickets.py` — classify in `_TICKET_BUILDERS` or `_TICKET_EXCLUDED`. Builders take a `TicketCtx` (src/dst, `common`, workload state) and return a `Transaction` or `None`. Only types that can't be built from the ctx (need object IDs, cosign, circular, batch) go in `_TICKET_EXCLUDED`. Every `REGISTRY` type must be in one; else `check_ticket_coverage` fires `unreachable : ticket_coverage_missing`.
 9. `setup.py` — creation logic if other transactions depend on the object.
-10. Run `check-imports` and `check-endpoints`.
+10. Run `check-imports`, `check-endpoints`, and `check-fuzz-coverage`.
 
 ## Patterns
 
@@ -53,10 +54,12 @@ Return early silently on empty state — never raise, never log. Non-XRPL except
 ### Faulty handlers
 One random mutation via `choice()`; never raise; same preconditions as `_valid`. Mutations: `fake_id()`, `zero_domain_id()` (→ `temMALFORMED`), non-owner submit, zero/negative amounts, mismatched assets, overdraw. Keep overdraw/state-aware mutations out of `_valid`.
 
-`tem*`/`tef*` vectors never enter a ledger, so they feed only `seen` + the submit-time `no_internal_rippled_error_submit` check — NOT the `success`/`failure` buckets. Keep ≥1 tec-producing vector per `_faulty` or `sometimes(failure)` starves.
+`tem*`/`tef*` vectors never enter a ledger, so they feed only `seen` + the submit-time `no_internal_rippled_error_submit` check — NOT the `success`/`failure` buckets. Keep ≥1 tec-producing vector per `_faulty` or `sometimes(failure)` starves. When no tec is reachable (e.g. malformations are all tem, or the "fault" is a tesSUCCESS no-op), add the type to `assertions._NO_FAILURE_TYPES` with a one-line reason instead.
 
 ### Generative fuzzing (`fuzz.py`)
-`submit_fuzzed(name, base, client, wallet)` applies 1–3 type-inferred mutations to a valid base's dict (boundary/zero/max, hostile hashes/accounts, empty/oversize/duplicate arrays, field drops), keeping it encodable and signed so it reaches preflight/preclaim/doApply. Leaves auth/sequence/fee intact (`_PROTECTED`). Rides `submit_raw`; emits `workload::fuzz` (+ `workload::fuzz_skipped`). Wired as one `"fuzz"` choice alongside curated mutations (share a `_*_base()` builder).
+`submit_fuzzed(name, base, client, wallet)` applies 1–3 type-inferred mutations to a valid base's dict (boundary/zero/max, hostile hashes/accounts, empty/oversize/duplicate arrays, field drops), keeping it encodable and signed so it reaches preflight/preclaim/doApply. Leaves auth/sequence/fee intact (`_PROTECTED`). Rides `submit_raw`; emits `workload::fuzz` (+ `workload::fuzz_skipped`).
+
+Wired as one `"fuzz"` choice in **every** `_faulty`, alongside curated mutations sharing a `_*_base()` builder — `check-fuzz-coverage` fails CI for any `_faulty` lacking it. Because fuzz rides single-wallet `submit_raw`, it can't sign txns needing a counterparty co-sign: `LoanSet` (broker co-sign) is the sole exclusion, listed in `check-fuzz-coverage`. `Batch` is single-account so it fuzzes the outer dict; multi-account batches would need `BatchSigners`.
 
 ### LoanSet co-signing
 Dual sign (borrower + broker): `autofill_and_sign` → `sign_loan_set_by_counterparty` → `xrpl_submit`, then `tx_submitted("LoanSet", txn, result)`. Setup direct paths (`setup.py` co-sign, `_probe_node`) call `assert_no_internal_error_submit` and emit `setup_*` instead.

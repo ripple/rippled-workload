@@ -11,8 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: imports + endpoints
-        run: nix develop --command bash -c "scripts/check-imports && scripts/check-endpoints"
+      - name: imports + endpoints + fuzz coverage
+        run: nix develop --command bash -c "scripts/check-imports && scripts/check-endpoints && scripts/check-fuzz-coverage"
       - name: lint + types
         run: |
           nix develop --command bash -c "cd workload && \

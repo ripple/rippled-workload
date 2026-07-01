@@ -15,9 +15,11 @@ from xrpl.models.transactions import (
 )
 from xrpl.models.transactions.loan_manage import LoanManageFlag
 from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
+from xrpl.wallet import Wallet
 
 from workload import params
 from workload.assertions import tx_submitted
+from workload.fuzz import submit_fuzzed
 from workload.models import Loan, LoanBroker, UserAccount, Vault
 from workload.randoms import choice, randint
 from workload.submit import submit_tx
@@ -36,17 +38,15 @@ async def loan_broker_set(
     return await _loan_broker_set_valid(accounts, vaults, loan_brokers, client)
 
 
-async def _loan_broker_set_valid(
+def _loan_broker_set_base(
     accounts: dict[str, UserAccount],
     vaults: list[Vault],
-    loan_brokers: list[LoanBroker],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[LoanBrokerSet, Wallet] | None:
     if not vaults:
-        return
+        return None
     vault = choice(vaults)
     if vault.owner not in accounts:
-        return
+        return None
     owner = accounts[vault.owner]
     txn = LoanBrokerSet(
         account=owner.address,
@@ -58,7 +58,20 @@ async def _loan_broker_set_valid(
         debt_maximum=params.loan_broker_debt_maximum(),
         data=params.loan_broker_data(),
     )
-    await submit_tx("LoanBrokerSet", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _loan_broker_set_valid(
+    accounts: dict[str, UserAccount],
+    vaults: list[Vault],
+    loan_brokers: list[LoanBroker],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _loan_broker_set_base(accounts, vaults)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("LoanBrokerSet", txn, client, wallet)
 
 
 async def _loan_broker_set_faulty(
@@ -70,7 +83,15 @@ async def _loan_broker_set_faulty(
     if not accounts:
         return
     acc = choice(list(accounts.values()))
-    mutation = choice(["nonexistent_vault", "cover_rate_asymmetry", "non_vault_owner"])
+    mutation = choice(["fuzz", "nonexistent_vault", "cover_rate_asymmetry", "non_vault_owner"])
+
+    if mutation == "fuzz":
+        built = _loan_broker_set_base(accounts, vaults)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("LoanBrokerSet", base, client, wallet)
+        return
 
     if mutation == "nonexistent_vault":
         txn = LoanBrokerSet(
@@ -133,20 +154,30 @@ async def loan_broker_delete(
     return await _loan_broker_delete_valid(accounts, loan_brokers, client)
 
 
-async def _loan_broker_delete_valid(
-    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
-) -> None:
+def _loan_broker_delete_base(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker]
+) -> tuple[LoanBrokerDelete, Wallet] | None:
     if not loan_brokers:
-        return
+        return None
     broker = choice(loan_brokers)
     if broker.owner not in accounts:
-        return
+        return None
     owner = accounts[broker.owner]
     txn = LoanBrokerDelete(
         account=owner.address,
         loan_broker_id=broker.loan_broker_id,
     )
-    await submit_tx("LoanBrokerDelete", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _loan_broker_delete_valid(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
+    built = _loan_broker_delete_base(accounts, loan_brokers)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("LoanBrokerDelete", txn, client, wallet)
 
 
 async def _loan_broker_delete_faulty(
@@ -154,7 +185,15 @@ async def _loan_broker_delete_faulty(
 ) -> None:
     if not accounts:
         return
-    mutation = choice(["nonexistent_broker", "non_owner"])
+    mutation = choice(["fuzz", "nonexistent_broker", "non_owner"])
+
+    if mutation == "fuzz":
+        built = _loan_broker_delete_base(accounts, loan_brokers)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("LoanBrokerDelete", base, client, wallet)
+        return
 
     if mutation == "nonexistent_broker":
         acc = choice(list(accounts.values()))
@@ -190,21 +229,31 @@ async def loan_broker_cover_deposit(
     return await _loan_broker_cover_deposit_valid(accounts, loan_brokers, client)
 
 
-async def _loan_broker_cover_deposit_valid(
-    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
-) -> None:
+def _loan_broker_cover_deposit_base(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker]
+) -> tuple[LoanBrokerCoverDeposit, Wallet] | None:
     if not loan_brokers:
-        return
+        return None
     broker = choice(loan_brokers)
     if broker.owner not in accounts:
-        return
+        return None
     owner = accounts[broker.owner]
     txn = LoanBrokerCoverDeposit(
         account=owner.address,
         loan_broker_id=broker.loan_broker_id,
         amount=params.loan_cover_deposit_amount(),
     )
-    await submit_tx("LoanBrokerCoverDeposit", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _loan_broker_cover_deposit_valid(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
+    built = _loan_broker_cover_deposit_base(accounts, loan_brokers)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("LoanBrokerCoverDeposit", txn, client, wallet)
 
 
 async def _loan_broker_cover_deposit_faulty(
@@ -213,7 +262,15 @@ async def _loan_broker_cover_deposit_faulty(
     if not accounts:
         return
     acc = choice(list(accounts.values()))
-    mutation = choice(["nonexistent_broker", "zero_deposit"])
+    mutation = choice(["fuzz", "nonexistent_broker", "zero_deposit"])
+
+    if mutation == "fuzz":
+        built = _loan_broker_cover_deposit_base(accounts, loan_brokers)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("LoanBrokerCoverDeposit", base, client, wallet)
+        return
 
     if mutation == "nonexistent_broker":
         txn = LoanBrokerCoverDeposit(
@@ -260,21 +317,31 @@ def _state_aware_cover_withdraw_amount(broker: LoanBroker) -> str:
     return str(max(1, broker.cover_balance // 4))
 
 
-async def _loan_broker_cover_withdraw_valid(
-    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
-) -> None:
+def _loan_broker_cover_withdraw_base(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker]
+) -> tuple[LoanBrokerCoverWithdraw, Wallet] | None:
     if not loan_brokers:
-        return
+        return None
     broker = choice(loan_brokers)
     if broker.owner not in accounts:
-        return
+        return None
     owner = accounts[broker.owner]
     txn = LoanBrokerCoverWithdraw(
         account=owner.address,
         loan_broker_id=broker.loan_broker_id,
         amount=_state_aware_cover_withdraw_amount(broker),
     )
-    await submit_tx("LoanBrokerCoverWithdraw", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _loan_broker_cover_withdraw_valid(
+    accounts: dict[str, UserAccount], loan_brokers: list[LoanBroker], client: AsyncJsonRpcClient
+) -> None:
+    built = _loan_broker_cover_withdraw_base(accounts, loan_brokers)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("LoanBrokerCoverWithdraw", txn, client, wallet)
 
 
 async def _loan_broker_cover_withdraw_faulty(
@@ -282,7 +349,15 @@ async def _loan_broker_cover_withdraw_faulty(
 ) -> None:
     if not accounts:
         return
-    mutation = choice(["nonexistent_broker", "excessive_withdrawal", "overdraw"])
+    mutation = choice(["fuzz", "nonexistent_broker", "excessive_withdrawal", "overdraw"])
+
+    if mutation == "fuzz":
+        built = _loan_broker_cover_withdraw_base(accounts, loan_brokers)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("LoanBrokerCoverWithdraw", base, client, wallet)
+        return
 
     if mutation == "overdraw":
         if not loan_brokers:
@@ -441,22 +516,32 @@ async def loan_delete(
     return await _loan_delete_valid(accounts, loans, client)
 
 
-async def _loan_delete_valid(
-    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
-) -> None:
+def _loan_delete_base(
+    accounts: dict[str, UserAccount], loans: list[Loan]
+) -> tuple[LoanDelete, Wallet] | None:
     if not loans:
-        return
+        return None
     # Prefer paid-off loans; loans with debt return tecHAS_OBLIGATIONS.
     paid_off = [ln for ln in loans if ln.principal <= 0 and ln.borrower in accounts]
     loan = choice(paid_off) if paid_off else choice(loans)
     if loan.borrower not in accounts:
-        return
+        return None
     borrower = accounts[loan.borrower]
     txn = LoanDelete(
         account=borrower.address,
         loan_id=loan.loan_id,
     )
-    await submit_tx("LoanDelete", txn, client, borrower.wallet)
+    return txn, borrower.wallet
+
+
+async def _loan_delete_valid(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
+    built = _loan_delete_base(accounts, loans)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("LoanDelete", txn, client, wallet)
 
 
 async def _loan_delete_faulty(
@@ -464,7 +549,15 @@ async def _loan_delete_faulty(
 ) -> None:
     if not accounts:
         return
-    mutation = choice(["nonexistent_loan", "non_borrower"])
+    mutation = choice(["fuzz", "nonexistent_loan", "non_borrower"])
+
+    if mutation == "fuzz":
+        built = _loan_delete_base(accounts, loans)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("LoanDelete", base, client, wallet)
+        return
 
     if mutation == "nonexistent_loan":
         acc = choice(list(accounts.values()))
@@ -512,25 +605,37 @@ def _state_aware_manage_flag(loan: Loan) -> LoanManageFlag:
     return choice([LoanManageFlag.TF_LOAN_IMPAIR, LoanManageFlag.TF_LOAN_DEFAULT])
 
 
-async def _loan_manage_valid(
+def _loan_manage_base(
     accounts: dict[str, UserAccount],
     loan_brokers: list[LoanBroker],
     loans: list[Loan],
-    client: AsyncJsonRpcClient,
-) -> None:
+) -> tuple[LoanManage, Wallet] | None:
     if not loans or not loan_brokers:
-        return
+        return None
     loan = choice(loans)
     broker = next((b for b in loan_brokers if b.loan_broker_id == loan.loan_broker_id), None)
     if not broker or broker.owner not in accounts:
-        return
+        return None
     owner = accounts[broker.owner]
     txn = LoanManage(
         account=owner.address,
         loan_id=loan.loan_id,
         flags=_state_aware_manage_flag(loan),
     )
-    await submit_tx("LoanManage", txn, client, owner.wallet)
+    return txn, owner.wallet
+
+
+async def _loan_manage_valid(
+    accounts: dict[str, UserAccount],
+    loan_brokers: list[LoanBroker],
+    loans: list[Loan],
+    client: AsyncJsonRpcClient,
+) -> None:
+    built = _loan_manage_base(accounts, loan_brokers, loans)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("LoanManage", txn, client, wallet)
 
 
 async def _loan_manage_faulty(
@@ -541,7 +646,15 @@ async def _loan_manage_faulty(
 ) -> None:
     if not accounts:
         return
-    mutation = choice(["nonexistent_loan", "non_broker_owner"])
+    mutation = choice(["fuzz", "nonexistent_loan", "non_broker_owner"])
+
+    if mutation == "fuzz":
+        built = _loan_manage_base(accounts, loan_brokers, loans)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("LoanManage", base, client, wallet)
+        return
 
     if mutation == "nonexistent_loan":
         acc = choice(list(accounts.values()))
@@ -601,21 +714,31 @@ def _state_aware_pay_amount(loan: Loan) -> str:
     return params.loan_pay_amount()
 
 
-async def _loan_pay_valid(
-    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
-) -> None:
+def _loan_pay_base(
+    accounts: dict[str, UserAccount], loans: list[Loan]
+) -> tuple[LoanPay, Wallet] | None:
     if not loans:
-        return
+        return None
     loan = choice(loans)
     if loan.borrower not in accounts:
-        return
+        return None
     borrower = accounts[loan.borrower]
     txn = LoanPay(
         account=borrower.address,
         loan_id=loan.loan_id,
         amount=_state_aware_pay_amount(loan),
     )
-    await submit_tx("LoanPay", txn, client, borrower.wallet)
+    return txn, borrower.wallet
+
+
+async def _loan_pay_valid(
+    accounts: dict[str, UserAccount], loans: list[Loan], client: AsyncJsonRpcClient
+) -> None:
+    built = _loan_pay_base(accounts, loans)
+    if built is None:
+        return
+    txn, wallet = built
+    await submit_tx("LoanPay", txn, client, wallet)
 
 
 async def _loan_pay_faulty(
@@ -623,7 +746,15 @@ async def _loan_pay_faulty(
 ) -> None:
     if not accounts:
         return
-    mutation = choice(["nonexistent_loan", "zero_payment"])
+    mutation = choice(["fuzz", "nonexistent_loan", "zero_payment"])
+
+    if mutation == "fuzz":
+        built = _loan_pay_base(accounts, loans)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("LoanPay", base, client, wallet)
+        return
 
     if mutation == "nonexistent_loan":
         acc = choice(list(accounts.values()))

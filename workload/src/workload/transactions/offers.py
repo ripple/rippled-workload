@@ -8,8 +8,10 @@ from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.currencies import IssuedCurrency, MPTCurrency
 from xrpl.models.transactions import OfferCancel, OfferCreate
 from xrpl.models.transactions.offer_create import OfferCreateFlag
+from xrpl.wallet import Wallet
 
 from workload import params
+from workload.fuzz import submit_fuzzed
 from workload.models import AMM, TrustLine, UserAccount
 from workload.randoms import choice, randint, random, sample
 from workload.submit import submit_tx
@@ -100,36 +102,43 @@ async def offer_create(
     return await _offer_create_valid(accounts, amms, trust_lines, client)
 
 
+def _offer_create_base(
+    accounts: dict[str, UserAccount],
+    amms: list[AMM],
+    trust_lines: list[TrustLine],
+) -> tuple[OfferCreate, Wallet] | None:
+    """Valid OfferCreate against an IOU/XRP AMM pair + wallet; shared by valid and fuzz."""
+    iou_amms = _non_mpt_amms(amms)
+    if not iou_amms:
+        return None
+    amm = choice(iou_amms)
+    src = _find_account_for_amm(accounts, trust_lines, amm)
+    if not src:
+        return None
+    pair = _make_offer_amounts(amm)
+    if not pair:
+        return None
+    taker_gets, taker_pays = pair
+    txn = OfferCreate(
+        account=src.address,
+        taker_gets=taker_gets,
+        taker_pays=taker_pays,
+        flags=_random_flag(),
+    )
+    return txn, src.wallet
+
+
 async def _offer_create_valid(
     accounts: dict[str, UserAccount],
     amms: list[AMM],
     trust_lines: list[TrustLine],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not amms:
+    built = _offer_create_base(accounts, amms, trust_lines)
+    if built is None:
         return
-
-    iou_amms = _non_mpt_amms(amms)
-    if not iou_amms:
-        return
-
-    amm = choice(iou_amms)
-    src = _find_account_for_amm(accounts, trust_lines, amm)
-    if not src:
-        return
-
-    pair = _make_offer_amounts(amm)
-    if not pair:
-        return
-    taker_gets, taker_pays = pair
-    flag = _random_flag()
-    txn = OfferCreate(
-        account=src.address,
-        taker_gets=taker_gets,
-        taker_pays=taker_pays,
-        flags=flag,
-    )
-    await submit_tx("OfferCreate", txn, client, src.wallet)
+    txn, wallet = built
+    await submit_tx("OfferCreate", txn, client, wallet)
 
 
 async def _offer_create_faulty(
@@ -149,8 +158,17 @@ async def _offer_create_faulty(
             "zero_amount",
             "negative_iou_amount",
             "crossed_offer",
+            "fuzz",
         ]
     )
+    if mutation == "fuzz":
+        built = _offer_create_base(accounts, amms, trust_lines)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("OfferCreate", base, client, wallet)
+        return
+
     if mutation == "non_existent_asset":
         fake = _fake_iou()
         taker_gets = _iou_amount(fake, str(randint(1, 1_000)))
@@ -234,8 +252,23 @@ async def offer_cancel(
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
-        return await _offer_cancel_faulty(accounts, client)
+        return await _offer_cancel_faulty(accounts, offers, client)
     return await _offer_cancel_valid(accounts, offers, client)
+
+
+def _offer_cancel_base(
+    accounts: dict[str, UserAccount],
+    offers: list[dict],
+) -> tuple[OfferCancel, Wallet] | None:
+    """Valid OfferCancel of a tracked resting offer + wallet; shared by valid and fuzz."""
+    if not offers:
+        return None
+    offer = choice(offers)
+    acct = accounts.get(offer["account"])
+    if not acct:
+        return None
+    txn = OfferCancel(account=acct.address, offer_sequence=offer["sequence"])
+    return txn, acct.wallet
 
 
 async def _offer_cancel_valid(
@@ -243,22 +276,16 @@ async def _offer_cancel_valid(
     offers: list[dict],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not offers:
+    built = _offer_cancel_base(accounts, offers)
+    if built is None:
         return
-    offer = choice(offers)
-    acct = accounts.get(offer["account"])
-    if not acct:
-        return
-
-    txn = OfferCancel(
-        account=acct.address,
-        offer_sequence=offer["sequence"],
-    )
-    await submit_tx("OfferCancel", txn, client, acct.wallet)
+    txn, wallet = built
+    await submit_tx("OfferCancel", txn, client, wallet)
 
 
 async def _offer_cancel_faulty(
     accounts: dict[str, UserAccount],
+    offers: list[dict],
     client: AsyncJsonRpcClient,
 ) -> None:
     if not accounts:
@@ -269,8 +296,16 @@ async def _offer_cancel_faulty(
         [
             "non_existent_sequence",
             "cancel_others_offer",
+            "fuzz",
         ]
     )
+    if mutation == "fuzz":
+        built = _offer_cancel_base(accounts, offers)
+        if built is None:
+            return
+        base, wallet = built
+        await submit_fuzzed("OfferCancel", base, client, wallet)
+        return
 
     if mutation == "non_existent_sequence":
         txn = OfferCancel(

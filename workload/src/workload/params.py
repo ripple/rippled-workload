@@ -5,7 +5,7 @@ from workload.randoms import choice, randint, random
 
 # ── Fuzzing ──────────────────────────────────────────────────────────
 def should_send_faulty() -> bool:
-    return random() < 0.01
+    return random() < 0.5
 
 
 def fake_account() -> str:
