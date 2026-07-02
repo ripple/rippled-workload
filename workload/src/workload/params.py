@@ -452,5 +452,12 @@ def confidential_mpt_amount() -> int:
     return randint(1, 10_000)
 
 
+def confidential_fee() -> str:
+    # rippled charges confidential txns base_fee x10; autofill's base fee draws
+    # telINSUF_FEE_P, which never validates and starves sometimes(failure). Fixed
+    # 1000 drops = 10x with headroom for load escalation.
+    return "1000"
+
+
 def confidential_invalid_flags() -> int:
     return choice([0x80000000, 0xFF000000, 0x40000000, randint(1, 0xFFFFFFFF)])

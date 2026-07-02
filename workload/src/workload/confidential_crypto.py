@@ -7,6 +7,9 @@ image it's absent -> ``CRYPTO_AVAILABLE`` False and only faulty paths run.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from xrpl.clients import JsonRpcClient
@@ -45,10 +48,17 @@ SEND_PROOF_SIZE = 946  # Send ZKProof (compact sigma 192 + double bulletproof 75
 CONVERT_BACK_PROOF_SIZE = 816  # ConvertBack ZKProof (compact sigma 128 + bulletproof 688)
 
 
-# ── Sync client for the builders ──────────────────────────────────────
-# prepare_confidential_* need a blocking client; handlers hold an async one, so
-# derive a sync one from its URL and cache it.
+# ── Sync client + worker thread for the builders ──────────────────────
+# prepare_confidential_* are synchronous and their sync JsonRpcClient calls
+# asyncio.run() internally — illegal on the running loop (RuntimeError). One
+# worker thread keeps every builder/crypto call off-loop AND serializes access
+# to the shared secp256k1 context.
 _sync_clients: dict[str, JsonRpcClient] = {}
+_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cmpt-crypto")
+
+
+async def _run[T](fn: Callable[..., T], *args: Any) -> T:
+    return await asyncio.get_running_loop().run_in_executor(_worker, lambda: fn(*args))
 
 
 def sync_client(url: str) -> JsonRpcClient:
@@ -59,22 +69,25 @@ def sync_client(url: str) -> JsonRpcClient:
     return client
 
 
-def account_sequence(url: str, address: str) -> int:
-    """Current Sequence — the builder binds it into the proof, so submit must stamp
-    the same value (a different autofilled one -> tecBAD_PROOF)."""
+def _account_sequence(url: str, address: str) -> int:
     from xrpl.models.requests import AccountInfo
 
     resp = sync_client(url).request(AccountInfo(account=address))
     return int(resp.result["account_data"]["Sequence"])
 
 
-def generate_keypair() -> tuple[str, str]:
+async def account_sequence(url: str, address: str) -> int:
+    """Current Sequence — the builder binds it into the proof, so submit must stamp
+    the same value (a different autofilled one -> tecBAD_PROOF)."""
+    return await _run(_account_sequence, url, address)
+
+
+async def generate_keypair() -> tuple[str, str]:
     assert _crypto is not None  # callers gate on CRYPTO_AVAILABLE
-    return _crypto.generate_keypair()
+    return await _run(_crypto.generate_keypair)
 
 
-def issuer_encrypted_balance(url: str, holder_address: str, mpt_id: str) -> str:
-    """Holder MPToken's ``IssuerEncryptedBalance`` (Clawback proof input), or ``""``."""
+def _issuer_encrypted_balance(url: str, holder_address: str, mpt_id: str) -> str:
     from xrpl.models.requests import LedgerEntry
     from xrpl.models.requests.ledger_entry import MPToken
 
@@ -84,16 +97,22 @@ def issuer_encrypted_balance(url: str, holder_address: str, mpt_id: str) -> str:
     return resp.result.get("node", {}).get("IssuerEncryptedBalance", "")
 
 
+async def issuer_encrypted_balance(url: str, holder_address: str, mpt_id: str) -> str:
+    """Holder MPToken's ``IssuerEncryptedBalance`` (Clawback proof input), or ``""``."""
+    return await _run(_issuer_encrypted_balance, url, holder_address, mpt_id)
+
+
 # ── Builders (real proofs, valid path only) ──────────────────────────
 # ElGamal keys are explicit params; builders query mutable ledger state, prove,
-# encrypt, and return an UNSIGNED model for submit_tx.
+# encrypt, and return an UNSIGNED model for submit_tx. Send/ConvertBack/Clawback
+# raise ValueError when the on-ledger confidential balance is missing.
 
 
-def build_merge_inbox(url: str, wallet: object, mpt_id: str) -> ConfidentialMPTMergeInbox:
-    return _conf.prepare_confidential_merge_inbox(sync_client(url), wallet, mpt_id)
+async def build_merge_inbox(url: str, wallet: object, mpt_id: str) -> ConfidentialMPTMergeInbox:
+    return await _run(_conf.prepare_confidential_merge_inbox, sync_client(url), wallet, mpt_id)
 
 
-def build_convert(
+async def build_convert(
     url: str,
     wallet: object,
     mpt_id: str,
@@ -102,12 +121,19 @@ def build_convert(
     holder_privkey: str | None = None,
     holder_pubkey: str | None = None,
 ) -> ConfidentialMPTConvert:
-    return _conf.prepare_confidential_convert(
-        sync_client(url), wallet, mpt_id, int(amount), issuer_pubkey, holder_privkey, holder_pubkey
+    return await _run(
+        _conf.prepare_confidential_convert,
+        sync_client(url),
+        wallet,
+        mpt_id,
+        int(amount),
+        issuer_pubkey,
+        holder_privkey,
+        holder_pubkey,
     )
 
 
-def build_convert_back(
+async def build_convert_back(
     url: str,
     wallet: object,
     mpt_id: str,
@@ -116,12 +142,19 @@ def build_convert_back(
     holder_pubkey: str,
     issuer_pubkey: str,
 ) -> ConfidentialMPTConvertBack:
-    return _conf.prepare_confidential_convert_back(
-        sync_client(url), wallet, mpt_id, int(amount), holder_privkey, holder_pubkey, issuer_pubkey
+    return await _run(
+        _conf.prepare_confidential_convert_back,
+        sync_client(url),
+        wallet,
+        mpt_id,
+        int(amount),
+        holder_privkey,
+        holder_pubkey,
+        issuer_pubkey,
     )
 
 
-def build_send(
+async def build_send(
     url: str,
     sender_wallet: object,
     receiver_address: str,
@@ -132,7 +165,8 @@ def build_send(
     receiver_pubkey: str,
     issuer_pubkey: str,
 ) -> ConfidentialMPTSend:
-    return _conf.prepare_confidential_send(
+    return await _run(
+        _conf.prepare_confidential_send,
         sync_client(url),
         sender_wallet,
         receiver_address,
@@ -145,7 +179,7 @@ def build_send(
     )
 
 
-def build_clawback(
+async def build_clawback(
     url: str,
     issuer_wallet: object,
     holder_address: str,
@@ -155,7 +189,8 @@ def build_clawback(
     issuer_pubkey: str,
     issuer_encrypted_balance_hex: str,
 ) -> ConfidentialMPTClawback:
-    return _conf.prepare_confidential_clawback(
+    return await _run(
+        _conf.prepare_confidential_clawback,
         sync_client(url),
         issuer_wallet,
         holder_address,

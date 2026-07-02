@@ -41,7 +41,11 @@ async def conf_mpt_merge_inbox(
 
 
 def _merge_inbox_base(account: str, mpt_id: str) -> ConfidentialMPTMergeInbox:
-    return ConfidentialMPTMergeInbox(account=account, mptoken_issuance_id=mpt_id)
+    return ConfidentialMPTMergeInbox(
+        account=account,
+        mptoken_issuance_id=mpt_id,
+        fee=params.confidential_fee(),
+    )
 
 
 async def _merge_inbox_valid(
@@ -56,7 +60,7 @@ async def _merge_inbox_valid(
     if not holders:
         return
     holder = accounts[choice(holders)]
-    base = cc.build_merge_inbox(client.url, holder.wallet, ci.mpt_issuance_id)
+    base = await cc.build_merge_inbox(client.url, holder.wallet, ci.mpt_issuance_id)
     await submit_tx("ConfidentialMPTMergeInbox", base, client, holder.wallet)
 
 
@@ -128,6 +132,7 @@ def _convert_base(account: str, mpt_id: str) -> ConfidentialMPTConvert:
         holder_encrypted_amount=params.confidential_ciphertext(),
         issuer_encrypted_amount=params.confidential_ciphertext(),
         blinding_factor=params.confidential_blinding_factor(),
+        fee=params.confidential_fee(),
     )
 
 
@@ -146,8 +151,8 @@ async def _convert_valid(
         return
     holder = accounts[choice(holders)]
     # Builder binds account Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF).
-    seq = cc.account_sequence(client.url, holder.address)
-    base = cc.build_convert(
+    seq = await cc.account_sequence(client.url, holder.address)
+    base = await cc.build_convert(
         client.url,
         holder.wallet,
         ci.mpt_issuance_id,
@@ -290,6 +295,7 @@ def _send_base(sender: str, destination: str, mpt_id: str) -> ConfidentialMPTSen
         amount_commitment=params.confidential_commitment(),
         balance_commitment=params.confidential_commitment(),
         zk_proof=params.confidential_send_proof(),
+        fee=params.confidential_fee(),
     )
 
 
@@ -319,18 +325,21 @@ async def _send_valid(
     amount = max(1, holder.spending_balance // randint(2, 10))
     # Builder binds account Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF),
     # and stash the plaintext amount keyed by it so _on_conf_send can decrement spending_balance.
-    seq = cc.account_sequence(client.url, sender.address)
-    base = cc.build_send(
-        client.url,
-        sender.wallet,
-        dest_addr,
-        ci.mpt_issuance_id,
-        amount,
-        sk,
-        pk,
-        dest_pk,
-        ci.issuer_pubkey,
-    )
+    seq = await cc.account_sequence(client.url, sender.address)
+    try:
+        base = await cc.build_send(
+            client.url,
+            sender.wallet,
+            dest_addr,
+            ci.mpt_issuance_id,
+            amount,
+            sk,
+            pk,
+            dest_pk,
+            ci.issuer_pubkey,
+        )
+    except ValueError:
+        return  # tracked state ahead of ledger: no on-ledger spending balance yet
     result = await submit_tx("ConfidentialMPTSend", base, client, sender.wallet, seq=seq)
     if result:
         _pending_send_amounts[(sender.address, seq, ci.mpt_issuance_id)] = (amount, dest_addr)
@@ -468,6 +477,7 @@ def _convert_back_base(account: str, mpt_id: str) -> ConfidentialMPTConvertBack:
         blinding_factor=params.confidential_blinding_factor(),
         balance_commitment=params.confidential_commitment(),
         zk_proof=params.confidential_convert_back_proof(),
+        fee=params.confidential_fee(),
     )
 
 
@@ -494,16 +504,19 @@ async def _convert_back_valid(
         return
     amount = max(1, state.spending_balance // randint(2, 10))
     # Builder binds account Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF).
-    seq = cc.account_sequence(client.url, holder.address)
-    base = cc.build_convert_back(
-        client.url,
-        holder.wallet,
-        ci.mpt_issuance_id,
-        amount,
-        sk,
-        pk,
-        ci.issuer_pubkey,
-    )
+    seq = await cc.account_sequence(client.url, holder.address)
+    try:
+        base = await cc.build_convert_back(
+            client.url,
+            holder.wallet,
+            ci.mpt_issuance_id,
+            amount,
+            sk,
+            pk,
+            ci.issuer_pubkey,
+        )
+    except ValueError:
+        return  # tracked state ahead of ledger: no on-ledger spending balance yet
     await submit_tx("ConfidentialMPTConvertBack", base, client, holder.wallet, seq=seq)
 
 
@@ -616,6 +629,7 @@ def _clawback_base(issuer: str, holder: str, mpt_id: str) -> ConfidentialMPTClaw
         mptoken_issuance_id=mpt_id,
         mpt_amount=params.confidential_mpt_amount(),
         zk_proof=params.confidential_clawback_proof(),
+        fee=params.confidential_fee(),
     )
 
 
@@ -642,21 +656,24 @@ async def _clawback_valid(
     holder_addr = choice(holders)
     state = ci.holders[holder_addr]
     # Proof links the holder's on-ledger IssuerEncryptedBalance to the amount; read it, else skip.
-    enc_bal = cc.issuer_encrypted_balance(client.url, holder_addr, ci.mpt_issuance_id)
+    enc_bal = await cc.issuer_encrypted_balance(client.url, holder_addr, ci.mpt_issuance_id)
     if not enc_bal:
         return
     # Builder binds issuer Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF).
-    seq = cc.account_sequence(client.url, issuer.address)
-    base = cc.build_clawback(
-        client.url,
-        issuer.wallet,
-        holder_addr,
-        ci.mpt_issuance_id,
-        state.spending_balance,
-        ci.issuer_privkey,
-        ci.issuer_pubkey,
-        enc_bal,
-    )
+    seq = await cc.account_sequence(client.url, issuer.address)
+    try:
+        base = await cc.build_clawback(
+            client.url,
+            issuer.wallet,
+            holder_addr,
+            ci.mpt_issuance_id,
+            state.spending_balance,
+            ci.issuer_privkey,
+            ci.issuer_pubkey,
+            enc_bal,
+        )
+    except ValueError:
+        return  # issuer account info unavailable (node flake)
     await submit_tx("ConfidentialMPTClawback", base, client, issuer.wallet, seq=seq)
 
 

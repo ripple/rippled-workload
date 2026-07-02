@@ -95,7 +95,9 @@ Five real on-ledger handlers (`transactions/confidential_mpt.py`: MergeInbox, Co
 
 `cc.CRYPTO_AVAILABLE` gates **valid** paths only. Faulty paths aren't gated: trivial-on-curve fixed-length blobs (66B ciphertext, 33B key, bogus proof) reach preclaim → `tecBAD_PROOF`/`temMALFORMED`/`tecOBJECT_NOT_FOUND` with no real crypto. Models validate the lengths rippled enforces, so `confidential_crypto.py` holds the wire-size constants and `params.py` builds faulty bases at them.
 
-Builders (`prepare_confidential_*`) take ElGamal keys explicitly + the sync `client` (they set the confidential fee = `base_fee × 10`; autofill preserves it). `cc.build_*` thread `client.url` + keys from tracked state; Clawback also needs the holder's on-ledger `IssuerEncryptedBalance`.
+Builders (`prepare_confidential_*`) take ElGamal keys explicitly + a **sync** `client` (they set the confidential fee = `base_fee × 10`; autofill preserves it). The sync client calls `asyncio.run()` internally — illegal on the running loop — so every `cc.*` builder/ledger-read is **async**, dispatched to a single worker thread (off-loop + serializes the shared secp256k1 context). `cc.build_*` thread `client.url` + keys from tracked state; Clawback also needs the holder's on-ledger `IssuerEncryptedBalance`. Send/ConvertBack/Clawback builders raise `ValueError` when ledger state is missing — valid paths catch it and return.
+
+**Faulty fee gotcha:** faulty bases must set `fee=params.confidential_fee()` — autofill's base fee draws `telINSUF_FEE_P` (confidential txns cost 10×), and `tel*` never validates, starving `sometimes(failure)`.
 
 Setup (`_setup_confidential_mpt`, chain step 6c): privacy issuances (`TF_MPT_CAN_CONFIDENTIAL_AMOUNT|CAN_CLAWBACK|CAN_TRANSFER`) on `[7..8]`, holders `[72..76]`; crypto steps gated on `CRYPTO_AVAILABLE`. `MPTokenIssuanceSet(issuer_encryption_key=...)` before Convert. Convert binds account Sequence into the proof, so setup/`_convert_valid` stamp `cc.account_sequence` on submit or `tecBAD_PROOF`.
 

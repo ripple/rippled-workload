@@ -306,7 +306,7 @@ async def _setup_confidential_mpt(
         issuer_acc = workload.accounts.get(m.issuer)
         if not issuer_acc:
             continue
-        priv, pub = cc.generate_keypair()
+        priv, pub = await cc.generate_keypair()
         issuer_keys[m.issuer] = (priv, pub)
         issuer_acc.elgamal_private_key = priv
         issuer_acc.elgamal_public_key = pub
@@ -361,7 +361,7 @@ async def _setup_confidential_mpt(
     # ── 5. Holder ElGamal keys ───────────────────────────────────────
     for h_idx in holder_indices:
         holder = accs[h_idx]
-        priv, pub = cc.generate_keypair()
+        priv, pub = await cc.generate_keypair()
         holder.elgamal_private_key = priv
         holder.elgamal_public_key = pub
 
@@ -377,8 +377,8 @@ async def _setup_confidential_mpt(
             if holder.address == m.issuer:
                 continue
             try:
-                holder_seq = cc.account_sequence(client.url, holder.address)
-                base = cc.build_convert(
+                holder_seq = await cc.account_sequence(client.url, holder.address)
+                base = await cc.build_convert(
                     client.url,
                     holder.wallet,
                     m.mpt_issuance_id,
@@ -424,13 +424,21 @@ async def _setup_confidential_mpt(
             holder = accs[h_idx]
             if holder.address == m.issuer:
                 continue
-            merge_txns.append(
-                (
-                    "ConfidentialMPTMergeInbox",
-                    cc.build_merge_inbox(client.url, holder.wallet, m.mpt_issuance_id),
-                    holder.wallet,
+            # Builder does an RPC; a raise here must not abort run_setup (it would
+            # starve every later phase's setup_* assert).
+            try:
+                txn = await cc.build_merge_inbox(client.url, holder.wallet, m.mpt_issuance_id)
+            except Exception as e:
+                send_event(
+                    "workload::setup_error : conf_mpt_merge",
+                    {
+                        "phase": "conf_mpt_merge",
+                        "account": holder.address,
+                        "error": f"{type(e).__name__}: {e}",
+                    },
                 )
-            )
+                continue
+            merge_txns.append(("ConfidentialMPTMergeInbox", txn, holder.wallet))
     summary["conf_mpt_merge"] = await _submit_batch("conf_mpt_merge", merge_txns, client, seq)
 
     # ── Fill tracked issuances with keys + seeded holder balances ────
@@ -666,7 +674,15 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     # ── 6c. Confidential MPT (XLS-0096): privacy issuances + seeded balances
     # Needs authorized funded holders, so runs after public MPT distribution.
-    await _setup_confidential_mpt(workload, accs, summary)
+    # Contained: a raise here must not abort run_setup — the setup_* asserts for
+    # every later phase only fire in the summary loop at the end.
+    try:
+        await _setup_confidential_mpt(workload, accs, summary)
+    except Exception as e:
+        send_event(
+            "workload::setup_error : conf_mpt",
+            {"phase": "conf_mpt", "error": f"{type(e).__name__}: {e}"},
+        )
 
     # ── 7. Vaults: 4 XRP (loan brokers), 2 IOU, 2 MPT ────────────────
     vault_txns = []
