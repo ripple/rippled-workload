@@ -338,8 +338,11 @@ async def _send_valid(
             dest_pk,
             ci.issuer_pubkey,
         )
-    except ValueError:
-        return  # tracked state ahead of ledger: no on-ledger spending balance yet
+    except (ValueError, RuntimeError):
+        # ValueError: no on-ledger spending balance yet. RuntimeError (native -1):
+        # tracked amount > ledger balance under races — the range proof on
+        # (balance - amount) can't prove a negative.
+        return
     result = await submit_tx("ConfidentialMPTSend", base, client, sender.wallet, seq=seq)
     if result:
         _pending_send_amounts[(sender.address, seq, ci.mpt_issuance_id)] = (amount, dest_addr)
@@ -515,8 +518,8 @@ async def _convert_back_valid(
             pk,
             ci.issuer_pubkey,
         )
-    except ValueError:
-        return  # tracked state ahead of ledger: no on-ledger spending balance yet
+    except (ValueError, RuntimeError):
+        return  # no ledger balance yet, or amount > ledger balance raced (native -1)
     await submit_tx("ConfidentialMPTConvertBack", base, client, holder.wallet, seq=seq)
 
 
@@ -654,10 +657,18 @@ async def _clawback_valid(
     if not holders:
         return
     holder_addr = choice(holders)
-    state = ci.holders[holder_addr]
     # Proof links the holder's on-ledger IssuerEncryptedBalance to the amount; read it, else skip.
     enc_bal = await cc.issuer_encrypted_balance(client.url, holder_addr, ci.mpt_issuance_id)
     if not enc_bal:
+        return
+    # The equality proof must match the encrypted balance EXACTLY; tracked
+    # spending_balance drifts under concurrent sends/converts (-> tecBAD_PROOF),
+    # so decrypt the ledger truth and claw that.
+    try:
+        amount = await cc.decrypt(ci.issuer_privkey, enc_bal)
+    except (ValueError, RuntimeError):
+        return  # balance outside the decrypt search range
+    if amount <= 0:
         return
     # Builder binds issuer Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF).
     seq = await cc.account_sequence(client.url, issuer.address)
@@ -667,13 +678,13 @@ async def _clawback_valid(
             issuer.wallet,
             holder_addr,
             ci.mpt_issuance_id,
-            state.spending_balance,
+            amount,
             ci.issuer_privkey,
             ci.issuer_pubkey,
             enc_bal,
         )
-    except ValueError:
-        return  # issuer account info unavailable (node flake)
+    except (ValueError, RuntimeError):
+        return  # issuer account info unavailable / proof generation raced
     await submit_tx("ConfidentialMPTClawback", base, client, issuer.wallet, seq=seq)
 
 

@@ -87,6 +87,17 @@ async def generate_keypair() -> tuple[str, str]:
     return await _run(_crypto.generate_keypair)
 
 
+def _decrypt(privkey: str, ciphertext: str) -> int:
+    assert _crypto is not None
+    half = len(ciphertext) // 2
+    return int(_crypto.decrypt(privkey, ciphertext[:half], ciphertext[half:]))
+
+
+async def decrypt(privkey: str, ciphertext: str) -> int:
+    """Brute-force ElGamal decrypt of a c1||c2 hex blob — O(value), 1M search cap."""
+    return await _run(_decrypt, privkey, ciphertext)
+
+
 def _issuer_encrypted_balance(url: str, holder_address: str, mpt_id: str) -> str:
     from xrpl.models.requests import LedgerEntry
     from xrpl.models.requests.ledger_entry import MPToken
