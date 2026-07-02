@@ -19,6 +19,8 @@ from workload.models import (
     DID,
     NFT,
     Check,
+    ConfidentialHolder,
+    ConfidentialMPTIssuance,
     Credential,
     Delegate,
     Escrow,
@@ -44,6 +46,13 @@ from workload.transactions.amm import (
 from workload.transactions.batch import batch_random
 from workload.transactions.checks import check_cancel, check_cash, check_create
 from workload.transactions.clawback import clawback
+from workload.transactions.confidential_mpt import (
+    conf_mpt_clawback,
+    conf_mpt_convert,
+    conf_mpt_convert_back,
+    conf_mpt_merge_inbox,
+    conf_mpt_send,
+)
 from workload.transactions.credentials import (
     credential_accept,
     credential_create,
@@ -259,6 +268,86 @@ def _on_mpt_destroy(w: Workload, tx: dict, meta: dict) -> None:
     mpt_id = tx.get("MPTokenIssuanceID")
     if mpt_id:
         w.mpt_issuances[:] = [m for m in w.mpt_issuances if m.mpt_issuance_id != mpt_id]
+
+
+# ── Confidential MPT (XLS-0096) state updaters ───────────────────────
+
+
+def _find_conf_issuance(w: Workload, mpt_id: str) -> ConfidentialMPTIssuance | None:
+    return next(
+        (ci for ci in w.confidential_mpt_issuances if ci.mpt_issuance_id == mpt_id),
+        None,
+    )
+
+
+def _on_conf_convert(w: Workload, tx: dict, meta: dict) -> None:
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    account = tx["Account"]
+    amount = int(tx.get("MPTAmount", 0))
+    holder = ci.holders.get(account)
+    if holder:
+        holder.spending_balance += amount
+        holder.version += 1
+    else:
+        ci.holders[account] = ConfidentialHolder(
+            address=account, spending_balance=amount, version=1
+        )
+
+
+def _on_conf_merge_inbox(w: Workload, tx: dict, meta: dict) -> None:
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    holder = ci.holders.get(tx["Account"])
+    if holder:
+        holder.spending_balance += holder.inbox_balance
+        holder.inbox_balance = 0
+        holder.version += 1
+
+
+def _on_conf_send(w: Workload, tx: dict, meta: dict) -> None:
+    """Amount is encrypted on-chain, so recover it from the submit-time side-channel;
+    only the sender's version bumps (dest inbox bumps on MergeInbox)."""
+    from workload.transactions.confidential_mpt import _pending_send_amounts
+
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    account = tx["Account"]
+    key = (account, tx.get("Sequence", 0), tx.get("MPTokenIssuanceID", ""))
+    pending = _pending_send_amounts.pop(key, None)
+    sender = ci.holders.get(account)
+    if not sender:
+        return
+    if pending:
+        amount, dest_addr = pending
+        sender.spending_balance = max(0, sender.spending_balance - amount)
+        dest = ci.holders.get(dest_addr)
+        if dest:
+            dest.inbox_balance += amount
+    sender.version += 1
+
+
+def _on_conf_convert_back(w: Workload, tx: dict, meta: dict) -> None:
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    holder = ci.holders.get(tx["Account"])
+    if holder:
+        holder.spending_balance = max(0, holder.spending_balance - int(tx.get("MPTAmount", 0)))
+        holder.version += 1
+
+
+def _on_conf_clawback(w: Workload, tx: dict, meta: dict) -> None:
+    ci = _find_conf_issuance(w, tx.get("MPTokenIssuanceID", ""))
+    if not ci:
+        return
+    holder = ci.holders.get(tx.get("Holder", ""))
+    if holder:
+        holder.spending_balance = max(0, holder.spending_balance - int(tx.get("MPTAmount", 0)))
+        holder.version += 1
 
 
 def _on_credential_create(w: Workload, tx: dict, meta: dict) -> None:
@@ -735,6 +824,41 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         mpt_destroy,
         lambda w: (w.accounts, w.mpt_issuances, w.client),
         _on_mpt_destroy,
+    ),
+    (
+        "ConfidentialMPTMergeInbox",
+        "/confidential/merge_inbox/random",
+        conf_mpt_merge_inbox,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_merge_inbox,
+    ),
+    (
+        "ConfidentialMPTConvert",
+        "/confidential/convert/random",
+        conf_mpt_convert,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_convert,
+    ),
+    (
+        "ConfidentialMPTSend",
+        "/confidential/send/random",
+        conf_mpt_send,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_send,
+    ),
+    (
+        "ConfidentialMPTConvertBack",
+        "/confidential/convert_back/random",
+        conf_mpt_convert_back,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_convert_back,
+    ),
+    (
+        "ConfidentialMPTClawback",
+        "/confidential/clawback/random",
+        conf_mpt_clawback,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_clawback,
     ),
     (
         "CredentialCreate",

@@ -24,6 +24,7 @@ from workload.models import (
     DID,
     NFT,
     Check,
+    ConfidentialMPTIssuance,
     Credential,
     Delegate,
     Escrow,
@@ -53,6 +54,7 @@ class Workload:
         self.vaults: list[Vault] = []
         self.domains: list[PermissionedDomain] = []
         self.mpt_issuances: list[MPTokenIssuance] = []
+        self.confidential_mpt_issuances: list[ConfidentialMPTIssuance] = []
         self.delegates: list[Delegate] = []
         self.dids: list[DID] = []
         self.loan_brokers: list[LoanBroker] = []

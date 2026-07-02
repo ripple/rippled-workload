@@ -48,9 +48,10 @@ from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredentia
 from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
+import workload.confidential_crypto as cc
 from workload import params
 from workload.assertions import assert_no_internal_error_submit
-from workload.models import UserAccount
+from workload.models import ConfidentialHolder, ConfidentialMPTIssuance, UserAccount
 from workload.sequence import SequenceTracker
 from workload.submit import submit_tx
 
@@ -80,6 +81,12 @@ _GATEWAYS = [
 # Accounts that receive IOU/MPT balances
 _HOLDER_RANGE = range(62, 72)  # accounts[62..71]
 _VAULT_RANGE = range(10, 17)  # accounts[10..16]
+
+# Confidential MPT (XLS-0096): issuers + holders on indices unused elsewhere.
+_CONF_ISSUER_RANGE = range(7, 9)  # accounts[7..8]
+_CONF_HOLDER_RANGE = range(72, 77)  # accounts[72..76]
+_CONF_MPT_DISTRIBUTION_AMOUNT = "100000"
+_CONF_MPT_CONVERT_AMOUNT = 5000
 
 
 def _accounts_list(workload: Workload) -> list[UserAccount]:
@@ -183,8 +190,7 @@ async def _submit_loan(
 
 
 async def _probe_node(workload: Workload) -> None:
-    # A 'full' sync report doesn't guarantee submit acceptance; retry until a
-    # no-op AccountSet is accepted (autofill/submit have stricter sync needs).
+    # 'full' sync doesn't guarantee submit acceptance; retry until a no-op AccountSet is accepted.
     max_wait = 300
     start = asyncio.get_event_loop().time()
     attempt = 0
@@ -233,6 +239,221 @@ async def _probe_node(workload: Workload) -> None:
         delay = min(delay * 1.5, 10)
 
 
+async def _setup_confidential_mpt(
+    workload: Workload,
+    accs: list[UserAccount],
+    summary: dict[str, int],
+) -> None:
+    """Seed Confidential MPT (XLS-0096) state; crypto steps run only when cc.CRYPTO_AVAILABLE."""
+    client = workload.client
+    seq = workload.seq
+
+    issuer_indices = [i for i in _CONF_ISSUER_RANGE if i < len(accs)]
+    holder_indices = [i for i in _CONF_HOLDER_RANGE if i < len(accs)]
+    if not issuer_indices or not holder_indices:
+        return
+
+    # ── 1. Create privacy-enabled MPT issuances (always) ─────────────
+    conf_flags = (
+        MPTokenIssuanceCreateFlag.TF_MPT_CAN_CONFIDENTIAL_AMOUNT
+        | MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
+        | MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER
+    )
+    before = len(workload.mpt_issuances)
+    summary["conf_mpt_issuances"] = await _submit_batch(
+        "conf_mpt",
+        [
+            (
+                "MPTokenIssuanceCreate",
+                MPTokenIssuanceCreate(account=accs[i].address, flags=conf_flags),
+                accs[i].wallet,
+            )
+            for i in issuer_indices
+        ],
+        client,
+        seq,
+    )
+    await _wait_for_state(
+        workload.mpt_issuances, before + summary["conf_mpt_issuances"], "conf_mpt_issuances"
+    )
+
+    conf_issuer_addrs = {accs[i].address for i in issuer_indices}
+    conf_issuances = [m for m in workload.mpt_issuances if m.issuer in conf_issuer_addrs]
+    if not conf_issuances:
+        return
+
+    # Track issuances even without crypto so handlers can find them.
+    issuer_keys: dict[str, tuple[str, str]] = {}
+    tracked = {ci.mpt_issuance_id for ci in workload.confidential_mpt_issuances}
+    for m in conf_issuances:
+        if m.mpt_issuance_id in tracked:
+            continue
+        workload.confidential_mpt_issuances.append(
+            ConfidentialMPTIssuance(
+                issuer=m.issuer,
+                mpt_issuance_id=m.mpt_issuance_id,
+                issuer_privkey="",
+                issuer_pubkey="",
+            )
+        )
+
+    if not cc.CRYPTO_AVAILABLE:
+        return
+
+    # ── 2. Issuer ElGamal keys: generate + register on-ledger ────────
+    set_txns: list[tuple[str, Transaction, Wallet]] = []
+    for m in conf_issuances:
+        issuer_acc = workload.accounts.get(m.issuer)
+        if not issuer_acc:
+            continue
+        priv, pub = cc.generate_keypair()
+        issuer_keys[m.issuer] = (priv, pub)
+        issuer_acc.elgamal_private_key = priv
+        issuer_acc.elgamal_public_key = pub
+        set_txns.append(
+            (
+                "MPTokenIssuanceSet",
+                MPTokenIssuanceSet(
+                    account=m.issuer,
+                    mptoken_issuance_id=m.mpt_issuance_id,
+                    issuer_encryption_key=pub,
+                ),
+                issuer_acc.wallet,
+            )
+        )
+    summary["conf_mpt_issuer_keys"] = await _submit_batch("conf_mpt_keys", set_txns, client, seq)
+
+    # ── 3. Authorize holders + 4. distribute public MPT balances ─────
+    auth_txns: list[tuple[str, Transaction, Wallet]] = []
+    dist_txns: list[tuple[str, Transaction, Wallet]] = []
+    for m in conf_issuances:
+        issuer_acc = workload.accounts.get(m.issuer)
+        if not issuer_acc:
+            continue
+        for h_idx in holder_indices:
+            holder = accs[h_idx]
+            if holder.address == m.issuer:
+                continue
+            auth_txns.append(
+                (
+                    "MPTokenAuthorize",
+                    MPTokenAuthorize(account=holder.address, mptoken_issuance_id=m.mpt_issuance_id),
+                    holder.wallet,
+                )
+            )
+            dist_txns.append(
+                (
+                    "Payment",
+                    Payment(
+                        account=m.issuer,
+                        destination=holder.address,
+                        amount=MPTAmount(
+                            mpt_issuance_id=m.mpt_issuance_id,
+                            value=_CONF_MPT_DISTRIBUTION_AMOUNT,
+                        ),
+                    ),
+                    issuer_acc.wallet,
+                )
+            )
+    summary["conf_mpt_auth"] = await _submit_batch("conf_mpt_auth", auth_txns, client, seq)
+    summary["conf_mpt_dist"] = await _submit_batch("conf_mpt_dist", dist_txns, client, seq)
+
+    # ── 5. Holder ElGamal keys ───────────────────────────────────────
+    for h_idx in holder_indices:
+        holder = accs[h_idx]
+        priv, pub = cc.generate_keypair()
+        holder.elgamal_private_key = priv
+        holder.elgamal_public_key = pub
+
+    # ── 6. Initial public->confidential Convert (matched sequence) ───
+    # First Convert also registers the holder encryption key on its MPToken.
+    await asyncio.sleep(3)
+    convert_ok = 0
+    for m in conf_issuances:
+        if m.issuer not in issuer_keys:
+            continue
+        for h_idx in holder_indices:
+            holder = accs[h_idx]
+            if holder.address == m.issuer:
+                continue
+            try:
+                holder_seq = cc.account_sequence(client.url, holder.address)
+                base = cc.build_convert(
+                    client.url,
+                    holder.wallet,
+                    m.mpt_issuance_id,
+                    _CONF_MPT_CONVERT_AMOUNT,
+                    issuer_keys[m.issuer][1],
+                    holder.elgamal_private_key,
+                    holder.elgamal_public_key,
+                )
+                result = await submit_tx(
+                    "ConfidentialMPTConvert", base, client, holder.wallet, seq=holder_seq
+                )
+                seq.reset(holder.address)  # realign tracker to ledger-driven seq
+                engine = result.get("engine_result", "")
+                if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
+                    convert_ok += 1
+                else:
+                    send_event(
+                        "workload::setup_reject : conf_mpt_convert",
+                        {
+                            "phase": "conf_mpt_convert",
+                            "account": holder.address,
+                            "engine_result": engine,
+                        },
+                    )
+            except Exception as e:
+                send_event(
+                    "workload::setup_error : conf_mpt_convert",
+                    {
+                        "phase": "conf_mpt_convert",
+                        "account": holder.address,
+                        "error": f"{type(e).__name__}: {e}",
+                    },
+                )
+    summary["conf_mpt_convert"] = convert_ok
+
+    # ── 7. MergeInbox: move converted inbox -> spending balance ──────
+    await asyncio.sleep(3)  # Convert must validate before merging its inbox
+    merge_txns: list[tuple[str, Transaction, Wallet]] = []
+    for m in conf_issuances:
+        if m.issuer not in issuer_keys:
+            continue
+        for h_idx in holder_indices:
+            holder = accs[h_idx]
+            if holder.address == m.issuer:
+                continue
+            merge_txns.append(
+                (
+                    "ConfidentialMPTMergeInbox",
+                    cc.build_merge_inbox(client.url, holder.wallet, m.mpt_issuance_id),
+                    holder.wallet,
+                )
+            )
+    summary["conf_mpt_merge"] = await _submit_batch("conf_mpt_merge", merge_txns, client, seq)
+
+    # ── Fill tracked issuances with keys + seeded holder balances ────
+    by_id = {ci.mpt_issuance_id: ci for ci in workload.confidential_mpt_issuances}
+    for m in conf_issuances:
+        ci = by_id.get(m.mpt_issuance_id)
+        if ci is None:
+            continue
+        priv, pub = issuer_keys.get(m.issuer, ("", ""))
+        ci.issuer_privkey = priv
+        ci.issuer_pubkey = pub
+        for h_idx in holder_indices:
+            holder = accs[h_idx]
+            if holder.address == m.issuer:
+                continue
+            ci.holders[holder.address] = ConfidentialHolder(
+                address=holder.address,
+                spending_balance=_CONF_MPT_CONVERT_AMOUNT,
+                inbox_balance=0,
+                version=0,
+            )
+
+
 async def run_setup(workload: Workload) -> dict[str, int]:
     await _probe_node(workload)
     accs = _accounts_list(workload)
@@ -245,12 +466,14 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     # Record setup-owned addresses so AccountDelete won't target them.
     _setup_indices: set[int] = (
         set(range(6))
+        | {7, 8}
         | set(range(10, 17))
         | set(range(20, 25))
         | set(range(30, 36))
         | set(range(40, 43))
         | set(range(50, 53))
         | set(range(60, 72))
+        | set(range(72, 77))
     )
     workload.protected_accounts.update(accs[i].address for i in _setup_indices if i < len(accs))
 
@@ -440,6 +663,10 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             if lock_count:
                 lockable.locked = True
     summary["mpt_lock"] = lock_count
+
+    # ── 6c. Confidential MPT (XLS-0096): privacy issuances + seeded balances
+    # Needs authorized funded holders, so runs after public MPT distribution.
+    await _setup_confidential_mpt(workload, accs, summary)
 
     # ── 7. Vaults: 4 XRP (loan brokers), 2 IOU, 2 MPT ────────────────
     vault_txns = []
