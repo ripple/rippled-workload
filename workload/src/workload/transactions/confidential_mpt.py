@@ -60,7 +60,10 @@ async def _merge_inbox_valid(
     if not holders:
         return
     holder = accounts[choice(holders)]
-    base = await cc.build_merge_inbox(client.url, holder.wallet, ci.mpt_issuance_id)
+    try:
+        base = await cc.build_merge_inbox(client.url, holder.wallet, ci.mpt_issuance_id)
+    except cc.BUILD_SKIP_ERRORS:
+        return
     await submit_tx("ConfidentialMPTMergeInbox", base, client, holder.wallet)
 
 
@@ -151,16 +154,19 @@ async def _convert_valid(
         return
     holder = accounts[choice(holders)]
     # Builder binds account Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF).
-    seq = await cc.account_sequence(client.url, holder.address)
-    base = await cc.build_convert(
-        client.url,
-        holder.wallet,
-        ci.mpt_issuance_id,
-        params.confidential_mpt_amount(),
-        ci.issuer_pubkey,
-        holder.elgamal_private_key,
-        holder.elgamal_public_key,
-    )
+    try:
+        seq = await cc.account_sequence(client.url, holder.address)
+        base = await cc.build_convert(
+            client.url,
+            holder.wallet,
+            ci.mpt_issuance_id,
+            params.confidential_mpt_amount(),
+            ci.issuer_pubkey,
+            holder.elgamal_private_key,
+            holder.elgamal_public_key,
+        )
+    except cc.BUILD_SKIP_ERRORS:
+        return
     await submit_tx("ConfidentialMPTConvert", base, client, holder.wallet, seq=seq)
 
 
@@ -325,8 +331,8 @@ async def _send_valid(
     amount = max(1, holder.spending_balance // randint(2, 10))
     # Builder binds account Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF),
     # and stash the plaintext amount keyed by it so _on_conf_send can decrement spending_balance.
-    seq = await cc.account_sequence(client.url, sender.address)
     try:
+        seq = await cc.account_sequence(client.url, sender.address)
         base = await cc.build_send(
             client.url,
             sender.wallet,
@@ -338,10 +344,7 @@ async def _send_valid(
             dest_pk,
             ci.issuer_pubkey,
         )
-    except (ValueError, RuntimeError):
-        # ValueError: no on-ledger spending balance yet. RuntimeError (native -1):
-        # tracked amount > ledger balance under races — the range proof on
-        # (balance - amount) can't prove a negative.
+    except cc.BUILD_SKIP_ERRORS:
         return
     result = await submit_tx("ConfidentialMPTSend", base, client, sender.wallet, seq=seq)
     if result:
@@ -507,8 +510,8 @@ async def _convert_back_valid(
         return
     amount = max(1, state.spending_balance // randint(2, 10))
     # Builder binds account Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF).
-    seq = await cc.account_sequence(client.url, holder.address)
     try:
+        seq = await cc.account_sequence(client.url, holder.address)
         base = await cc.build_convert_back(
             client.url,
             holder.wallet,
@@ -518,8 +521,8 @@ async def _convert_back_valid(
             pk,
             ci.issuer_pubkey,
         )
-    except (ValueError, RuntimeError):
-        return  # no ledger balance yet, or amount > ledger balance raced (native -1)
+    except cc.BUILD_SKIP_ERRORS:
+        return
     await submit_tx("ConfidentialMPTConvertBack", base, client, holder.wallet, seq=seq)
 
 
@@ -657,22 +660,20 @@ async def _clawback_valid(
     if not holders:
         return
     holder_addr = choice(holders)
-    # Proof links the holder's on-ledger IssuerEncryptedBalance to the amount; read it, else skip.
-    enc_bal = await cc.issuer_encrypted_balance(client.url, holder_addr, ci.mpt_issuance_id)
-    if not enc_bal:
-        return
-    # The equality proof must match the encrypted balance EXACTLY; tracked
-    # spending_balance drifts under concurrent sends/converts (-> tecBAD_PROOF),
-    # so decrypt the ledger truth and claw that.
     try:
+        # Proof links the holder's on-ledger IssuerEncryptedBalance to the amount.
+        enc_bal = await cc.issuer_encrypted_balance(client.url, holder_addr, ci.mpt_issuance_id)
+        if not enc_bal:
+            return
+        # The equality proof must match the encrypted balance EXACTLY; tracked
+        # spending_balance drifts under concurrent sends/converts (-> tecBAD_PROOF),
+        # so decrypt the ledger truth and claw that.
         amount = await cc.decrypt(ci.issuer_privkey, enc_bal)
-    except (ValueError, RuntimeError):
-        return  # balance outside the decrypt search range
-    if amount <= 0:
-        return
-    # Builder binds issuer Sequence into the proof; stamp same seq on submit (else tecBAD_PROOF).
-    seq = await cc.account_sequence(client.url, issuer.address)
-    try:
+        if amount <= 0:
+            return
+        # Builder binds issuer Sequence into the proof; stamp same seq on submit
+        # (else tecBAD_PROOF).
+        seq = await cc.account_sequence(client.url, issuer.address)
         base = await cc.build_clawback(
             client.url,
             issuer.wallet,
@@ -683,8 +684,8 @@ async def _clawback_valid(
             ci.issuer_pubkey,
             enc_bal,
         )
-    except (ValueError, RuntimeError):
-        return  # issuer account info unavailable / proof generation raced
+    except cc.BUILD_SKIP_ERRORS:
+        return
     await submit_tx("ConfidentialMPTClawback", base, client, issuer.wallet, seq=seq)
 
 

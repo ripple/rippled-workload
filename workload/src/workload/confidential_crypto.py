@@ -34,6 +34,12 @@ CRYPTO_AVAILABLE: bool = bool(_conf.MPT_CRYPTO_AVAILABLE) if _conf is not None e
 # Shared because secp256k1 allocation is expensive; None when native lib absent.
 _crypto = _conf.MPTCrypto() if CRYPTO_AVAILABLE else None
 
+# Skippable build failures: builders surface degraded RPC responses as stdlib
+# errors (fee -> KeyError 'drops', missing balance -> ValueError) and proof races
+# as RuntimeError (native -1 when tracked amount > ledger balance). Valid paths
+# catch these and return — they are fault-injection weather, not workload bugs.
+BUILD_SKIP_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError, KeyError)
+
 
 # ── Wire-format sizes (bytes) ────────────────────────────────────────
 # rippled enforces these in preflight (wrong length -> tem*, no failure bucket);

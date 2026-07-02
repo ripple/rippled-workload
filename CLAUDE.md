@@ -97,7 +97,9 @@ Five real on-ledger handlers (`transactions/confidential_mpt.py`: MergeInbox, Co
 
 Builders (`prepare_confidential_*`) take ElGamal keys explicitly + a **sync** `client` (they set the confidential fee = `base_fee × 10`; autofill preserves it). The sync client calls `asyncio.run()` internally — illegal on the running loop — so every `cc.*` builder/ledger-read is **async**, dispatched to a single worker thread (off-loop + serializes the shared secp256k1 context). `cc.build_*` thread `client.url` + keys from tracked state; Clawback also needs the holder's on-ledger `IssuerEncryptedBalance`.
 
-**Drift gotcha:** proofs bind the **on-ledger** balance, and tracked state drifts under concurrent sends/converts. Send/ConvertBack valid paths catch `ValueError` (no ledger balance) and `RuntimeError` (native `-1`: tracked amount > ledger balance → range proof on the negative remainder) and return. Clawback's equality proof must match the encrypted balance exactly, so `_clawback_valid` `cc.decrypt`s the `IssuerEncryptedBalance` and claws that — never the tracked amount (→ `tecBAD_PROOF`).
+**Skippable build failures:** every valid path wraps its `cc.*` section in `except cc.BUILD_SKIP_ERRORS: return` — `(ValueError, RuntimeError, KeyError)`. Builders surface degraded RPC responses as stdlib errors (fee → `KeyError 'drops'`, missing balance → `ValueError`) and proof races as `RuntimeError` (native `-1` when the tracked amount > ledger balance — the range proof can't prove the negative remainder). These are fault-injection weather; `sometimes(success)` still catches systematic breakage.
+
+**Clawback drift:** the equality proof must match the on-ledger `IssuerEncryptedBalance` exactly and tracked state drifts under concurrent sends/converts, so `_clawback_valid` `cc.decrypt`s the encrypted balance and claws that — never the tracked amount (→ `tecBAD_PROOF`).
 
 **Faulty fee gotcha:** faulty bases must set `fee=params.confidential_fee()` — autofill's base fee draws `telINSUF_FEE_P` (confidential txns cost 10×), and `tel*` never validates, starving `sometimes(failure)`.
 
