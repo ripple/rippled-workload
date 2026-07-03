@@ -16,7 +16,13 @@ from workload.models import UserAccount
 from workload.randoms import choice, randint, sample
 from workload.submit import submit_tx
 
-DELEGABLE_TX_TYPES = [t for t in TransactionType if t not in NON_DELEGABLE_TRANSACTIONS]
+# xrpl-py's NON_DELEGABLE_TRANSACTIONS predates SponsorshipTransfer -- rippled marks
+# it Delegation::NotDelegable (SponsorshipSet stays Delegable) -- so patch it out here.
+DELEGABLE_TX_TYPES = [
+    t
+    for t in TransactionType
+    if t not in NON_DELEGABLE_TRANSACTIONS and t != TransactionType.SPONSORSHIP_TRANSFER
+]
 
 
 async def delegate_set(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:

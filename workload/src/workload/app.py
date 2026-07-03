@@ -19,6 +19,7 @@ from workload import logger
 from workload.assertions import register_assertions
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
+from workload.features import SPONSOR
 from workload.models import (
     AMM,
     DID,
@@ -34,6 +35,7 @@ from workload.models import (
     NFTOffer,
     PaymentChannel,
     PermissionedDomain,
+    Sponsorship,
     TrustLine,
     UserAccount,
     Vault,
@@ -64,6 +66,9 @@ class Workload:
         self.checks: list[Check] = []
         self.payment_channels: list[PaymentChannel] = []
         self.offers: list[dict] = []
+        self.sponsorships: list[Sponsorship] = []
+        self.sponsored_accounts: dict[str, str] = {}  # sponsee addr -> sponsor addr
+        self.sponsored_objects: dict[str, tuple[str, str]] = {}  # object_id -> (owner, sponsor)
         # Setup addresses (gateways, vault creators, etc.) — never delete; populated by run_setup().
         self.protected_accounts: set[str] = set()
         self.deleted_vault_ids: list[str] = []
@@ -107,7 +112,7 @@ class Workload:
         # Wire delegation state so submit_tx can transparently delegate.
         from workload.submit import configure as configure_submit
 
-        configure_submit(self.delegates, self.accounts)
+        configure_submit(self.delegates, self.accounts, self.sponsorships)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
         reachable("workload::started", {})
@@ -222,6 +227,23 @@ def create_app(workload: Workload) -> FastAPI:
 
     for name, path, handler_fn, args_fn, _ in REGISTRY:
         app.get(path)(_make_endpoint(path, name, handler_fn, args_fn))
+
+    # SponsorshipAudit is a read-only ledger cross-check, not a transaction --
+    # no engine_result, so it doesn't fit REGISTRY's seen/success/failure shape
+    # (register_assertions() would starve waiting for a hit that never comes).
+    # Wired directly with the same _make_endpoint plumbing (XRPLException/
+    # timeout handling) instead.
+    if SPONSOR:
+        from workload.transactions.sponsorship import sponsorship_audit_random
+
+        app.get("/sponsorship/audit/random")(
+            _make_endpoint(
+                "/sponsorship/audit/random",
+                "SponsorshipAudit",
+                sponsorship_audit_random,
+                lambda w: (w.sponsorships, w.sponsored_accounts, w.client),
+            )
+        )
 
     return app
 

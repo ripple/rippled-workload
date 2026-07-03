@@ -20,6 +20,24 @@ log = logging.getLogger(__name__)
 
 _TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 _TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
+_TF_SPONSORSHIP_DELETE_OBJECT = 0x00100000  # SponsorshipSetFlag.TF_DELETE_OBJECT
+_TF_SPONSOR_CREATED_ACCOUNT = 0x00080000  # PaymentFlag.TF_SPONSOR_CREATED_ACCOUNT
+
+# Reserve-sponsored object creation (sponsored_create.py): real types allow-listed by
+# rippled's preflight1Sponsor for spfSponsorReserve that this workload's endpoints use to
+# create an object. SponsorshipTransfer also carries SponsorFlags/spfSponsorReserve (for
+# its own Create/Reassign) but isn't in this set, so it keeps its own dedicated bucket below.
+_SPF_SPONSOR_RESERVE = 0x00000002  # common SponsorFlags bit (any Transaction subtype)
+_RESERVE_SPONSOR_TX_TYPES = {
+    "CheckCreate",
+    "EscrowCreate",
+    "PaymentChannelCreate",
+    "TrustSet",
+    "CredentialCreate",
+    "SignerListSet",
+    "DepositPreauth",
+    "MPTokenAuthorize",
+}
 
 
 def _amount_is_mpt(amt: object) -> bool:
@@ -29,6 +47,25 @@ def _amount_is_mpt(amt: object) -> bool:
 def _delivered_amount(tx: dict) -> object:
     """api_version 2 renames Payment Amount→DeliverMax and drops Amount; fall back for v1."""
     return tx.get("DeliverMax", tx.get("Amount"))
+
+
+def _on_reserve_sponsored_create(w: Workload, tx: dict, meta: dict) -> None:
+    """Records w.sponsored_objects for any reserve-sponsored create, regardless of
+    real TransactionType -- one generic parse of the CreatedNode's Sponsor field
+    (HighSponsor/LowSponsor for RippleState) rather than a per-type copy. Only
+    fires when the reserve actually landed on the object: spfSponsorFee-only
+    sponsorship never touches the ledger entry, so the field's absence there
+    (even with SponsorFlags present on the tx) correctly skips tracking."""
+    owner = tx.get("Account", "")
+    for node in meta.get("AffectedNodes", []):
+        fields = node.get("CreatedNode", {}).get("NewFields", {})
+        sponsor = fields.get("Sponsor") or fields.get("HighSponsor") or fields.get("LowSponsor")
+        if not sponsor:
+            continue
+        idx = node["CreatedNode"].get("LedgerIndex")
+        if isinstance(idx, str):
+            w.sponsored_objects[idx] = (owner, sponsor)
+        return
 
 
 def _handle_validated_tx(workload: Workload, msg: dict) -> None:
@@ -78,6 +115,8 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
         # SendMax or non-string delivered amount ⇒ cross-currency (api_version 2 renames Amount).
         is_xc = tx.get("SendMax") is not None or not isinstance(_delivered_amount(tx), str)
         tx_result("PaymentDomainXC" if is_xc else "PaymentDomain", result)
+    elif tx_type == "Payment" and tx.get("Flags", 0) & _TF_SPONSOR_CREATED_ACCOUNT:
+        tx_result("PaymentSponsoredAccount", result)
 
     # MPT-on-DEX (XLS-82): pure MPT offer has no DomainID, so never double-fires domain buckets.
     if tx_type == "OfferCreate" and (
@@ -91,7 +130,20 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     ):
         tx_result("PaymentMPT", result)
 
+    # Sponsorship (XLS-68): synthetic buckets on top of the two real types.
+    if tx_type == "SponsorshipSet" and tx.get("Flags", 0) & _TF_SPONSORSHIP_DELETE_OBJECT:
+        tx_result("SponsorshipSetDelete", result)
+    elif tx_type == "SponsorshipTransfer" and not tx.get("ObjectID"):
+        tx_result("SponsorshipTransferAccount", result)
+
+    # Reserve-sponsored object creation (sponsored_create.py): one generic rule
+    # bucketing by real TransactionType, not per-type ifs.
+    if tx_type in _RESERVE_SPONSOR_TX_TYPES and tx.get("SponsorFlags", 0) & _SPF_SPONSOR_RESERVE:
+        tx_result(f"Sponsored{tx_type}", result)
+
     if engine_result == "tesSUCCESS":
+        if tx_type in _RESERVE_SPONSOR_TX_TYPES:
+            _on_reserve_sponsored_create(workload, tx, meta)
         updater = STATE_UPDATERS.get(tx_type)
         if updater:
             try:

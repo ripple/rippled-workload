@@ -95,6 +95,8 @@ class Credential:
     subject: str
     credential_type: str
     accepted: bool = False
+    # Real ledger ID; needed as a SponsorshipTransfer ObjectID.
+    credential_id: str | None = None
 
 
 @dataclass
@@ -151,6 +153,9 @@ class TrustLine:
     account_a: str
     account_b: str
     currency: str
+    # Real RippleState ledger ID; needed as a SponsorshipTransfer ObjectID.
+    # account_a is treated as the "owner" side for sponsorship purposes.
+    trust_line_id: str | None = None
 
 
 @dataclass
@@ -180,6 +185,8 @@ class Escrow:
     fulfillment: str | None = None
     finish_after: int | None = None
     cancel_after: int | None = None
+    # Real ledger ID (keylet(owner, sequence)); needed as a SponsorshipTransfer ObjectID.
+    escrow_id: str | None = None
 
 
 @dataclass
@@ -197,3 +204,16 @@ class PaymentChannel:
     destination: str
     amount: str  # total XRP drops allocated
     settle_delay: int
+
+
+@dataclass
+class Sponsorship:
+    """Prefunded Sponsorship ledger entry (XLS-68), keyed by (sponsor, sponsee)."""
+
+    sponsor: str
+    sponsee: str
+    fee_amount: int  # drops remaining (local estimate, decays)
+    max_fee: int | None
+    remaining_owner_count: int
+    require_sign_for_fee: bool = False
+    require_sign_for_reserve: bool = False

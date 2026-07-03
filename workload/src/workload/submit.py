@@ -10,21 +10,24 @@ from xrpl.models.requests import SubmitOnly
 from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
-from workload import logging
+from workload import features, logging, params
 from workload.assertions import tx_submitted
 
 log = logging.getLogger(__name__)
 
-# ── Delegation state (set once via configure()) ──────────────────────
+# ── Delegation/sponsorship state (set once via configure()) ──────────
 _delegates: list = []
 _accounts: dict = {}
+_sponsorships: list = []
 
 
-def configure(delegates: list, accounts: dict) -> None:
-    """Store delegation state once at init so submit_tx can apply it transparently."""
-    global _delegates, _accounts
+def configure(delegates: list, accounts: dict, sponsorships: list) -> None:
+    """Store delegation/sponsorship state once at init so submit_tx can apply
+    it transparently."""
+    global _delegates, _accounts, _sponsorships
     _delegates = delegates
     _accounts = accounts
+    _sponsorships = sponsorships
 
 
 async def submit_tx(
@@ -38,12 +41,15 @@ async def submit_tx(
 
     ``seq`` (if given) is stamped pre-autofill so xrpl-py skips the RPC seq fetch.
     With delegation configured, a matching delegate co-signs ~10% of the time.
-    Lets XRPLRequestFailureException propagate to the handler's XRPLException catch.
+    Independently, ~10% of eligible txns get a prefunded fee sponsor attached
+    (mutually exclusive with delegation). Lets XRPLRequestFailureException
+    propagate to the handler's XRPLException catch.
     """
     if seq is not None:
         txn = txn.__replace__(sequence=seq)
 
     # Lazy import: avoids circular dependency.
+    delegated = False
     if _delegates:
         from workload.transactions.delegation import maybe_delegate
 
@@ -56,6 +62,23 @@ async def submit_tx(
         if delegate_addr is not None and delegate_wallet is not None:
             txn = txn.__replace__(delegate=delegate_addr)
             wallet = delegate_wallet
+            delegated = True
+
+    # Batch's Fee must be zero (TapBatch), and a txn built with sponsor fields
+    # already set (e.g. sponsorship.py's prefunded co-sign helpers) must not be
+    # clobbered here.
+    if (
+        not delegated
+        and features.SPONSOR
+        and _sponsorships
+        and name != "Batch"
+        and txn.sponsor is None
+    ):
+        from workload.transactions.sponsorship import maybe_sponsor
+
+        sponsor_addr = maybe_sponsor(txn.account, _sponsorships)
+        if sponsor_addr is not None:
+            txn = txn.__replace__(sponsor=sponsor_addr, sponsor_flags=params.SPF_SPONSOR_FEE)
 
     signed = await autofill_and_sign(txn, client, wallet)
     response = await submit(signed, client)

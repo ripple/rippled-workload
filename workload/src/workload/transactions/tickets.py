@@ -31,6 +31,7 @@ from xrpl.wallet import Wallet
 
 from workload import params
 from workload.assertions import tx_submitted
+from workload.features import SPONSOR
 from workload.fuzz import submit_fuzzed
 from workload.models import AMM, Credential, PermissionedDomain, UserAccount
 from workload.randoms import choice
@@ -186,6 +187,21 @@ _TICKET_BUILDERS: dict[str, _TicketBuilder] = {
     "PaymentDomainXC": lambda ctx: _ticket_domain_payment(ctx, cross_currency=True),
 }
 
+# Gated (workload/features.py): SponsorshipSet only exists on xrpl-py's
+# sponsoredFeesDraft1 branch. Create/update needs no pre-existing state (dst
+# just becomes the sponsee), unlike SponsorshipTransfer/SponsorshipSetDelete
+# below, which need a tracked Sponsorship/object -- excluded instead.
+if SPONSOR:
+    from xrpl.models.transactions import SponsorshipSet
+
+    _TICKET_BUILDERS["SponsorshipSet"] = lambda ctx: SponsorshipSet(
+        sponsee=ctx.dst,
+        fee_amount=params.sponsorship_fee_amount(),
+        max_fee=params.sponsorship_max_fee(),
+        remaining_owner_count=params.sponsorship_reserve_count(),
+        **ctx.common,
+    )
+
 # Types the (dst, common)-only builder signature can't reach: objects (need
 # pre-existing IDs), circular (tickets on tickets), cosign, batch.
 _TICKET_EXCLUDED: set[str] = {
@@ -193,6 +209,25 @@ _TICKET_EXCLUDED: set[str] = {
     "TicketUse",
     "Batch",
     "LoanSet",
+    # Delete needs a pre-existing tracked Sponsorship; ctx carries no such list.
+    "SponsorshipSetDelete",
+    # Object-level needs a tracked sponsorable object ID; account-level Create/
+    # Reassign additionally needs a counterparty co-sign, like LoanSet.
+    "SponsorshipTransfer",
+    "SponsorshipTransferAccount",
+    # Needs a fresh, untracked-by-ctx wallet as Destination (ctx.dst is an
+    # existing account, which would hit tecNO_SPONSOR_PERMISSION instead).
+    "PaymentSponsoredAccount",
+    # Reserve sponsorship needs a co-sign or a pre-existing Sponsorship budget
+    # pick, neither of which the (dst, common)-only ctx signature can supply.
+    "SponsoredCheckCreate",
+    "SponsoredEscrowCreate",
+    "SponsoredPaymentChannelCreate",
+    "SponsoredTrustSet",
+    "SponsoredCredentialCreate",
+    "SponsoredSignerListSet",
+    "SponsoredDepositPreauth",
+    "SponsoredMPTokenAuthorize",
     "NFTokenBurn",
     "NFTokenModify",
     "NFTokenCreateOffer",
