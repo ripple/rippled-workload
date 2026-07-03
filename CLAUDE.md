@@ -65,7 +65,7 @@ Wired as one `"fuzz"` choice in **every** `_faulty`, alongside curated mutations
 Dual sign (borrower + broker): `autofill_and_sign` → `sign_loan_set_by_counterparty` → `xrpl_submit`, then `tx_submitted("LoanSet", txn, result)`. Setup direct paths (`setup.py` co-sign, `_probe_node`) call `assert_no_internal_error_submit` and emit `setup_*` instead.
 
 ### Setup dependency chain
-gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth → mpt_distribution → mpt_lock → vaults → vault_deposits → holder_vault_deposits → nfts → nft_offers → credentials → credential_accepts → tickets → domains → loan_brokers → cover_deposits → loans → zero_interest_loan_payoff. Gateway failure cascades. `credential_accepts` makes subjects domain members — without it `accountInDomain` fails and permissioned-DEX valid paths starve.
+gateways → trust_lines → iou_distribution → mpt_issuances → mpt_auth → mpt_distribution → mpt_lock → confidential_mpt (XLS-0096 privacy issuances + seeded balances) → vaults → vault_deposits → holder_vault_deposits → nfts → nft_offers → credentials → credential_accepts → tickets → domains → loan_brokers → cover_deposits → loans → zero_interest_loan_payoff. Gateway failure cascades. `credential_accepts` makes subjects domain members — without it `accountInDomain` fails and permissioned-DEX valid paths starve.
 
 ### MPT cohorts (XLS-82)
 Setup step 4 mints flag-distinct cohorts (one issuer each) so MPT-on-DEX paths hit valid + fault gates: `[0]/[1]` tradeable (success), `[2]` no-trade (`tecNO_PERMISSION`), `[3]` no-transfer (`tecNO_AUTH`/`tecPATH_PARTIAL`), `[4]` require-auth never authorized (`tecNO_AUTH`), `[5]` lockable→locked in `mpt_lock` (`tecLOCKED` / `tecPATH_DRY`). `MPTokenIssuance` tracks `can_trade/can_transfer/require_auth/locked/holders`. `w.amms` now holds MPT-paired AMMs — filter `isinstance(asset, IssuedCurrency)` before reading `.currency`/`.issuer`.
@@ -86,7 +86,26 @@ Some `REGISTRY` entries use a synthetic `name` ≠ on-ledger `TransactionType` f
 ### Logging
 No logger calls in `setup.py` or handlers — `send_event` + assertions cover observability. `setup.py` emits `workload::setup_reject : {phase}` / `setup_error : {phase}`. Only `ws_listener.py` keeps warn/error logs; `sequence.py` one debug log.
 
+### Confidential MPT (XLS-0096)
+Five real on-ledger handlers (`transactions/confidential_mpt.py`: MergeInbox, Convert, Send, ConvertBack, Clawback) — true `ConfidentialMPT*` type, real-type `STATE_UPDATERS`, no synthetic-name mapping.
+
+**Packaging.** Models come from xrpl-py's `confidential-mpt` branch (git-pinned, in the core wheel). Proof generation is `xrpl.ext.confidential` — the separate `xrpl-py-confidential` dist, EXCLUDED from the core wheel — so `uv sync` gets models but not proofs. `scripts/setup-confidential-crypto.sh` (in `Dockerfile.workload`) copies `xrpl/ext/confidential` into the venv, fetches `libmpt-crypto.so` from `XRPLF/mpt-crypto`'s public release, and compiles `_mpt_crypto` (fail-loud). Import is guarded: absent add-on → `CRYPTO_AVAILABLE=False`.
+
+**Version coherence (not hardcoded).** The script reads the target from the branch's `MPT_CRYPTO_VERSION` and cross-checks it against rippled's `conanfile.py` `mpt-crypto/*` pin (`ARG XRPLD_COMMIT`, default `develop`); divergence fails the build — mismatched proof formats → rippled rejects → `success` starves. Currently `0.4.0-rc2`.
+
+`cc.CRYPTO_AVAILABLE` gates **valid** paths only. Faulty paths aren't gated: trivial-on-curve fixed-length blobs (66B ciphertext, 33B key, bogus proof) reach preclaim → `tecBAD_PROOF`/`temMALFORMED`/`tecOBJECT_NOT_FOUND` with no real crypto. Models validate the lengths rippled enforces, so `confidential_crypto.py` holds the wire-size constants and `params.py` builds faulty bases at them.
+
+Builders (`prepare_confidential_*`) take ElGamal keys explicitly + a **sync** `client` (they set the confidential fee = `base_fee × 10`; autofill preserves it). The sync client calls `asyncio.run()` internally — illegal on the running loop — so every `cc.*` builder/ledger-read is **async**, dispatched to a single worker thread (off-loop + serializes the shared secp256k1 context). `cc.build_*` thread `client.url` + keys from tracked state; Clawback also needs the holder's on-ledger `IssuerEncryptedBalance`.
+
+**Skippable build failures:** every valid path wraps its `cc.*` section in `except cc.BUILD_SKIP_ERRORS: return` — `(ValueError, RuntimeError, KeyError)`. Builders surface degraded RPC responses as stdlib errors (fee → `KeyError 'drops'`, missing balance → `ValueError`) and proof races as `RuntimeError` (native `-1` when the tracked amount > ledger balance — the range proof can't prove the negative remainder). These are fault-injection weather; `sometimes(success)` still catches systematic breakage.
+
+**Clawback drift:** the equality proof must match the on-ledger `IssuerEncryptedBalance` exactly and tracked state drifts under concurrent sends/converts, so `_clawback_valid` `cc.decrypt`s the encrypted balance and claws that — never the tracked amount (→ `tecBAD_PROOF`).
+
+**Faulty fee gotcha:** faulty bases must set `fee=params.confidential_fee()` — autofill's base fee draws `telINSUF_FEE_P` (confidential txns cost 10×), and `tel*` never validates, starving `sometimes(failure)`.
+
+Setup (`_setup_confidential_mpt`, chain step 6c): privacy issuances (`TF_MPT_CAN_CONFIDENTIAL_AMOUNT|CAN_CLAWBACK|CAN_TRANSFER`) on `[7..8]`, holders `[72..76]`; crypto steps gated on `CRYPTO_AVAILABLE`. `MPTokenIssuanceSet(issuer_encryption_key=...)` before Convert. Convert binds account Sequence into the proof, so setup/`_convert_valid` stamp `cc.account_sequence` on submit or `tecBAD_PROOF`.
+
+Caveat: `sometimes(success)` + `conf_mpt_version_monotonic` only fire against an XLS-0096 `xrpld` whose mpt-crypto pin matches.
+
 ### Randomness & specs
 All randomness via `workload.randoms` (`AntithesisRandom`); generators in `params.py`, never hardcode. Tx docs: `xrpl.org/docs/references/protocol/transactions/types/<name>`; specs: `github.com/XRPLF/XRPL-Standards` `XLS-NNNN-<name>/`.
-</content>
-</invoke>

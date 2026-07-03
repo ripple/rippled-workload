@@ -47,6 +47,9 @@ class UserAccount(Account):
     balances: dict = field(default_factory=dict)
     _tickets: set = field(default_factory=set)
     _nfts: set = field(default_factory=set)
+    # ElGamal keypair for Confidential MPT (XLS-0096); set during confidential setup.
+    elgamal_private_key: str | None = None
+    elgamal_public_key: str | None = None
 
     @property
     def nfts(self) -> set:
@@ -120,6 +123,27 @@ class MPTokenIssuance:
     require_auth: bool = False
     locked: bool = False
     holders: set[str] = field(default_factory=set)
+
+
+@dataclass
+class ConfidentialHolder:
+    """Plaintext mirror of a holder's encrypted balances; ``version`` tracks the ledger counter."""
+
+    address: str
+    spending_balance: int = 0
+    inbox_balance: int = 0  # pending-merge
+    version: int = 0
+
+
+@dataclass
+class ConfidentialMPTIssuance:
+    """Confidential-transfer MPT issuance (XLS-0096); issuer keys decrypt holders for clawback."""
+
+    issuer: str
+    mpt_issuance_id: str
+    issuer_privkey: str
+    issuer_pubkey: str
+    holders: dict[str, ConfidentialHolder] = field(default_factory=dict)
 
 
 @dataclass

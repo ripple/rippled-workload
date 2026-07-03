@@ -361,3 +361,103 @@ def did_hex_field() -> str:
     else:
         n = randint(101, 128)  # near the 128-byte limit
     return "".join(choice(_HEX_CHARS) for _ in range(n * 2))
+
+
+# ── Confidential MPT (XLS-0096) ──────────────────────────────────────
+# Faulty bases carry blobs of the exact rippled wire length; the confidential-mpt
+# branch models validate the SAME lengths, so one set serves both construction and
+# preflight. Wrong length → tem* in preflight (only feeds `seen`, never failure).
+from workload import confidential_crypto as _cc  # noqa: E402
+
+# On-ledger (rippled) hex lengths — 2x the byte size.
+_CIPHERTEXT_HEX_LEN = _cc.CIPHERTEXT_SIZE * 2  # 132 — ElGamal c1||c2 (66 bytes)
+_COMMITMENT_HEX_LEN = _cc.COMMITMENT_SIZE * 2  # 66 — Pedersen commitment (33 bytes)
+_BLINDING_FACTOR_HEX_LEN = _cc.BLINDING_FACTOR_SIZE * 2  # 64 (32 bytes)
+_ENCRYPTION_KEY_HEX_LEN = _cc.ENCRYPTION_KEY_SIZE * 2  # 66 — compressed ElGamal pubkey
+_SCHNORR_PROOF_HEX_LEN = _cc.SCHNORR_PROOF_SIZE * 2  # 128 — Convert ZKProof (64 bytes)
+_CLAWBACK_PROOF_HEX_LEN = _cc.CLAWBACK_PROOF_SIZE * 2  # 128 — Clawback ZKProof (64 bytes)
+_SEND_PROOF_HEX_LEN = _cc.SEND_PROOF_SIZE * 2  # 1892 — Send ZKProof (946 bytes)
+_CONVERT_BACK_PROOF_HEX_LEN = _cc.CONVERT_BACK_PROOF_SIZE * 2  # 1632 (816 bytes)
+
+# Trivial on-curve compressed point (02 || x=1): passes preflight EC-parse checks
+# but is cryptographically meaningless → preclaim fails tecBAD_PROOF (a validating
+# tec that feeds failure). Mirrors rippled's getTrivialCiphertext fixtures.
+_TRIVIAL_POINT_HEX = "02" + "00" * 31 + "01"  # 33 bytes / 66 hex
+
+
+def _garbage_hex(hex_len: int) -> str:
+    return bytes(randint(0, 255) for _ in range(hex_len // 2)).hex().upper()
+
+
+def _trivial_blob(byte_len: int) -> str:
+    # Repeated on-curve point so the blob survives preflight EC-parse; trailing
+    # partial chunk zero-padded. Matches rippled's getTrivialSendProofHex layout.
+    chunk = bytes.fromhex(_TRIVIAL_POINT_HEX)  # 33 bytes
+    out = bytearray()
+    while len(out) < byte_len:
+        out += chunk
+    return bytes(out[:byte_len]).hex().upper()
+
+
+def confidential_ciphertext() -> str:
+    return _trivial_blob(_cc.CIPHERTEXT_SIZE)
+
+
+def confidential_commitment() -> str:
+    return _TRIVIAL_POINT_HEX.upper()
+
+
+def confidential_blinding_factor() -> str:
+    # Not an EC point, not parsed in preflight — garbage of the right length is fine.
+    return _garbage_hex(_BLINDING_FACTOR_HEX_LEN)
+
+
+def confidential_encryption_key() -> str:
+    # rippled and the model parse this 33-byte point in preflight, so it must be on-curve.
+    return _TRIVIAL_POINT_HEX.upper()
+
+
+def confidential_schnorr_proof() -> str:
+    return _trivial_blob(_cc.SCHNORR_PROOF_SIZE)
+
+
+def confidential_clawback_proof() -> str:
+    return _trivial_blob(_cc.CLAWBACK_PROOF_SIZE)
+
+
+def confidential_send_proof() -> str:
+    return _trivial_blob(_cc.SEND_PROOF_SIZE)
+
+
+def confidential_convert_back_proof() -> str:
+    return _trivial_blob(_cc.CONVERT_BACK_PROOF_SIZE)
+
+
+def confidential_wrong_length_hex(correct_len: int) -> str:
+    # Wrong length → tem* in preflight; coverage vector for the length checks only.
+    if random() < 0.5:
+        bad_len = max(2, correct_len - randint(2, 20))
+    else:
+        bad_len = correct_len + randint(2, 20)
+    bad_len = bad_len if bad_len % 2 == 0 else bad_len + 1
+    return _garbage_hex(bad_len)
+
+
+def confidential_not_on_curve_point() -> str:
+    # Prefix 02/03 + 32 random bytes — statistically off-curve → preflight temMALFORMED.
+    return choice(["02", "03"]) + _garbage_hex(64)
+
+
+def confidential_mpt_amount() -> int:
+    return randint(1, 10_000)
+
+
+def confidential_fee() -> str:
+    # rippled charges confidential txns base_fee x10; autofill's base fee draws
+    # telINSUF_FEE_P, which never validates and starves sometimes(failure). Fixed
+    # 1000 drops = 10x with headroom for load escalation.
+    return "1000"
+
+
+def confidential_invalid_flags() -> int:
+    return choice([0x80000000, 0xFF000000, 0x40000000, randint(1, 0xFFFFFFFF)])

@@ -201,6 +201,12 @@ _TICKET_EXCLUDED: set[str] = {
     "MPTokenAuthorize",
     "MPTokenIssuanceSet",
     "MPTokenIssuanceDestroy",
+    # Confidential MPT — need ElGamal keys / proofs the ticket builder signature can't supply.
+    "ConfidentialMPTMergeInbox",
+    "ConfidentialMPTConvert",
+    "ConfidentialMPTSend",
+    "ConfidentialMPTConvertBack",
+    "ConfidentialMPTClawback",
     "CredentialAccept",
     "CredentialDelete",
     "VaultCreate",

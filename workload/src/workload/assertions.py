@@ -2,11 +2,15 @@
 
 from antithesis.assertions import assert_raw
 from antithesis.lifecycle import send_event
-from xrpl.models import Transaction
+from xrpl.models import Transaction, TransactionFlag
 
 _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
 _LOC_COL = 0
+
+# Inner batch txns (XLS-56d) consolidate effects into the outer Batch's meta, so
+# their own AffectedNodes may be empty — skip to avoid false invariant fires.
+_TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 
 # Engine results signalling a rippled internal error. Checked on BOTH submit
 # and validated WS: tef* never validates (submit-side catches it); but
@@ -57,6 +61,12 @@ _NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC"}
 _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "DIDSet": ("Created", "Modified", "DID"),
     "DIDDelete": ("Deleted", "DID"),
+    # Convert Creates the holder MPToken on first use, else Modifies; others Modify.
+    "ConfidentialMPTConvert": ("Created", "Modified", "MPToken"),
+    "ConfidentialMPTMergeInbox": ("Modified", "MPToken"),
+    "ConfidentialMPTSend": ("Modified", "MPToken"),
+    "ConfidentialMPTConvertBack": ("Modified", "MPToken"),
+    "ConfidentialMPTClawback": ("Modified", "MPToken"),
 }
 
 # XRPL fields → normalized event keys; only object identifiers, for tracking.
@@ -140,6 +150,11 @@ def register_assertions() -> None:
     _emit_catalog_entry("workload::always : no_temDISABLED", "always", "Always", must_hit=True)
     _emit_catalog_entry(
         "workload::always : meta_matches_tx_type", "always", "Always", must_hit=True
+    )
+    # must_hit=False: only fires against an XLS-0096 xrpld, so daily non-confidential
+    # runs must not starve on it.
+    _emit_catalog_entry(
+        "workload::always : conf_mpt_version_monotonic", "always", "Always", must_hit=False
     )
     for setup_key in [
         "gateways",
@@ -374,4 +389,42 @@ def tx_result(name: str, result: dict) -> None:
             assert_type="always",
             display_type="Always",
             assert_id="workload::always : meta_matches_tx_type",
+        )
+    # Every successful Confidential MPT op must strictly bump the holder MPToken's
+    # ConfidentialBalanceVersion (replay / stale-proof guard). Skip inner-batch txns
+    # (consolidated meta); only check ModifiedNodes carrying both version fields.
+    if (
+        name.startswith("ConfidentialMPT")
+        and engine_result == "tesSUCCESS"
+        and not (int(tx_json.get("Flags", 0)) & _TF_INNER_BATCH_TXN)
+    ):
+        monotonic = True
+        for node in meta.get("AffectedNodes", []):
+            modified = node.get("ModifiedNode", {})
+            if modified.get("LedgerEntryType") != "MPToken":
+                continue
+            prev = modified.get("PreviousFields", {})
+            final = modified.get("FinalFields", {})
+            if (
+                "ConfidentialBalanceVersion" in prev
+                and "ConfidentialBalanceVersion" in final
+                and int(final["ConfidentialBalanceVersion"])
+                <= int(prev["ConfidentialBalanceVersion"])
+            ):
+                monotonic = False
+                break
+        assert_raw(
+            condition=monotonic,
+            message="workload::always : conf_mpt_version_monotonic",
+            details={"tx_type": name, "hash": details.get("hash", "")},
+            loc_filename=_LOC_FILE,
+            loc_function="tx_result",
+            loc_class=_LOC_CLASS,
+            loc_begin_line=0,
+            loc_begin_column=_LOC_COL,
+            hit=True,
+            must_hit=False,
+            assert_type="always",
+            display_type="Always",
+            assert_id="workload::always : conf_mpt_version_monotonic",
         )
