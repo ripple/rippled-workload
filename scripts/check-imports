@@ -31,7 +31,9 @@ from workload.transactions.lending import (
     loan_set, loan_delete, loan_manage, loan_pay,
 )
 from workload.assertions import tx_submitted, tx_result, register_assertions
+from workload.probe import probe_network
 from workload.submit import submit_tx
+from workload.fuzz import submit_fuzzed, fuzz_mutate
 from workload.sequence import SequenceTracker
 from workload.ws_listener import start_ws_listener
 from workload.setup import run_setup

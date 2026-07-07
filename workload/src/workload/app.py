@@ -38,6 +38,7 @@ from workload.models import (
     UserAccount,
     Vault,
 )
+from workload.probe import probe_network
 from workload.transactions import REGISTRY
 from workload.transactions.tickets import check_ticket_coverage
 
@@ -214,6 +215,10 @@ def create_app(workload: Workload) -> FastAPI:
     @app.get("/ready")
     def _ready() -> Response:
         return Response(status_code=200 if ready["value"] else 503)
+
+    @app.get("/probe/network")
+    async def _probe_network(w: Workload = Depends(get_workload)) -> Response:
+        return Response(status_code=200 if await probe_network(w) else 503)
 
     for name, path, handler_fn, args_fn, _ in REGISTRY:
         app.get(path)(_make_endpoint(path, name, handler_fn, args_fn))

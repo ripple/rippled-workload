@@ -113,12 +113,14 @@ if __name__ == "__main__":
     last_index_per_validator = {}  # validator: (index, update_num_of_last_change)
     stall_episode = {}  # validator: bool -- currently inside a (soft) stall episode
     last_good_skew = {}  # validator: update_num of last pass with acceptable close_time skew
+    last_total_coins = {}  # validator: (index, total_coins) at the highest index seen
     update_num = 0
 
     for v in servers:
         last_index_per_validator[v] = (0, 0)
         stall_episode[v] = False
         last_good_skew[v] = 0
+        last_total_coins[v] = None
 
     stop_num = args.stop  # 0 to run forever
 
@@ -282,6 +284,36 @@ if __name__ == "__main__":
                     "Validator close_time tracks wall clock",
                     evt,
                 )
+
+            # XRP supply is fixed and only burns (fees), so total_coins must never rise
+            # as a validator's ledger advances. Any increase means XRP was minted -- a
+            # safety bug, so this is a hard always(). Compared only when the index
+            # strictly advances (a stale/rewound read during faults isn't a violation).
+            for v, thr in threads.items():
+                r = thr._return
+                if r.get("status") != "success":
+                    continue
+                idx = r.get("ledger_index")
+                tc_raw = r.get("ledger", {}).get("total_coins")
+                if idx is None or tc_raw is None:
+                    continue
+                total_coins = int(tc_raw)
+                prev = last_total_coins[v]
+                if prev is not None and idx > prev[0]:
+                    evt = {
+                        "validator": v,
+                        "index": idx,
+                        "prev_index": prev[0],
+                        "total_coins": total_coins,
+                        "prev_total_coins": prev[1],
+                    }
+                    assertions.always(
+                        total_coins <= prev[1],
+                        "XRP total supply never increases",
+                        evt,
+                    )
+                if prev is None or idx >= prev[0]:
+                    last_total_coins[v] = (idx, total_coins)
 
             # Validators on the same ledger_index must agree on its hash. This is a safety
             # invariant -- divergence is always a bug, so it stays a hard always().
