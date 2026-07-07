@@ -67,6 +67,32 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "ConfidentialMPTSend": ("Modified", "MPToken"),
     "ConfidentialMPTConvertBack": ("Modified", "MPToken"),
     "ConfidentialMPTClawback": ("Modified", "MPToken"),
+    # Verified against rippled transactors: each touches its entry on every
+    # tesSUCCESS. Create-or-update txns list both ops (new → Created, existing →
+    # Modified); NFTokenMint places into a new page (Created) or existing (Modified).
+    "EscrowCreate": ("Created", "Escrow"),
+    "EscrowFinish": ("Deleted", "Escrow"),
+    "EscrowCancel": ("Deleted", "Escrow"),
+    "CheckCreate": ("Created", "Check"),
+    "CheckCash": ("Deleted", "Check"),
+    "CheckCancel": ("Deleted", "Check"),
+    "PaymentChannelCreate": ("Created", "PayChannel"),
+    "TicketCreate": ("Created", "Ticket"),
+    "CredentialCreate": ("Created", "Credential"),
+    "CredentialAccept": ("Modified", "Credential"),
+    "CredentialDelete": ("Deleted", "Credential"),
+    "MPTokenIssuanceCreate": ("Created", "MPTokenIssuance"),
+    "MPTokenIssuanceDestroy": ("Deleted", "MPTokenIssuance"),
+    "NFTokenMint": ("Created", "Modified", "NFTokenPage"),
+    "PermissionedDomainSet": ("Created", "Modified", "PermissionedDomain"),
+    "PermissionedDomainDelete": ("Deleted", "PermissionedDomain"),
+    "AMMCreate": ("Created", "AMM"),
+    "VaultCreate": ("Created", "Vault"),
+    "VaultDelete": ("Deleted", "Vault"),
+    "LoanBrokerSet": ("Created", "Modified", "LoanBroker"),
+    "LoanBrokerDelete": ("Deleted", "LoanBroker"),
+    "LoanSet": ("Created", "Loan"),
+    "LoanDelete": ("Deleted", "Loan"),
 }
 
 # XRPL fields → normalized event keys; only object identifiers, for tracking.
@@ -122,6 +148,25 @@ def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_
     )
 
 
+def assert_network_functional(ok: bool, engine_result: str) -> None:
+    """Post-fault liveness: at least one probe payment must validate tesSUCCESS."""
+    assert_raw(
+        condition=ok,
+        message="workload::sometimes : network_functional_after_faults",
+        details={"engine_result": engine_result},
+        loc_filename=_LOC_FILE,
+        loc_function="assert_network_functional",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=True,
+        must_hit=True,
+        assert_type="sometimes",
+        display_type="Sometimes",
+        assert_id="workload::sometimes : network_functional_after_faults",
+    )
+
+
 def register_assertions() -> None:
     """Call once at startup, before any transactions are submitted."""
     from workload.transactions import TX_TYPES
@@ -155,6 +200,12 @@ def register_assertions() -> None:
     # runs must not starve on it.
     _emit_catalog_entry(
         "workload::always : conf_mpt_version_monotonic", "always", "Always", must_hit=False
+    )
+    _emit_catalog_entry(
+        "workload::sometimes : network_functional_after_faults",
+        "sometimes",
+        "Sometimes",
+        must_hit=True,
     )
     for setup_key in [
         "gateways",
@@ -362,9 +413,14 @@ def tx_result(name: str, result: dict) -> None:
         display_type="Sometimes",
         assert_id=_failure_id(name),
     )
-    # On tesSUCCESS, verify the expected ledger entry operations.
+    # On tesSUCCESS, verify the expected ledger entry operations. Skip inner-batch
+    # txns: effects consolidate into the outer Batch's meta, so their own may be empty.
     exp = _META_EXPECTATIONS.get(name)
-    if exp and engine_result == "tesSUCCESS":
+    if (
+        exp
+        and engine_result == "tesSUCCESS"
+        and not (int(tx_json.get("Flags", 0)) & _TF_INNER_BATCH_TXN)
+    ):
         *ops, entry_type = exp
         has_match = any(
             node.get(f"{op}Node", {}).get("LedgerEntryType") == entry_type
