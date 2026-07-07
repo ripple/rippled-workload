@@ -89,6 +89,24 @@ def _hostile_amount(value: dict) -> dict:
     return out
 
 
+def _type_morph(value: object) -> object:
+    """Replace a value with one of a DIFFERENT type. STAmount is polymorphic
+    (XRP drops string ↔ IOU/MPT object), so those morphs stay encodable and reach
+    the transactor's amount handling; other cross-type morphs usually die at the
+    codec (→ graceful fuzz_skipped), which is why this op fires only rarely."""
+    if isinstance(value, str) and value.isdigit():  # XRP drops → issued amount
+        return choice(
+            [
+                {"currency": "USD", "issuer": params.fake_account(), "value": "1"},
+                {"mpt_issuance_id": params.fake_mpt_id(), "value": "1"},
+            ]
+        )
+    if isinstance(value, dict) and "value" in value:  # issued amount → XRP drops
+        return choice(["0", "1000000"])
+    candidates: list[object] = [42, "corrupt", True, [{}], {"x": 1}]
+    return choice([c for c in candidates if type(c) is not type(value)])
+
+
 def _hostile(value: object, depth: int = 0) -> object:
     """Return a hostile-but-encodable variant of ``value``, inferred from shape.
     Recurses one level into nested objects/arrays so inner fields aren't spared."""
@@ -166,10 +184,15 @@ def fuzz_mutate(tx_dict: dict) -> list[str]:
         present = [k for k in tx_dict if k not in _PROTECTED]
         if random() < 0.8:
             absent = [(n, t) for n, t in _INJECTABLE if n not in tx_dict]
-            # Injection folds into the set-branch: sometimes add an absent known
-            # field (reaches preflight's unknown/illegal-field paths for the type)
-            # instead of overwriting a present one; set-heavy bias stays intact.
-            if absent and (not present or random() < 0.3):
+            # Both fold into the set-branch (set-heavy bias stays intact): rarely
+            # morph a present field's value to a different type, else sometimes
+            # inject an absent known field (preflight unknown/illegal-field paths),
+            # else overwrite a present field with a same-type hostile value.
+            if present and random() < 0.05:
+                field = choice(present)
+                tx_dict[field] = _type_morph(tx_dict[field])
+                ops.append(f"morph:{field}")
+            elif absent and (not present or random() < 0.3):
                 name, ftype = choice(absent)
                 tx_dict[name] = _hostile_for_type(ftype)
                 ops.append(f"inject:{name}")
