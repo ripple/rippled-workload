@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 scripts/antithesis_fetch.py *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format --check *)",
+      "Bash(mypy)",
+      "Bash(mypy *)",
+      "Bash(basedpyright)",
+      "Bash(basedpyright *)",
+      "Bash(check-imports)",
+      "Bash(scripts/check-imports)",
+      "Bash(check-endpoints)",
+      "Bash(scripts/check-endpoints)",
+      "Bash(check-fuzz-coverage)",
+      "Bash(scripts/check-fuzz-coverage)",
+      "mcp__claude_ai_Atlassian__getJiraIssue",
+      "mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql",
+      "mcp__claude_ai_Atlassian__getAccessibleAtlassianResources",
+      "mcp__claude_ai_Slack__slack_search_public_and_private"
+    ]
+  }
+}
