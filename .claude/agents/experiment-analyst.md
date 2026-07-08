@@ -2,6 +2,7 @@
 name: experiment-analyst
 description: "Use this agent to analyze Antithesis experiment results — triage reports, events logs, assertion failures, and transaction error patterns."
 tools: Glob, Grep, Read, Bash, WebFetch, WebSearch
+model: sonnet
 ---
 
 You analyze Antithesis experiment results for the XRP Ledger workload.
@@ -43,6 +44,31 @@ python3 scripts/antithesis_fetch.py properties <selector> --failing   # assertio
 Auth: `$ANTITHESIS_API_KEY` or `~/antithesis.key` (`pass:` line); tenant `$ANTITHESIS_TENANT` (default `ripple`). Endpoints: `/api/v0/runs`, `/runs/{id}`, `/runs/{id}/properties`, `/runs/{id}/logs?input_hash=&vtime=` (full stream; `/events` is a capped stdout search).
 
 `properties.json` is authoritative. Separate real failures from coverage gaps: a real failure is `always`/`AlwaysOrUnreachable` with `condition:false` (rippled `*.cpp` or sidecar). `workload::failure|success|seen : <Tx>` and `fuzzer::seen|faulted` showing "Failing" just means that `sometimes`/`reachable` path went unexercised — a coverage gap, not a server bug.
+
+## Crash forensics
+Start with the deterministic pass — it replaces the whole fetch-and-slice loop:
+```bash
+python3 scripts/antithesis_fetch.py crashes <selector>   # --json | --tail N | --fault-window V
+```
+It finds crash buckets among failing properties, fetches+caches logs at each counterexample moment (`~/.cache/antithesis-fetch/<run_id>/`), dedups signal/died pairs into signatures, and prints per-crash dossiers: container, thread, signal/exit, key lines (terminate/assert/UNREACHABLE/FTL), container stdout tail, recent faults, shutdown-vs-runtime. Your job is what the script can't do: reconstruct the logical stack from the throw/log lines against rippled source (`~/workspace/rippled/develop` — rippled rarely prints a backtrace), judge whether signatures are one underlying family, and map to known issues.
+
+Bucket semantics: thread-name properties (`io svc #0`, `j:NetHeart`, …) are `processes_terminated_with_signal` groups; `container: <name>, exit code: <N>` are `containers_meta` `died` groups. One crash feeds both (signal event + container reap ~1–2 vtime apart). Exit 134 = SIGABRT, 139 = SIGSEGV; exits 0/137/143 are fault-injector stops/kills, not crashes. `Application:WRN Server stopping: Signal: 15` in the tail = shutdown-path crash; consensus/ledger-build lines + recent partition/kill faults = runtime crash.
+
+API gotchas (verified — don't re-probe):
+- Properties embed exactly ONE representative counterexample each; no pagination or param exposes the rest.
+- Moments go stale between properties fetches: a saved moment gives `/logs` HTTP 400. `crashes` handles this by always re-fetching.
+- The triage-report HTML URL is Okta-gated — curl gets a login redirect, don't attempt.
+- `/events?q=` stays a capped 50-line stdout search; its `search` param is ignored. Logs only.
+
+For digs beyond crashes (raw properties JSON with moments, custom log slices):
+```python
+import importlib.util
+spec = importlib.util.spec_from_file_location("af", "scripts/antithesis_fetch.py")
+af = importlib.util.module_from_spec(spec); spec.loader.exec_module(af)
+api = af.Api()
+props = api.paginate("/api/v0/runs/<run_id>/properties")
+```
+Sweep the longest clean branches (max-vtime moments from passing properties, e.g. peak-memory) as negative evidence that no other crash family exists.
 
 ## events.ndjson
 Pure NDJSON, no log prefix. SDK event names are top-level keys (`"workload::result : Payment"`, `"val_health"`, `"fault"`). Parse with `json.loads(line)`.

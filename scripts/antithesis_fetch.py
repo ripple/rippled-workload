@@ -23,6 +23,15 @@ Key API facts this relies on (verified against the live API):
   moment: SDK events (``workload::result : <Tx>``, ``val_health``, ``fault`` ...) and container
   stdout/stderr. ``begin_vtime``/``begin_input_hash`` restrict it to a range. This is the real
   "events.log"; ``/events`` is only a capped stdout text-search and is not used here.
+- Properties embed exactly ONE representative counterexample; no param exposes the rest. Moments
+  are re-derived per properties fetch and go stale -- a saved moment gives ``/logs`` HTTP 400, so
+  ``crashes`` always works from a fresh properties fetch.
+- Log-stream line shapes (every line: ``moment{input_hash,vtime}``, ``source{name,...}``):
+  signal deaths ``source.name=processes_terminated_with_signal`` with ``output_text`` JSON
+  ``{executable(=thread), signal, pid}``; container exits ``source.name=containers_meta`` with
+  ``event=died``, ``name``, ``container_exit_code``; faults ``source.name=fault_injector`` with
+  ``fault{name,type,affected_nodes,details}``; container stdout has ``source.container`` +
+  ``output_text``. Exit codes 0/137/143 are fault-injector stops/kills, not crashes.
 """
 
 from __future__ import annotations
@@ -30,8 +39,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -316,6 +327,239 @@ def cmd_fetch(api: Api, args: argparse.Namespace) -> None:
     print(f"  run.json  properties.json  failing.txt  {events_note}")
 
 
+# ── crash dossier ─────────────────────────────────────────────────────────────
+
+# fault-injector stop/kill and clean exit -- expected under fault injection
+_BENIGN_EXITS = {0, 137, 143}
+_SIGNAMES = {4: "SIGILL", 6: "SIGABRT", 7: "SIGBUS", 8: "SIGFPE", 11: "SIGSEGV"}
+_KEY_LINE_RE = re.compile(
+    r"terminate called|what\(\):|[Aa]ssertion|UNREACHABLE|Segmentation"
+    r"|:FTL |Server stopping: Signal|stack smashing|double free|corrupted"
+)
+_HEX_RE = re.compile(r"[0-9A-Fa-f]{16,}")
+
+
+def _crash_counterexamples(props: list[dict]) -> list[tuple[str, dict]]:
+    """(property name, counterexample) for every failing crash bucket.
+
+    Thread buckets (``j:NetHeart``, ``io svc #0``) carry a signal counterexample;
+    ``container: X, exit code: N`` buckets carry a container-died counterexample.
+    """
+    out: list[tuple[str, dict]] = []
+    for p in failing(props):
+        for ex in p.get("counterexamples") or []:
+            if not isinstance(ex, dict) or not (ex.get("moment") or {}).get("vtime"):
+                continue
+            src = (ex.get("source") or {}).get("name", "")
+            if src == "processes_terminated_with_signal" or (
+                src == "containers_meta"
+                and ex.get("event") == "died"
+                and ex.get("container_exit_code") not in _BENIGN_EXITS
+            ):
+                out.append((p["name"], ex))
+    return out
+
+
+def _fetch_stream(api: Api, rid: str, moment: dict, cache_dir: Path) -> Path | None:
+    ih, vt = moment["input_hash"], moment["vtime"]
+    path = cache_dir / f"logs_{ih}_{vt}.ndjson"
+    if path.is_file() and path.stat().st_size:
+        return path
+    code, body = api.get(f"/api/v0/runs/{rid}/logs?input_hash={ih}&vtime={vt}")
+    if code != 200:
+        print(f"warn: /logs ih={ih} vt={vt} -> HTTP {code}, skipping", file=sys.stderr)
+        return None
+    path.write_bytes(body)
+    return path
+
+
+def _scan_stream(path: Path) -> dict[str, Any]:
+    signals: list[tuple[float, str, int | None]] = []  # (vtime, thread, signal)
+    deaths: list[tuple[float, str, int | None]] = []  # (vtime, container, exit)
+    faults: list[tuple[float, dict]] = []
+    stdout: dict[str, list[tuple[float, str]]] = {}  # container -> [(vtime, line)]
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            src = d.get("source") or {}
+            try:
+                vt = float((d.get("moment") or {}).get("vtime", ""))
+            except ValueError:
+                continue
+            name = src.get("name", "")
+            if name == "processes_terminated_with_signal":
+                try:
+                    info = json.loads(d.get("output_text") or "{}")
+                except ValueError:
+                    info = {}
+                signals.append((vt, info.get("executable", "?"), info.get("signal")))
+            elif name == "containers_meta" and d.get("event") == "died":
+                deaths.append((vt, d.get("name", "?"), d.get("container_exit_code")))
+            elif name == "fault_injector" and "fault" in d:
+                faults.append((vt, d["fault"]))
+            elif src.get("container") and "output_text" in d:
+                stdout.setdefault(name, []).append((vt, d["output_text"]))
+    return {"signals": signals, "deaths": deaths, "faults": faults, "stdout": stdout}
+
+
+def _fault_brief(f: dict) -> str:
+    det = f.get("details") or {}
+    bits = [str(f.get("name", "?"))]
+    if det.get("disruption_type"):
+        bits.append(str(det["disruption_type"]))
+    if f.get("affected_nodes"):
+        bits.append(",".join(map(str, f["affected_nodes"])))
+    if det.get("partitions"):
+        bits.append(" | ".join("[" + ",".join(p) + "]" for p in det["partitions"]))
+    return " ".join(bits)
+
+
+def _build_record(
+    bucket: str, ex: dict, scan: dict[str, Any], tail_n: int, fault_window: float
+) -> dict[str, Any]:
+    anchor = float(ex["moment"]["vtime"])
+    # the stream ends AT the moment, so the cex's own event may be absent from it -- seed
+    # thread/signal (signal buckets) or container/exit (died buckets) from the cex itself
+    thread = signal = exit_code = container = None
+    if (ex.get("source") or {}).get("name") == "processes_terminated_with_signal":
+        try:
+            info = json.loads(ex.get("output_text") or "{}")
+        except ValueError:
+            info = {}
+        thread, signal = info.get("executable"), info.get("signal")
+    else:
+        container, exit_code = ex.get("name"), ex.get("container_exit_code")
+    sig = min(
+        (s for s in scan["signals"] if anchor - 5 <= s[0] <= anchor + 1),
+        key=lambda s: abs(s[0] - anchor),
+        default=None,
+    )
+    if sig:
+        thread, signal = thread or sig[1], signal if signal is not None else sig[2]
+    death = min(
+        (
+            d
+            for d in scan["deaths"]
+            if anchor - 1 <= d[0] <= anchor + 5 and d[2] not in _BENIGN_EXITS
+        ),
+        key=lambda d: abs(d[0] - anchor),
+        default=None,
+    )
+    if death:
+        container = container or death[1]
+        exit_code = exit_code if exit_code is not None else death[2]
+    crash_vt = sig[0] if sig else anchor
+    if container is None:  # signal events don't name the container; infer from key lines
+        for cname, lines in scan["stdout"].items():
+            near = (line for vt, line in lines if crash_vt - 10 <= vt <= crash_vt + 0.5)
+            if any(_KEY_LINE_RE.search(t) for t in near):
+                container = cname
+                break
+    tail = [(vt, t) for vt, t in scan["stdout"].get(container or "", []) if vt <= crash_vt + 0.5][
+        -max(tail_n, 200) :
+    ]
+    key_lines = [(vt, t) for vt, t in tail if _KEY_LINE_RE.search(t)][-12:]
+    shutdown = any("Server stopping" in t for vt, t in tail if vt >= crash_vt - 40)
+    return {
+        "buckets": [bucket],
+        "container": container or "?",
+        "thread": thread,
+        "signal": signal,
+        "exit_code": exit_code,
+        "moment": ex["moment"],
+        "crash_vtime": crash_vt,
+        "context": "shutdown" if shutdown else "runtime",
+        "faults": [
+            (vt, _fault_brief(f))
+            for vt, f in scan["faults"]
+            if crash_vt - fault_window <= vt <= crash_vt
+        ][-8:],
+        "key_lines": key_lines,
+        "tail": tail[-tail_n:],
+    }
+
+
+def _signature(rec: dict[str, Any]) -> tuple:
+    # last key line = nearest the crash, most specific. Exit code stays out: the signal-bucket
+    # stream ends before the container reap, so its record never sees the exit.
+    head = rec["key_lines"][-1][1] if rec["key_lines"] else ""
+    return (rec["container"], rec["signal"], _HEX_RE.sub("…", head.strip()))
+
+
+def cmd_crashes(api: Api, args: argparse.Namespace) -> None:
+    r = resolve(api, args.selector)
+    rid = r["run_id"]
+    f = _desc_fields(r.get("description", ""))
+    props = api.paginate(f"/api/v0/runs/{rid}/properties", limit=100)
+    cexs = _crash_counterexamples(props)
+    counts = {p["name"]: p.get("counterexample_count", 0) for p in props}
+
+    print(
+        f"run {rid}  xrpld {f.get('xrpld_ref')}@{f.get('xrpld_commit')}  "
+        f"workload {f.get('workload_ref')}@{f.get('workload_commit')}  gh={f.get('run')}"
+    )
+    if not cexs:
+        print("no crash buckets (signal deaths / unexpected exits) among failing properties")
+        return
+    names = sorted({b for b, _ in cexs})
+    print(f"crash buckets: {len(names)}")
+    for n in names:
+        print(f"  {n}  (cex={counts.get(n, '?')}, 1 inspectable -- API embeds one per property)")
+
+    cache = Path(args.cache_dir).expanduser() / rid
+    cache.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(4) as pool:
+        paths = list(pool.map(lambda be: _fetch_stream(api, rid, be[1]["moment"], cache), cexs))
+
+    scans: dict[Path, dict[str, Any]] = {}
+    records: list[dict[str, Any]] = []
+    for (bucket, ex), path in zip(cexs, paths, strict=True):
+        if path is None:
+            continue
+        if path not in scans:
+            scans[path] = _scan_stream(path)
+        records.append(_build_record(bucket, ex, scans[path], args.tail, args.fault_window))
+
+    merged: dict[tuple, dict[str, Any]] = {}
+    for rec in records:
+        key = _signature(rec)
+        if key in merged:
+            kept = merged[key]
+            kept["buckets"].extend(rec["buckets"])
+            for field in ("exit_code", "thread"):
+                if kept[field] is None:
+                    kept[field] = rec[field]
+        else:
+            merged[key] = rec
+
+    if args.json:
+        print(json.dumps(list(merged.values()), indent=2))
+        return
+    for i, rec in enumerate(merged.values(), 1):
+        signame = _SIGNAMES.get(rec["signal"] or 0, f"signal {rec['signal']}")
+        exit_s = f", exit {rec['exit_code']}" if rec["exit_code"] is not None else ""
+        thread_s = f", thread {rec['thread']}" if rec["thread"] else ""
+        print(f"\n== crash {i}: {rec['container']} {signame}{exit_s}{thread_s}  [{rec['context']}]")
+        print(f"   buckets: {'; '.join(rec['buckets'])}")
+        m = rec["moment"]
+        print(f"   moment:  input_hash={m['input_hash']} vtime={m['vtime']}")
+        if rec["faults"]:
+            print(f"   faults (last {args.fault_window:g} vtime):")
+            for vt, brief in rec["faults"]:
+                print(f"     vt {vt:9.2f}  {brief}")
+        if rec["key_lines"]:
+            print("   key lines:")
+            for vt, t in rec["key_lines"]:
+                print(f"     vt {vt:9.2f}  {t.strip()[:160]}")
+        print(f"   {rec['container']} tail ({len(rec['tail'])} lines):")
+        for vt, t in rec["tail"]:
+            print(f"     vt {vt:9.2f}  {t.rstrip()[:160]}")
+    print(f"\nstreams cached in {cache}/")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Fetch Antithesis run results via the REST API.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -357,6 +601,16 @@ def main() -> None:
     p.add_argument("selector")
     p.add_argument("--save-dir", help="parent dir (default ~/Downloads/antithesis)")
     p.set_defaults(fn=cmd_fetch)
+
+    p = sub.add_parser("crashes", help="crash dossier: buckets -> logs at moments -> signatures")
+    p.add_argument("selector")
+    p.add_argument("--tail", type=int, default=20, help="stdout lines per crash (default 20)")
+    p.add_argument(
+        "--fault-window", type=float, default=40.0, help="vtime window for faults (default 40)"
+    )
+    p.add_argument("--cache-dir", default="~/.cache/antithesis-fetch", help="log stream cache")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.set_defaults(fn=cmd_crashes)
 
     args = ap.parse_args()
     args.fn(Api(), args)
