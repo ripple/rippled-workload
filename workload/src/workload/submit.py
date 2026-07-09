@@ -1,6 +1,7 @@
 """Fire-and-forget transaction submission; ws_listener.py handles validated results."""
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
@@ -85,6 +86,7 @@ async def submit_raw(
     client: AsyncJsonRpcClient,
     wallet: Wallet,
     mutate: Callable[[dict], None] | None = None,
+    encode_ctx: AbstractContextManager[None] | None = None,
 ) -> dict:
     """Raw ``_faulty`` submit path: autofill a valid ``base``, ``mutate(dict)`` it
     into a malformation xrpl-py rejects at construction, then sign+submit raw so
@@ -93,6 +95,9 @@ async def submit_raw(
     Contract: ``mutate`` MUST keep the dict encodable — submit_raw has no encode
     guard (only submit_fuzzed catches XRPLBinaryCodecException / ValueError).
     Delegation is intentionally NOT applied here so a flagged result maps to one account.
+
+    ``encode_ctx`` wraps the sign+encode section — the brutal fuzz band injects
+    unregistered codes into the codec definitions for its duration (see rawfuzz.py).
     """
     autofilled = await autofill(base, client)
     tx_dict = autofilled.to_xrpl()
@@ -100,10 +105,12 @@ async def submit_raw(
     if mutate is not None:
         mutate(tx_dict)
     tx_dict["SigningPubKey"] = wallet.public_key
-    serialized = encode_for_signing(tx_dict)
-    tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
+    with encode_ctx if encode_ctx is not None else nullcontext():
+        serialized = encode_for_signing(tx_dict)
+        tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
+        tx_blob = encode(tx_dict)
     tx_submitting(name, tx_dict)
-    response = await client.request(SubmitOnly(tx_blob=encode(tx_dict)))
+    response = await client.request(SubmitOnly(tx_blob=tx_blob))
     result: dict = response.result
     tx_submitted(name, tx_dict, result)
     return result

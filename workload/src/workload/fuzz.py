@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+
 from antithesis.lifecycle import send_event
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.core.binarycodec.definitions.definitions import load_definitions
@@ -9,7 +12,7 @@ from xrpl.core.binarycodec.exceptions import XRPLBinaryCodecException
 from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
-from workload import params
+from workload import params, rawfuzz
 from workload.randoms import choice, randint, random
 from workload.submit import submit_raw
 
@@ -217,14 +220,27 @@ async def submit_fuzzed(
 ) -> dict | None:
     """Fuzz a valid ``base`` and submit raw. Never raises (faulty paths must not):
     an unserializable shape emits ``workload::fuzz_skipped`` and returns None.
+
+    Mostly the codec-legal band (``fuzz_mutate``); a low ``RAW_CHANCE`` fraction
+    escalates to ``rawfuzz`` when a raw operator applies to ``name``.
     """
     ops: list[str] = []
+    mutate: Callable[[dict], None]
+    encode_ctx: AbstractContextManager[None] | None
 
-    def _mutate(d: dict) -> None:
-        ops.extend(fuzz_mutate(d))
+    escalation = rawfuzz.escalate(name, ops) if random() < rawfuzz.RAW_CHANCE else None
+    if escalation is not None:
+        mutate, encode_ctx = escalation
+    else:
+        encode_ctx = None
+
+        def _codec_legal(d: dict) -> None:
+            ops.extend(fuzz_mutate(d))
+
+        mutate = _codec_legal
 
     try:
-        result = await submit_raw(name, base, client, wallet, _mutate)
+        result = await submit_raw(name, base, client, wallet, mutate, encode_ctx=encode_ctx)
     except (XRPLBinaryCodecException, ValueError, TypeError, KeyError, OverflowError) as e:
         send_event(
             "workload::fuzz_skipped",

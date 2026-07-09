@@ -67,6 +67,13 @@ One random mutation via `choice()`; never raise; same preconditions as `_valid`.
 
 Wired as one `"fuzz"` choice in **every** `_faulty`, alongside curated mutations sharing a `_*_base()` builder — `check-fuzz-coverage` fails CI for any `_faulty` lacking it. Because fuzz rides single-wallet `submit_raw`, it can't sign txns needing a counterparty co-sign: `LoanSet` (broker co-sign) is the sole exclusion, listed in `check-fuzz-coverage`. `Batch` is single-account so it fuzzes the outer dict; multi-account batches would need `BatchSigners`.
 
+### Raw fuzz band (`rawfuzz.py`)
+The band above is codec-legal — every blob parses at the top level and reaches doApply, the highest-yield surface per submit. `rawfuzz` is a low-weight escalation (`RAW_CHANCE`) inside `submit_fuzzed` that corrupts **through** the codec's gatekeeping: encodings a conformant client library can never emit. `escalate(name, ops)` returns `(mutate, encode_ctx)` when a raw operator applies, else `None` (caller falls back to codec-legal). The `encode_ctx` wraps `submit_raw`'s sign+encode section (new `encode_ctx` param) so injected codes survive the encode. Same `workload::fuzz` event namespace; the op is tagged in `ops` (`raw:*`).
+
+Injection mechanism: `TRANSACTION_TYPES` in the codec's `_DEFINITIONS` is read live by `get_transaction_type_code`, so temporarily inserting a sentinel `name -> code` makes `encode` emit an unregistered type. (`FIELDS` is **not** live — field lookup uses a prebuilt instance cache — so unregistered *field* codes and byte-level structural corruption need a field-by-field assembler, a separate future band, not wired here.)
+
+v1 operator — **Batch inner-txn carrier** (`_carry_unknown_inner_txn_type`): a validly-signed outer Batch (≥2 inners) whose inner carries `TransactionType=60000`. Outer parses + signature verifies; the inner survives outer deserialization (raw-transaction field has no inner-object template) and only throws later when batch fee recomputation reconstructs it as a full transaction against an unknown type — an uncaught throw class. Restores the map on exit; single-process asyncio + unused sentinel name makes concurrent encodes safe.
+
 ### LoanSet co-signing
 Dual sign (borrower + broker): `autofill_and_sign` → `sign_loan_set_by_counterparty` → `tx_submitting("LoanSet", cosigned.tx)` → `xrpl_submit` → `tx_submitted("LoanSet", cosigned.tx, result)` (pass the co-signed tx, not the unsigned model, so the logged body has the counterparty signer + autofilled fields). Setup direct paths (`setup.py` co-sign, `_probe_node`) call `assert_no_internal_error_submit` and emit `setup_*` instead.
 
