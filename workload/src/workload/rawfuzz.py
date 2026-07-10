@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import xrpl.core.binarycodec.definitions.definitions as _defs
 
+from workload import assembler
 from workload.randoms import choice, randint
 
 # Above every real transaction type: the codec accepts the sentinel mapping, the server's
@@ -99,6 +100,68 @@ def _byte_flip(blob: bytes) -> bytes:
     return bytes(b)
 
 
+# Field-aware ops: parse the blob into field spans, splice one, reassemble. Structure the
+# codec enforces (canonical order, known field codes, honest VL prefixes) but rippled's
+# deserializer must still reject without crashing.
+
+
+def _field_id(type_code: int, field_code: int) -> bytes:
+    if type_code < 16 and field_code < 16:
+        return bytes([(type_code << 4) | field_code])
+    if type_code < 16:
+        return bytes([type_code << 4, field_code])
+    if field_code < 16:
+        return bytes([field_code, type_code])
+    return bytes([0, type_code, field_code])
+
+
+def _duplicate_field(blob: bytes) -> bytes:
+    fields = assembler.parse(blob)
+    if not fields:
+        return blob
+    i = randint(0, len(fields) - 1)
+    fields.insert(i, fields[i])
+    return assembler.reassemble(fields)
+
+
+def _reorder_fields(blob: bytes) -> bytes:
+    fields = assembler.parse(blob)
+    if len(fields) < 2:
+        return blob
+    i, j = randint(0, len(fields) - 1), randint(0, len(fields) - 1)
+    fields[i], fields[j] = fields[j], fields[i]
+    return assembler.reassemble(fields)
+
+
+def _unknown_field_code(blob: bytes) -> bytes:
+    fields = assembler.parse(blob)
+    # UInt32 type (code 2) with an unregistered field code so the parser hits an unknown field.
+    injected = assembler.Field("", "UInt32", False, _field_id(2, 255), _random_bytes(4))
+    fields.insert(randint(0, len(fields)), injected)
+    return assembler.reassemble(fields)
+
+
+def _vl_length_lie(blob: bytes) -> bytes:
+    fields = assembler.parse(blob)
+    vl = [f for f in fields if f.is_vl and f.value]
+    if not vl:
+        return blob
+    f = choice(vl)
+    content = f.value[assembler.vl_prefix_len(f) :]
+    f.value = bytes([randint(0, 192)]) + content  # single-byte prefix lying about the length
+    return assembler.reassemble(fields)
+
+
+def _drop_end_marker(blob: bytes) -> bytes:
+    fields = assembler.parse(blob)
+    containers = [f for f in fields if f.type_name in ("STArray", "STObject") and f.value]
+    if not containers:
+        return blob
+    target = choice(containers)
+    target.value = target.value[:-1]  # drop the terminating end-marker byte
+    return assembler.reassemble(fields)
+
+
 @dataclass(frozen=True)
 class _Operator:
     tag: str
@@ -111,11 +174,20 @@ def _blob_op(fn: Callable[[bytes], bytes]) -> Callable[[], Escalation]:
     return lambda: Escalation(blob_mutate=fn)
 
 
+def _starter(n: str) -> bool:
+    return n in _STARTER_TYPES
+
+
 _OPERATORS: tuple[_Operator, ...] = (
     _Operator("unknown_inner_txn_type", 3, lambda n: n == "Batch", _unknown_inner_txn_type),
-    _Operator("truncate", 1, lambda n: n in _STARTER_TYPES, _blob_op(_truncate)),
-    _Operator("trailing_garbage", 1, lambda n: n in _STARTER_TYPES, _blob_op(_trailing_garbage)),
-    _Operator("byte_flip", 1, lambda n: n in _STARTER_TYPES, _blob_op(_byte_flip)),
+    _Operator("truncate", 1, _starter, _blob_op(_truncate)),
+    _Operator("trailing_garbage", 1, _starter, _blob_op(_trailing_garbage)),
+    _Operator("byte_flip", 1, _starter, _blob_op(_byte_flip)),
+    _Operator("duplicate_field", 1, _starter, _blob_op(_duplicate_field)),
+    _Operator("reorder_fields", 1, _starter, _blob_op(_reorder_fields)),
+    _Operator("unknown_field_code", 1, _starter, _blob_op(_unknown_field_code)),
+    _Operator("vl_length_lie", 1, _starter, _blob_op(_vl_length_lie)),
+    _Operator("drop_end_marker", 1, _starter, _blob_op(_drop_end_marker)),
 )
 
 

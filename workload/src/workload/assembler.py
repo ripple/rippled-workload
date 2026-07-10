@@ -15,6 +15,7 @@ from xrpl.core.binarycodec.binary_wrappers.binary_parser import BinaryParser
 class Field:
     name: str
     type_name: str
+    is_vl: bool  # variable-length-encoded: value leads with a 1-3 byte size prefix
     header: bytes  # field-id bytes
     # everything the parser consumed after the header: VL length prefix + content for a
     # variable-length field, or nested content + end marker for an STObject/STArray.
@@ -36,9 +37,20 @@ def parse(blob: bytes) -> list[Field]:
         after_value = parser.bytes
         header = before[: len(before) - len(after_header)]
         value = after_header[: len(after_header) - len(after_value)]
-        fields.append(Field(instance.name, instance.type, header, value))
+        fields.append(
+            Field(instance.name, instance.type, instance.is_variable_length_encoded, header, value)
+        )
     return fields
 
 
 def reassemble(fields: list[Field]) -> bytes:
     return b"".join(f.raw for f in fields)
+
+
+def vl_prefix_len(field: Field) -> int:
+    """Byte width of the VL size prefix at the head of ``field.value`` (0 if not VL).
+    Mirrors rippled's length-prefix rule so an op can splice prefix vs content."""
+    if not field.is_vl or not field.value:
+        return 0
+    first = field.value[0]
+    return 1 if first <= 192 else 2 if first <= 240 else 3
