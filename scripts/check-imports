@@ -39,6 +39,7 @@ from workload.submit import submit_tx
 from workload.modifiers import apply_modifiers, check_modifier_coverage
 from workload.fuzz import submit_fuzzed, fuzz_mutate
 from workload.rawfuzz import escalate
+from workload.assembler import parse, reassemble
 from workload.sequence import SequenceTracker
 from workload.ws_listener import start_ws_listener
 from workload.setup import run_setup

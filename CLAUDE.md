@@ -7,10 +7,11 @@ Antithesis workload generator for rippled fuzzing. FastAPI server emits random X
 `direnv allow` once — `.envrc` auto-loads the flake devshell (Python, uv, ruff, mypy, basedpyright, `scripts/` on PATH) on every `cd` into the tree, and `uv sync`s the venv. Without direnv, prefix commands with `nix develop --command` (what CI does). With the env active:
 
 ```bash
-check-imports          # imports resolve (~2s)
-check-endpoints        # endpoints register (~3s)
-check-fuzz-coverage    # every _faulty wires generative fuzz (~2s)
-check-modifier-coverage # every Modifier partitions REGISTRY types (~2s)
+check-imports              # imports resolve (~2s)
+check-endpoints            # endpoints register (~3s)
+check-fuzz-coverage        # every _faulty wires generative fuzz (~2s)
+check-modifier-coverage    # every Modifier partitions REGISTRY types (~2s)
+check-assembler-roundtrip  # assembler parse/reassemble is byte-identity (~2s)
 ```
 
 ## Add a transaction type
@@ -72,7 +73,9 @@ The band above is codec-legal — every blob parses at the top level and reaches
 
 Two corruption surfaces:
 - **Surface 2 — parseable, no conformant client emits it** (pre-sign, needs a valid signature): mutate the tx dict + register sentinel codes via `encode_ctx`, which wraps `submit_raw`'s sign+encode section so the injected codes survive both the signing blob and the wire blob. Mechanism: `TRANSACTION_TYPES` in the codec's `_DEFINITIONS` is read live by `get_transaction_type_code`, so a temporary sentinel `name -> code` makes `encode` emit an unregistered type. (`FIELDS` is **not** live — a prebuilt instance cache — so unregistered *field* codes need the field-aware assembler, not this path.)
-- **Surface 1 — structural byte corruption** (post-sign, via `blob_mutate`): corrupt the serialized blob after signing. The signature no longer covers it, but rippled's deserializer runs *before* signature checks, so this targets the parser. Phase A ops are codec-blind: `truncate`, `trailing_garbage`, `byte_flip`. Field-aware ops (unknown field code, VL-length lies, reorder, …) land on the assembler in a later commit.
+- **Surface 1 — structural byte corruption** (post-sign, via `blob_mutate`): corrupt the serialized blob after signing. The signature no longer covers it, but rippled's deserializer runs *before* signature checks, so this targets the parser. Phase A ops are codec-blind: `truncate`, `trailing_garbage`, `byte_flip`. Field-aware ops (unknown field code, VL-length lies, reorder, …) ride the assembler.
+
+`assembler.py` is the field-aware primitive: `parse(blob)` walks a canonical blob into ordered `Field` spans (exact consumed bytes via `BinaryParser` cursor deltas), `reassemble(fields)` concatenates them. `reassemble(parse(b)) == b` by construction on any canonical blob, so a field-aware op's only effect is the bytes it deliberately splices — `check-assembler-roundtrip` guards that identity across scalar/VL/Amount/PathSet/STArray/STObject/nested-txn samples.
 
 Surface-2 v1 operator — **Batch inner-txn carrier** (`_carry_unknown_inner_txn_type`): a validly-signed outer Batch (≥2 inners) whose inner carries `TransactionType=60000`. Outer parses + signature verifies, exercising how an inner transaction with an unregistered type is handled downstream of outer deserialization. `_injected_txn_types` restores the map on exit; single-process asyncio + unused sentinel name makes concurrent encodes safe.
 
