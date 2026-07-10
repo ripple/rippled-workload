@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 
+import httpx
 from antithesis.lifecycle import send_event
 from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.clients import XRPLRequestFailureException
 from xrpl.core.binarycodec.definitions.definitions import load_definitions
 from xrpl.core.binarycodec.exceptions import XRPLBinaryCodecException
 from xrpl.models.transactions.transaction import Transaction
@@ -244,6 +246,20 @@ async def submit_fuzzed(
         send_event(
             "workload::fuzz_skipped",
             {"tx_type": name, "ops": "; ".join(ops), "error": type(e).__name__},
+        )
+        return None
+    except httpx.TimeoutException as e:
+        # Node hung on the blob past xrpl-py's 10s ceiling — a DoS smell, not a build failure.
+        send_event(
+            "workload::fuzz_timeout",
+            {"tx_type": name, "ops": "; ".join(ops), "error": type(e).__name__},
+        )
+        return None
+    except XRPLRequestFailureException:
+        # Non-JSON response: the node choked rather than cleanly rejecting — crash-adjacent.
+        send_event(
+            "workload::fuzz_undecodable_response",
+            {"tx_type": name, "ops": "; ".join(ops)},
         )
         return None
     tx_hash = result.get("tx_json", {}).get("hash", "") or result.get("hash", "")
