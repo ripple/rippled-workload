@@ -226,22 +226,28 @@ async def submit_fuzzed(
     A ``RAW_CHANCE`` fraction escalates to the raw band when it covers ``name``.
     """
     ops: list[str] = []
-    mutate: Callable[[dict], None]
+    dict_mutate: Callable[[dict], None] | None
     encode_ctx: AbstractContextManager[None] | None
+    blob_mutate: Callable[[bytes], bytes] | None
 
     escalation = rawfuzz.escalate(name, ops) if random() < rawfuzz.RAW_CHANCE else None
     if escalation is not None:
-        mutate, encode_ctx = escalation
+        dict_mutate = escalation.dict_mutate
+        encode_ctx = escalation.encode_ctx
+        blob_mutate = escalation.blob_mutate
     else:
         encode_ctx = None
+        blob_mutate = None
 
         def _codec_legal(d: dict) -> None:
             ops.extend(fuzz_mutate(d))
 
-        mutate = _codec_legal
+        dict_mutate = _codec_legal
 
     try:
-        result = await submit_raw(name, base, client, wallet, mutate, encode_ctx=encode_ctx)
+        result = await submit_raw(
+            name, base, client, wallet, dict_mutate, encode_ctx=encode_ctx, blob_mutate=blob_mutate
+        )
     except (XRPLBinaryCodecException, ValueError, TypeError, KeyError, OverflowError) as e:
         send_event(
             "workload::fuzz_skipped",

@@ -87,6 +87,7 @@ async def submit_raw(
     wallet: Wallet,
     mutate: Callable[[dict], None] | None = None,
     encode_ctx: AbstractContextManager[None] | None = None,
+    blob_mutate: Callable[[bytes], bytes] | None = None,
 ) -> dict:
     """Raw ``_faulty`` submit path: autofill a valid ``base``, ``mutate(dict)`` it
     into a malformation xrpl-py rejects at construction, then sign+submit raw so
@@ -97,6 +98,8 @@ async def submit_raw(
     Delegation is intentionally NOT applied here so a flagged result maps to one account.
     ``encode_ctx`` must stay live across sign+encode (the raw band mutates codec
     definitions for that window; see rawfuzz.py).
+    ``blob_mutate`` corrupts the serialized blob after signing — the signature no longer
+    covers it, so it targets rippled's deserializer, which runs before signature checks.
     """
     autofilled = await autofill(base, client)
     tx_dict = autofilled.to_xrpl()
@@ -108,6 +111,8 @@ async def submit_raw(
         serialized = encode_for_signing(tx_dict)
         tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
         tx_blob = encode(tx_dict)
+    if blob_mutate is not None:
+        tx_blob = blob_mutate(bytes.fromhex(tx_blob)).hex().upper()
     tx_submitting(name, tx_dict)
     response = await client.request(SubmitOnly(tx_blob=tx_blob))
     result: dict = response.result
