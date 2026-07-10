@@ -221,8 +221,7 @@ async def submit_fuzzed(
     """Fuzz a valid ``base`` and submit raw. Never raises (faulty paths must not):
     an unserializable shape emits ``workload::fuzz_skipped`` and returns None.
 
-    Mostly the codec-legal band (``fuzz_mutate``); a low ``RAW_CHANCE`` fraction
-    escalates to ``rawfuzz`` when a raw operator applies to ``name``.
+    A ``RAW_CHANCE`` fraction escalates to the raw band when it covers ``name``.
     """
     ops: list[str] = []
     mutate: Callable[[dict], None]

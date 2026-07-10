@@ -95,9 +95,8 @@ async def submit_raw(
     Contract: ``mutate`` MUST keep the dict encodable — submit_raw has no encode
     guard (only submit_fuzzed catches XRPLBinaryCodecException / ValueError).
     Delegation is intentionally NOT applied here so a flagged result maps to one account.
-
-    ``encode_ctx`` wraps the sign+encode section — the brutal fuzz band injects
-    unregistered codes into the codec definitions for its duration (see rawfuzz.py).
+    ``encode_ctx`` must stay live across sign+encode (the raw band mutates codec
+    definitions for that window; see rawfuzz.py).
     """
     autofilled = await autofill(base, client)
     tx_dict = autofilled.to_xrpl()
