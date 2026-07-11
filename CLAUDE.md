@@ -130,3 +130,11 @@ Caveat: `sometimes(success)` + `conf_mpt_version_monotonic` only fire against an
 
 ### Randomness & specs
 All randomness via `workload.randoms` (`AntithesisRandom`); generators in `params.py`, never hardcode. Tx docs: `xrpl.org/docs/references/protocol/transactions/types/<name>`; specs: `github.com/XRPLF/XRPL-Standards` `XLS-NNNN-<name>/`.
+
+## Crash diagnostics (xrpld image)
+
+`xrpld` is an unstripped Debug build with full DWARF (`/symbols/xrpld`), so crashes are fully symbolizable — but a raw SIGSEGV leaves nothing in `debug.log`. Two mechanisms capture it, both applied at the **image/compose** level so they cover **every** node built on this image (validators, the tracking-node peer, and the fuzzer), not just whatever runs `fuzzer-entrypoint.sh`:
+- **boost::stacktrace handler** (`crash-handler/crash_handler.cpp`, built header-only w/ addr2line backend). Installed via `/etc/ld.so.preload` (`Dockerfile.xrpld`) so it loads into every dynamically-linked process regardless of launch path, and composes with any platform `LD_PRELOAD` (e.g. libvoidstar) instead of being overridden by a runtime env. On a fatal signal it `safe_dump_to()`s a raw stack (async-signal-safe), then re-raises to also produce a core; the next start symbolizes the dump to `file:line` on stderr. Symbolization assumes stable load addresses (holds under Antithesis's disabled ASLR); the core is the ASLR-independent fallback.
+- **Core dumps** — enabled via the compose `ulimits: core` on every service (`prepare-workload/` `service.yml.mako` + `fuzzer_service.yml.mako`), so validators/peer get cores even though they launch `xrpld` directly with no entrypoint. `fuzzer-entrypoint.sh` additionally best-efforts `core_pattern` → `/var/log/xrpld/cores/` (host-global sysctl, may be read-only). Runtime image ships `gdb`/`binutils`/`elfutils`/`file` to open cores in-container.
+
+Launch gotcha: validators (`val0`–`valN`) and the tracking-node peer (`xrpld`) run the `xrpld` binary directly via `command:` in the generated compose; only the `fuzzer` container runs `fuzzer-entrypoint.sh` (which also starts an isolated xrpld internally). That's why the two mechanisms live in the image (`ld.so.preload`) and the compose templates (`ulimits`) rather than the entrypoint. An in-process backtrace-on-SIGSEGV still belongs upstream in rippled itself.
