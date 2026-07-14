@@ -210,6 +210,10 @@ def create_app(workload: Workload) -> FastAPI:
                 "workload::setup_failed",
                 {"error": f"{type(e).__name__}: {e}"},
             )
+            # Antithesis ends a run immediately on a non-zero container exit before
+            # setup_complete. Exiting here aborts a broken setup fast instead of idling
+            # the full duration; unreachable() above is dispatched synchronously first.
+            os._exit(1)
 
         yield
 
