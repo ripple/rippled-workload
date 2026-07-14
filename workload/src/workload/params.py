@@ -467,6 +467,13 @@ def confidential_invalid_flags() -> int:
 SPF_SPONSOR_FEE = 0x00000001
 SPF_SPONSOR_RESERVE = 0x00000002
 
+# TEMPORARY: xrpl-py's SponsorshipTransferFlag enum (0x1/0x2/0x4) is 16 bits off from
+# rippled's tfSponsorship{End,Create,Reassign} (0x10000/0x20000/0x40000), so the enum
+# draws temINVALID_FLAG. Mirror rippled's bits until the xrpl-py branch is corrected.
+TF_SPONSORSHIP_END = 0x00010000
+TF_SPONSORSHIP_CREATE = 0x00020000
+TF_SPONSORSHIP_REASSIGN = 0x00040000
+
 
 def sponsored_account_amount() -> str:
     """Below the base reserve -- the sponsor covers it, not the sender (the feature's point)."""

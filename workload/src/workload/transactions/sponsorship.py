@@ -33,7 +33,6 @@ from xrpl.models.transactions import (
     SponsorshipSet,
     SponsorshipSetFlag,
     SponsorshipTransfer,
-    SponsorshipTransferFlag,
 )
 from xrpl.transaction import sign_as_sponsor
 from xrpl.wallet import Wallet
@@ -129,7 +128,7 @@ async def _submit_transfer_prefunded(
     sponsee: UserAccount,
     sponsor_addr: str,
     object_id: str | None,
-    flag: SponsorshipTransferFlag,
+    flag: int,
     client: AsyncJsonRpcClient,
 ) -> None:
     """A prefunded Sponsorship with budget lets the sponsee submit alone (XLS-68
@@ -150,7 +149,7 @@ async def _submit_transfer_cosigned(
     sponsee: UserAccount,
     sponsor: UserAccount,
     object_id: str | None,
-    flag: SponsorshipTransferFlag,
+    flag: int,
     client: AsyncJsonRpcClient,
 ) -> None:
     """Dual-sign per sponsor_signer.py's documented flow: the sponsee autofills
@@ -186,7 +185,7 @@ async def _submit_transfer_end(
         account=submitter.address,
         object_id=object_id,
         sponsee=sponsee_addr,
-        flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+        flags=params.TF_SPONSORSHIP_END,
     )
     await submit_tx(name, txn, client, submitter.wallet)
 
@@ -517,7 +516,7 @@ def _transfer_end_base(
         account=submitter_addr,
         object_id=object_id,
         sponsee=sponsee_addr,
-        flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+        flags=params.TF_SPONSORSHIP_END,
     )
     return txn, accounts[submitter_addr].wallet
 
@@ -555,7 +554,7 @@ async def _sponsorship_transfer_valid(
         if new_sponsor_addr is None:
             return
         owner = accounts[owner_addr]
-        flag = SponsorshipTransferFlag.TF_SPONSORSHIP_CREATE
+        flag = params.TF_SPONSORSHIP_CREATE
         if prefunded:
             await _submit_transfer_prefunded(
                 "SponsorshipTransfer", owner, new_sponsor_addr, object_id, flag, client
@@ -586,7 +585,7 @@ async def _sponsorship_transfer_valid(
     if new_sponsor_addr is None:
         return
     owner = accounts[owner_addr]
-    flag = SponsorshipTransferFlag.TF_SPONSORSHIP_REASSIGN
+    flag = params.TF_SPONSORSHIP_REASSIGN
     if prefunded:
         await _submit_transfer_prefunded(
             "SponsorshipTransfer", owner, new_sponsor_addr, object_id, flag, client
@@ -648,9 +647,7 @@ async def _sponsorship_transfer_faulty(
 
     if mutation == "multiple_flags":
         acc = choice(list(accounts.values()))
-        base = SponsorshipTransfer(
-            account=acc.address, flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END
-        )
+        base = SponsorshipTransfer(account=acc.address, flags=params.TF_SPONSORSHIP_END)
 
         def _mutate(d: dict) -> None:
             d["Flags"] = params.TF_SPONSORSHIP_CREATE | params.TF_SPONSORSHIP_REASSIGN
@@ -663,7 +660,7 @@ async def _sponsorship_transfer_faulty(
         txn = SponsorshipTransfer(
             account=acc.address,
             object_id=params.fake_id(),
-            flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+            flags=params.TF_SPONSORSHIP_END,
         )
         await submit_tx("SponsorshipTransfer", txn, client, acc.wallet)
         return
@@ -676,7 +673,7 @@ async def _sponsorship_transfer_faulty(
         txn = SponsorshipTransfer(
             account=owner.address,
             object_id=object_id,
-            flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+            flags=params.TF_SPONSORSHIP_END,
         )
         await submit_tx("SponsorshipTransfer", txn, client, owner.wallet)
         return
@@ -691,7 +688,7 @@ async def _sponsorship_transfer_faulty(
         if new_sponsor_addr is None:
             return
         owner = accounts[owner_addr]
-        flag = SponsorshipTransferFlag.TF_SPONSORSHIP_CREATE
+        flag = params.TF_SPONSORSHIP_CREATE
         if prefunded:
             await _submit_transfer_prefunded(
                 "SponsorshipTransfer", owner, new_sponsor_addr, object_id, flag, client
@@ -710,7 +707,7 @@ async def _sponsorship_transfer_faulty(
         if new_sponsor_addr is None:
             return
         owner = accounts[owner_addr]
-        flag = SponsorshipTransferFlag.TF_SPONSORSHIP_REASSIGN
+        flag = params.TF_SPONSORSHIP_REASSIGN
         if prefunded:
             await _submit_transfer_prefunded(
                 "SponsorshipTransfer", owner, new_sponsor_addr, object_id, flag, client
@@ -733,7 +730,7 @@ async def _sponsorship_transfer_faulty(
             account=third.address,
             object_id=object_id,
             sponsee=owner_addr,
-            flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+            flags=params.TF_SPONSORSHIP_END,
         )
         await submit_tx("SponsorshipTransfer", txn, client, third.wallet)
         return
@@ -750,7 +747,7 @@ async def _sponsorship_transfer_faulty(
         txn = SponsorshipTransfer(
             account=acc.address,
             object_id=offer_id,
-            flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+            flags=params.TF_SPONSORSHIP_END,
         )
         await submit_tx("SponsorshipTransfer", txn, client, acc.wallet)
         return
@@ -771,7 +768,7 @@ async def _sponsorship_transfer_faulty(
     txn = SponsorshipTransfer(
         account=owner.address,
         object_id=object_id,
-        flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+        flags=params.TF_SPONSORSHIP_END,
     )
     await submit_tx("SponsorshipTransfer", txn, client, owner.wallet)
 
@@ -820,7 +817,7 @@ def _transfer_end_account_base(
     txn = SponsorshipTransfer(
         account=submitter_addr,
         sponsee=sponsee_addr,
-        flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+        flags=params.TF_SPONSORSHIP_END,
     )
     return txn, accounts[submitter_addr].wallet
 
@@ -856,7 +853,7 @@ async def _sponsorship_transfer_account_valid(
             accounts[owner_addr],
             accounts[new_sponsor_addr],
             None,
-            SponsorshipTransferFlag.TF_SPONSORSHIP_CREATE,
+            params.TF_SPONSORSHIP_CREATE,
             client,
         )
         return
@@ -885,7 +882,7 @@ async def _sponsorship_transfer_account_valid(
         accounts[owner_addr],
         accounts[new_sponsor_addr],
         None,
-        SponsorshipTransferFlag.TF_SPONSORSHIP_REASSIGN,
+        params.TF_SPONSORSHIP_REASSIGN,
         client,
     )
 
@@ -941,7 +938,7 @@ async def _sponsorship_transfer_account_faulty(
             account=owner_addr,
             sponsor=new_sponsor_addr,
             sponsor_flags=params.sponsor_reserve_flags(),
-            flags=SponsorshipTransferFlag.TF_SPONSORSHIP_CREATE,
+            flags=params.TF_SPONSORSHIP_CREATE,
         )
         await submit_tx("SponsorshipTransferAccount", txn, client, accounts[owner_addr].wallet)
         return
@@ -957,7 +954,7 @@ async def _sponsorship_transfer_account_faulty(
             account=owner.address,
             sponsor=fake_wallet.address,
             sponsor_flags=params.sponsor_reserve_flags(),
-            flags=SponsorshipTransferFlag.TF_SPONSORSHIP_CREATE,
+            flags=params.TF_SPONSORSHIP_CREATE,
         )
         signed = await autofill_and_sign(txn, client, owner.wallet)
         sponsor_result = sign_as_sponsor(fake_wallet, signed)
@@ -977,7 +974,7 @@ async def _sponsorship_transfer_account_faulty(
         txn = SponsorshipTransfer(
             account=third.address,
             sponsee=owner_addr,
-            flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END,
+            flags=params.TF_SPONSORSHIP_END,
         )
         await submit_tx("SponsorshipTransferAccount", txn, client, third.wallet)
         return
@@ -992,9 +989,7 @@ async def _sponsorship_transfer_account_faulty(
         return
     if not await _drain_below_reserve(owner, other_addr, client, reserve_delta_is_base=True):
         return
-    txn = SponsorshipTransfer(
-        account=owner.address, flags=SponsorshipTransferFlag.TF_SPONSORSHIP_END
-    )
+    txn = SponsorshipTransfer(account=owner.address, flags=params.TF_SPONSORSHIP_END)
     await submit_tx("SponsorshipTransferAccount", txn, client, owner.wallet)
 
 
