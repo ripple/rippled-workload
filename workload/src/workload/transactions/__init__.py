@@ -100,16 +100,7 @@ from workload.transactions.permissioned_dex import (
 )
 from workload.transactions.set_regular_key import set_regular_key
 from workload.transactions.signer_list_set import signer_list_set
-from workload.transactions.sponsored_create import (
-    sponsored_channel_create,
-    sponsored_check_create,
-    sponsored_credential_create,
-    sponsored_deposit_preauth,
-    sponsored_escrow_create,
-    sponsored_mpt_authorize,
-    sponsored_signer_list_set,
-    sponsored_trustline_create,
-)
+from workload.transactions.sponsor_malformation import sponsor_malformation
 from workload.transactions.sponsorship import (
     payment_sponsored_account,
     sponsorship_set,
@@ -969,66 +960,15 @@ _SPONSOR_REGISTRY_ENTRIES: list[tuple[str, str, Handler, ArgsFn, StateUpdater | 
         lambda w: (w.accounts, w.client),
         None,
     ),
-    # ── Reserve-sponsored object creation (sponsored_create.py) ──────
-    # Synthetic names; on-ledger type is the real creator tx (CheckCreate,
-    # EscrowCreate, ...). Real-type rows above already carry the state
-    # updater that tracks the created object; ws_listener's generic
-    # reserve-sponsor rule fires these buckets and records
-    # w.sponsored_objects, so state_updater=None here.
+    # Reserve/fee sponsorship of any supported tx now rides the submit-time
+    # sponsor Modifier (modifiers.py). This lone endpoint carries the sponsor
+    # malformations xrpl-py rejects at construction (raw submit, modifier-free);
+    # all vectors are preflight tem*, so state_updater=None.
     (
-        "SponsoredCheckCreate",
-        "/sponsored/check/random",
-        sponsored_check_create,
-        lambda w: (w.accounts, w.sponsorships, w.client),
-        None,
-    ),
-    (
-        "SponsoredEscrowCreate",
-        "/sponsored/escrow/random",
-        sponsored_escrow_create,
-        lambda w: (w.accounts, w.sponsorships, w.client),
-        None,
-    ),
-    (
-        "SponsoredPaymentChannelCreate",
-        "/sponsored/channel/random",
-        sponsored_channel_create,
-        lambda w: (w.accounts, w.sponsorships, w.client),
-        None,
-    ),
-    (
-        "SponsoredTrustSet",
-        "/sponsored/trustline/random",
-        sponsored_trustline_create,
-        lambda w: (w.accounts, w.sponsorships, w.client),
-        None,
-    ),
-    (
-        "SponsoredCredentialCreate",
-        "/sponsored/credential/random",
-        sponsored_credential_create,
-        lambda w: (w.accounts, w.sponsorships, w.client),
-        None,
-    ),
-    (
-        "SponsoredSignerListSet",
-        "/sponsored/signer_list/random",
-        sponsored_signer_list_set,
-        lambda w: (w.accounts, w.sponsorships, w.client),
-        None,
-    ),
-    (
-        "SponsoredDepositPreauth",
-        "/sponsored/deposit_preauth/random",
-        sponsored_deposit_preauth,
-        lambda w: (w.accounts, w.sponsorships, w.client),
-        None,
-    ),
-    (
-        "SponsoredMPTokenAuthorize",
-        "/sponsored/mpt/random",
-        sponsored_mpt_authorize,
-        lambda w: (w.accounts, w.mpt_issuances, w.sponsorships, w.client),
+        "SponsorMalformation",
+        "/sponsor/malformation/random",
+        sponsor_malformation,
+        lambda w: (w.accounts, w.client),
         None,
     ),
 ]

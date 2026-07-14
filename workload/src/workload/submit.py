@@ -10,7 +10,7 @@ from xrpl.models.requests import SubmitOnly
 from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
-from workload import logging, params
+from workload import logging
 from workload.assertions import tx_submitted
 
 log = logging.getLogger(__name__)
@@ -40,10 +40,9 @@ async def submit_tx(
     """Sign and submit; returns the tentative engine_result (final via WS listener).
 
     ``seq`` (if given) is stamped pre-autofill so xrpl-py skips the RPC seq fetch.
-    Runs the transaction-modifier pipeline (delegate this phase; ticket/sponsor
-    fold in later): a matching delegate signs ~10% of the time. Independently,
-    ~10% of eligible txns get a prefunded fee sponsor attached (still mutually
-    exclusive with delegation until Phase 3 folds it into the sponsor modifier).
+    Runs the transaction-modifier pipeline (ticket → delegate → sponsor); the
+    sponsor modifier owns fee + reserve sponsorship (fold of the former inline
+    fee-sponsor block) and may attach a post-sign co-sign hook.
     Lets XRPLRequestFailureException propagate to the handler's XRPLException catch.
     """
     if seq is not None:
@@ -53,18 +52,7 @@ async def submit_tx(
     from workload.modifiers import ModifierCtx, apply_modifiers
 
     ctx = ModifierCtx(delegates=_delegates, accounts=_accounts, sponsorships=_sponsorships)
-    txn, wallet, applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
-    delegated = "delegate" in applied
-
-    # Batch's Fee must be zero (TapBatch), and a txn built with sponsor fields
-    # already set (e.g. sponsorship.py's prefunded co-sign helpers) must not be
-    # clobbered here.
-    if not delegated and _sponsorships and name != "Batch" and txn.sponsor is None:
-        from workload.transactions.sponsorship import maybe_sponsor
-
-        sponsor_addr = maybe_sponsor(txn.account, _sponsorships)
-        if sponsor_addr is not None:
-            txn = txn.__replace__(sponsor=sponsor_addr, sponsor_flags=params.SPF_SPONSOR_FEE)
+    txn, wallet, _applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
 
     signed = await autofill_and_sign(txn, client, wallet)
     for cosign in cosigns:

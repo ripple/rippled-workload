@@ -1098,7 +1098,7 @@ async def _payment_sponsored_account_faulty(
     await submit_tx("PaymentSponsoredAccount", txn, client, sender.wallet)
 
 
-# ── Fee-sponsor helper for submit_tx ──────────────────────────────────
+# ── Fee-sponsor helper for the sponsor Modifier ───────────────────────
 
 # Nominal per-use decrement for the local FeeAmount estimate; the real budget
 # only refreshes when a SponsorshipSet on the same pair is observed (see
@@ -1106,12 +1106,10 @@ async def _payment_sponsored_account_faulty(
 _SPONSORED_FEE_ESTIMATE_DROPS = 10
 
 
-def maybe_sponsor(src_address: str, sponsorships: list[Sponsorship]) -> str | None:
-    """Pick a prefunded fee sponsor for src_address's tx, or None. Prefunded-only:
-    a co-signed sponsor needs its own signature, which this fire-and-forget hook
-    can't obtain (that flow lives in the sponsorship.py endpoints instead)."""
-    if not sponsorships or random() >= 0.10:
-        return None
+def pick_prefunded_fee_sponsor(src_address: str, sponsorships: list[Sponsorship]) -> str | None:
+    """Pick a prefunded fee sponsor for src_address's tx (no co-sign needed), or
+    None. Pure picker: the sponsor Modifier (modifiers.py) owns the fire
+    probability and the co-signed-fee fallback."""
     candidates = [
         s
         for s in sponsorships

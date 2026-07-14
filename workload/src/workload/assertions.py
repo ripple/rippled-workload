@@ -12,9 +12,42 @@ _LOC_COL = 0
 # their own AffectedNodes may be empty — skip to avoid false invariant fires.
 _TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 
-# Sponsor (XLS-68) SponsorFlags bit; xrpl-py ships it as a raw int (no enum), same
-# as params.py/ws_listener.py mirror this bitmask locally.
+# Sponsor (XLS-68) SponsorFlags bits; xrpl-py ships them as raw ints (no enum),
+# same as params.py/ws_listener.py mirror these bitmasks locally.
 _SPF_SPONSOR_FEE = 0x00000001
+_SPF_SPONSOR_RESERVE = 0x00000002
+
+# Real tx types rippled allow-lists for reserve sponsorship (isReserveSponsorAllowed,
+# SponsorHelpers.cpp). A reserve sponsor on any OTHER type is preflight temINVALID_FLAG
+# -- the /sponsor/malformation disallowed_type vector. Mirror, not import (rippled C++);
+# drift only under-fires a `sometimes`, never breaks correctness.
+_RESERVE_SPONSOR_ALLOWED_TYPES = {
+    "DelegateSet",
+    "DepositPreauth",
+    "Payment",
+    "SignerListSet",
+    "CheckCancel",
+    "CheckCash",
+    "CheckCreate",
+    "EscrowCancel",
+    "EscrowCreate",
+    "EscrowFinish",
+    "PaymentChannelClaim",
+    "PaymentChannelCreate",
+    "PaymentChannelFund",
+    "Clawback",
+    "MPTokenAuthorize",
+    "MPTokenIssuanceCreate",
+    "MPTokenIssuanceDestroy",
+    "MPTokenIssuanceSet",
+    "TrustSet",
+    "CredentialAccept",
+    "CredentialCreate",
+    "CredentialDelete",
+    "AccountSet",
+    "SetRegularKey",
+    "SponsorshipTransfer",
+}
 
 # Engine results signalling a rippled internal error. Checked on BOTH submit
 # and validated WS: tef* never validates (submit-side catches it); but
@@ -42,6 +75,8 @@ _RIPPLED_INTERNAL_ERRORS = (
 # - TrustSet: self-trust is temDST_IS_SRC; no tec is reachable with funded accounts.
 # - TicketCreate: bad count is temINVALID_COUNT; reserve tecs need an exhausted account.
 # - NFTokenCancelOffer: canceling an unknown offer id is a tesSUCCESS no-op.
+# - SponsorMalformation: every vector is a preflight tem* that never enters a ledger,
+#   so the validated failure bucket can't fill (submit-time seen + dims cover it).
 _NO_FAILURE_TYPES = {
     "SignerListSet",
     "MPTokenIssuanceCreate",
@@ -50,6 +85,7 @@ _NO_FAILURE_TYPES = {
     "TrustSet",
     "TicketCreate",
     "NFTokenCancelOffer",
+    "SponsorMalformation",
 }
 
 # Types that effectively never succeed in this test environment:
@@ -58,7 +94,8 @@ _NO_FAILURE_TYPES = {
 #   so it finds the AMM gone (tecAMM_NOT_FOUND) or non-empty (tecAMM_NOT_EMPTY).
 # - PaymentDomainXC: cross-currency domain payment needs resting domain
 #   liquidity the workload doesn't guarantee; usually tecPATH_DRY. Drop if hit.
-_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC"}
+# - SponsorMalformation: all vectors are preflight tem*, so no tesSUCCESS ever lands.
+_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC", "SponsorMalformation"}
 
 # tx types that must touch a specific ledger entry on tesSUCCESS.
 # Value: allowed node ops followed by the expected LedgerEntryType.
@@ -222,6 +259,10 @@ def register_assertions() -> None:
         "sponsor_fee_prefunded_used",
         "sponsor_fee_cosigned_used",
         "sponsor_reserve_budget_exhausted",
+        "sponsor_reserve_succeeded",
+        "sponsor_reserve_failed",
+        "sponsor_reserve_exhausted",
+        "sponsor_disallowed_type_rejected",
         "sponsor_no_permission_seen",
         "sponsor_has_obligations_seen",
         "sponsorship_audit_object_consistent",
@@ -336,6 +377,13 @@ def _assert_sponsor_submit_signals(name: str, raw: dict, result: dict) -> None:
             engine_result in ("terNO_SPONSORSHIP", "tecINSUFFICIENT_RESERVE"),
             details,
         )
+        # Reserve sponsor on a type outside rippled's allow-list -> preflight
+        # temINVALID_FLAG (the /sponsor/malformation disallowed_type vector).
+        reserve_sponsored = bool(int(raw.get("SponsorFlags", 0) or 0) & _SPF_SPONSOR_RESERVE)
+        if reserve_sponsored and raw.get("TransactionType") not in _RESERVE_SPONSOR_ALLOWED_TYPES:
+            _fire_sometimes(
+                "sponsor_disallowed_type_rejected", engine_result == "temINVALID_FLAG", details
+            )
 
     _fire_sometimes(
         "sponsor_no_permission_seen", engine_result == "tecNO_SPONSOR_PERMISSION", details
@@ -360,6 +408,24 @@ def _assert_sponsor_fee_usage(name: str, tx_json: dict, engine_result: str, tx_h
     details = {"tx_type": name, "hash": tx_hash}
     _fire_sometimes("sponsor_fee_cosigned_used", cosigned, details)
     _fire_sometimes("sponsor_fee_prefunded_used", not cosigned, details)
+
+
+def _assert_sponsor_reserve_usage(
+    name: str, tx_json: dict, engine_result: str, tx_hash: str
+) -> None:
+    """Reserve-sponsor outcome dims off the validated tx (a tec claims a fee and
+    validates, so it reaches here; tem/ter/tef never do). Mirrors the fee dims but
+    routes both success and failure -- these cross-type buckets replace the deleted
+    per-type Sponsored* success/failure buckets and their flakiness."""
+    sponsor_flags = int(tx_json.get("SponsorFlags", 0) or 0)
+    if not tx_json.get("Sponsor") or not (sponsor_flags & _SPF_SPONSOR_RESERVE):
+        return
+    details = {"tx_type": name, "hash": tx_hash, "engine_result": engine_result}
+    _fire_sometimes("sponsor_reserve_succeeded", engine_result == "tesSUCCESS", details)
+    _fire_sometimes("sponsor_reserve_failed", engine_result != "tesSUCCESS", details)
+    _fire_sometimes(
+        "sponsor_reserve_exhausted", engine_result == "tecINSUFFICIENT_RESERVE", details
+    )
 
 
 def assert_sponsorship_audit(kind: str, consistent: bool) -> None:
@@ -604,3 +670,4 @@ def tx_result(name: str, result: dict) -> None:
             assert_id="workload::always : conf_mpt_version_monotonic",
         )
     _assert_sponsor_fee_usage(name, tx_json, engine_result, details.get("hash", ""))
+    _assert_sponsor_reserve_usage(name, tx_json, engine_result, details.get("hash", ""))

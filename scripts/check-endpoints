@@ -75,14 +75,7 @@ try:
         '/sponsorship/transfer/random',
         '/sponsorship/transfer/account/random',
         '/payment/sponsored_account/random',
-        '/sponsored/check/random',
-        '/sponsored/escrow/random',
-        '/sponsored/channel/random',
-        '/sponsored/trustline/random',
-        '/sponsored/credential/random',
-        '/sponsored/signer_list/random',
-        '/sponsored/deposit_preauth/random',
-        '/sponsored/mpt/random',
+        '/sponsor/malformation/random',
         '/sponsorship/audit/random',
     ]
 

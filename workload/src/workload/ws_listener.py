@@ -23,10 +23,11 @@ _TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
 _TF_SPONSORSHIP_DELETE_OBJECT = 0x00100000  # SponsorshipSetFlag.TF_DELETE_OBJECT
 _TF_SPONSOR_CREATED_ACCOUNT = 0x00080000  # PaymentFlag.TF_SPONSOR_CREATED_ACCOUNT
 
-# Reserve-sponsored object creation (sponsored_create.py): real types allow-listed by
-# rippled's preflight1Sponsor for spfSponsorReserve that this workload's endpoints use to
-# create an object. SponsorshipTransfer also carries SponsorFlags/spfSponsorReserve (for
-# its own Create/Reassign) but isn't in this set, so it keeps its own dedicated bucket below.
+# Object-creating types the sponsor Modifier attaches reserve sponsors to; a
+# tesSUCCESS on one may carry a Sponsor on the created ledger entry, which
+# _on_reserve_sponsored_create records into w.sponsored_objects (feeding
+# SponsorshipTransfer's sponsored pool + the audit). The reserve outcome dims
+# (sponsor_reserve_*) fire generically from assertions.tx_result, not here.
 _SPF_SPONSOR_RESERVE = 0x00000002  # common SponsorFlags bit (any Transaction subtype)
 _RESERVE_SPONSOR_TX_TYPES = {
     "CheckCreate",
@@ -35,7 +36,6 @@ _RESERVE_SPONSOR_TX_TYPES = {
     "TrustSet",
     "CredentialCreate",
     "SignerListSet",
-    "DepositPreauth",
     "MPTokenAuthorize",
 }
 
@@ -135,11 +135,6 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
         tx_result("SponsorshipSetDelete", result)
     elif tx_type == "SponsorshipTransfer" and not tx.get("ObjectID"):
         tx_result("SponsorshipTransferAccount", result)
-
-    # Reserve-sponsored object creation (sponsored_create.py): one generic rule
-    # bucketing by real TransactionType, not per-type ifs.
-    if tx_type in _RESERVE_SPONSOR_TX_TYPES and tx.get("SponsorFlags", 0) & _SPF_SPONSOR_RESERVE:
-        tx_result(f"Sponsored{tx_type}", result)
 
     if engine_result == "tesSUCCESS":
         if tx_type in _RESERVE_SPONSOR_TX_TYPES:

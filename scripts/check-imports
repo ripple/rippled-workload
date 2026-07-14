@@ -26,7 +26,7 @@ from workload.transactions.permissioned_dex import offer_create_domain, offer_cr
 from workload.transactions.mpt_dex import offer_create_mpt, payment_mpt
 from workload.transactions.confidential_mpt import conf_mpt_merge_inbox, conf_mpt_convert, conf_mpt_send, conf_mpt_convert_back, conf_mpt_clawback
 from workload.transactions.sponsorship import sponsorship_set, sponsorship_set_delete, sponsorship_transfer, sponsorship_transfer_account, payment_sponsored_account, sponsorship_audit_random
-from workload.transactions.sponsored_create import sponsored_check_create, sponsored_escrow_create, sponsored_channel_create, sponsored_trustline_create, sponsored_credential_create, sponsored_signer_list_set, sponsored_deposit_preauth, sponsored_mpt_authorize
+from workload.transactions.sponsor_malformation import sponsor_malformation
 from workload.transactions.lending import (
     loan_broker_set, loan_broker_delete,
     loan_broker_cover_deposit, loan_broker_cover_withdraw,
