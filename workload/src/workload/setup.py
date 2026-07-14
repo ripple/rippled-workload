@@ -990,16 +990,22 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                     )
                 )
         else:
-            if workload.mpt_issuances:
-                mpt_idx = min(i - 6, len(workload.mpt_issuances) - 1)
+            # A vault can only back a transferable, unlocked, non-require-auth MPT; the
+            # flag-distinct fault cohorts (require-auth [4] → tecNO_AUTH, locked [5] →
+            # tecLOCKED) can't, so exclude them or the fail-loud phase aborts on them.
+            vault_mpts = [
+                m
+                for m in workload.mpt_issuances
+                if m.can_transfer and not m.require_auth and not m.locked
+            ]
+            if vault_mpts:
+                mpt = vault_mpts[min(i - 6, len(vault_mpts) - 1)]
                 vault_txns.append(
                     (
                         "VaultCreate",
                         VaultCreate(
                             account=src.address,
-                            asset=MPTCurrency(
-                                mpt_issuance_id=workload.mpt_issuances[mpt_idx].mpt_issuance_id
-                            ),
+                            asset=MPTCurrency(mpt_issuance_id=mpt.mpt_issuance_id),
                             assets_maximum=_VAULT_ASSETS_MAXIMUM,
                         ),
                         src.wallet,
