@@ -1,6 +1,7 @@
 """Fire-and-forget transaction submission; ws_listener.py handles validated results."""
 
 from collections.abc import Callable
+from typing import Any
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction import autofill, autofill_and_sign, submit
@@ -30,6 +31,17 @@ def configure(delegates: list, accounts: dict, sponsorships: list) -> None:
     _sponsorships = sponsorships
 
 
+# Modifiers decorate DRIVER submits only. Enabled after setup completes so setup
+# submits stay deterministic — a modifier firing mid-setup would zero a Sequence,
+# swap the signer, or attach a sponsor and could break the fail-loud setup.
+_modifiers_enabled: bool = False
+
+
+def enable_modifiers() -> None:
+    global _modifiers_enabled
+    _modifiers_enabled = True
+
+
 async def submit_tx(
     name: str,
     txn: Transaction,
@@ -48,12 +60,14 @@ async def submit_tx(
     if seq is not None:
         txn = txn.__replace__(sequence=seq)
 
-    # Lazy import: modifiers -> transactions -> delegation -> submit would cycle.
-    from workload.modifiers import ModifierCtx, apply_modifiers
+    cosigns: list[Callable[[Any], Any]] = []
+    if _modifiers_enabled:
+        # Lazy import: modifiers -> transactions -> delegation -> submit would cycle.
+        from workload.modifiers import ModifierCtx, apply_modifiers
 
-    ctx = ModifierCtx(delegates=_delegates, accounts=_accounts, sponsorships=_sponsorships)
-    txn, wallet, applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
-    assert_modifier_combo(name, applied)
+        ctx = ModifierCtx(delegates=_delegates, accounts=_accounts, sponsorships=_sponsorships)
+        txn, wallet, applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
+        assert_modifier_combo(name, applied)
 
     signed = await autofill_and_sign(txn, client, wallet)
     for cosign in cosigns:

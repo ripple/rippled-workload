@@ -198,6 +198,10 @@ def create_app(workload: Workload) -> FastAPI:
         try:
             result = await run_setup(workload)
             reachable("workload::setup_complete_with_state", result)
+            # Modifiers decorate driver submits only; enable now that setup is done.
+            from workload.submit import enable_modifiers
+
+            enable_modifiers()
             # Signal setup_complete ONLY on success. Calling it after a failed setup
             # tells Antithesis "faults may begin" and drives the whole run on broken
             # state (every driver cascades); leaving it unsignaled keeps the run in the
