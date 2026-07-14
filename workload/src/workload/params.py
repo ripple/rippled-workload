@@ -37,6 +37,15 @@ def payment_amount() -> str:
     return str(randint(1_000, 10_000_000))
 
 
+def new_account_funding_amount() -> str:
+    """Strictly above this network's 10 XRP ReserveBase (genesis_ledger.json) so every
+    fund-new delivers enough to CREATE the AccountRoot — an under-delivery is
+    tecNO_DST_INSUF_XRP that creates nothing and defeats the state-bloat purpose. A
+    fresh bare AccountRoot owns no objects, so only ReserveBase applies (not the 2 XRP
+    ReserveIncrement). 11-30 XRP a pop lets a 100k-XRP account fund thousands before draining."""
+    return str(randint(11_000_000, 30_000_000))
+
+
 # ── Trust Lines & IOUs ────────────────────────────────────────────────
 CURRENCY_CODES = ["USD", "EUR", "GBP", "JPY", "BTC", "ETH", "XAU", "CNY"]
 

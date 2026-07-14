@@ -92,7 +92,7 @@ from workload.transactions.payment_channels import (
     channel_create,
     channel_fund,
 )
-from workload.transactions.payments import payment_random
+from workload.transactions.payments import payment_fund_new, payment_random
 from workload.transactions.permissioned_dex import (
     offer_create_domain,
     offer_create_hybrid,
@@ -1037,6 +1037,16 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         payment_random,
         lambda w: (w.accounts, w.trust_lines, w.mpt_issuances, w.client),
         _on_payment_maybe_sponsored_account,
+    ),
+    # Synthetic name; on-ledger type is Payment. Dedicated state-tree bloat driver
+    # that funds a fresh AccountRoot each call (see payments.payment_fund_new).
+    # ws_listener routes a validated Payment that CREATED an AccountRoot here.
+    (
+        "PaymentFundNew",
+        "/payment/fund_new/random",
+        payment_fund_new,
+        lambda w: (w.accounts, w.client),
+        None,
     ),
     (
         "TicketCreate",

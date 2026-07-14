@@ -136,6 +136,14 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     elif tx_type == "SponsorshipTransfer" and not tx.get("ObjectID"):
         tx_result("SponsorshipTransferAccount", result)
 
+    # State-tree bloat driver: only PaymentFundNew sends XRP to an unfunded new
+    # account, so a Payment that CREATED an AccountRoot uniquely feeds that bucket.
+    if tx_type == "Payment" and any(
+        node.get("CreatedNode", {}).get("LedgerEntryType") == "AccountRoot"
+        for node in meta.get("AffectedNodes", [])
+    ):
+        tx_result("PaymentFundNew", result)
+
     if engine_result == "tesSUCCESS":
         if tx_type in _RESERVE_SPONSOR_TX_TYPES:
             _on_reserve_sponsored_create(workload, tx, meta)

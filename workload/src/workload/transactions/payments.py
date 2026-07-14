@@ -66,6 +66,27 @@ async def _payment_random_valid(
     await submit_tx("Payment", txn, client, wallet)
 
 
+async def payment_fund_new(
+    accounts: dict[str, UserAccount],
+    client: AsyncJsonRpcClient,
+) -> None:
+    """State-tree bloat driver (synthetic name PaymentFundNew, on-ledger Payment):
+    fund a brand-new account every call so each ledger grows the state SHAMap with
+    fresh AccountRoots. This widens the window in which a diverging/lagging validator
+    holds an incompletely-acquired state tree — the condition under which
+    RCLConsensus::timerEntry throws SHAMapMissingNode and aborts the process.
+    Valid-only: an under-funded fund-new creates nothing, defeating the purpose."""
+    if not accounts:
+        return
+    src = accounts[choice(list(accounts))]
+    txn = Payment(
+        account=src.address,
+        amount=params.new_account_funding_amount(),
+        destination=params.fake_account(),
+    )
+    await submit_tx("PaymentFundNew", txn, client, src.wallet)
+
+
 def _iou_amount(trust_lines: list[TrustLine]) -> IOUAmount:
     tl = choice(trust_lines)
     issuer = choice([tl.account_a, tl.account_b])
