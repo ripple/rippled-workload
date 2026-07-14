@@ -17,6 +17,7 @@ from workload.transactions.delegation import delegate_set
 from workload.transactions.escrow import escrow_create, escrow_finish, escrow_cancel
 from workload.transactions.payment_channels import channel_create, channel_fund, channel_claim
 from workload.transactions.set_regular_key import set_regular_key
+from workload.transactions.deposit_preauth import deposit_preauth
 from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.did import did_set, did_delete
 from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy

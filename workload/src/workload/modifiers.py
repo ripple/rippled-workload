@@ -135,6 +135,7 @@ _SPONSOR_SUPPORTED: set[str] = {
     "CredentialCreate",
     "SignerListSet",
     "MPTokenAuthorize",
+    "DepositPreauth",
 }
 _SPONSOR_EXCLUDED: dict[str, str] = dict.fromkeys(
     _TX_NAMES - _SPONSOR_SUPPORTED,

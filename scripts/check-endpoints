@@ -46,6 +46,7 @@ try:
         '/offer/create/mpt/random',
         '/payment/mpt/random',
         '/delegate/set/random',
+        '/deposit_preauth/random',
         '/did/set/random',
         '/did/delete/random',
         '/nft/modify/random',

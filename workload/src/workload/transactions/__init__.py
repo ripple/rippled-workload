@@ -62,6 +62,7 @@ from workload.transactions.credentials import (
     credential_delete,
 )
 from workload.transactions.delegation import delegate_set
+from workload.transactions.deposit_preauth import deposit_preauth
 from workload.transactions.did import did_delete, did_set
 from workload.transactions.domains import permissioned_domain_delete, permissioned_domain_set
 from workload.transactions.escrow import escrow_cancel, escrow_create, escrow_finish
@@ -1323,6 +1324,13 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         "SetRegularKey",
         "/set_regular_key/random",
         set_regular_key,
+        lambda w: (w.accounts, w.client),
+        None,
+    ),
+    (
+        "DepositPreauth",
+        "/deposit_preauth/random",
+        deposit_preauth,
         lambda w: (w.accounts, w.client),
         None,
     ),

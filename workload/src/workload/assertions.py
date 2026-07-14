@@ -120,6 +120,7 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "PaymentChannelCreate": ("Created", "PayChannel"),
     "TicketCreate": ("Created", "Ticket"),
     "CredentialCreate": ("Created", "Credential"),
+    "DepositPreauth": ("Created", "DepositPreauth"),
     "CredentialAccept": ("Modified", "Credential"),
     "CredentialDelete": ("Deleted", "Credential"),
     "MPTokenIssuanceCreate": ("Created", "MPTokenIssuance"),
