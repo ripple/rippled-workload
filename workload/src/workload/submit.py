@@ -11,7 +11,7 @@ from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
 from workload import logging
-from workload.assertions import tx_submitted
+from workload.assertions import assert_modifier_combo, tx_submitted
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +52,8 @@ async def submit_tx(
     from workload.modifiers import ModifierCtx, apply_modifiers
 
     ctx = ModifierCtx(delegates=_delegates, accounts=_accounts, sponsorships=_sponsorships)
-    txn, wallet, _applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
+    txn, wallet, applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
+    assert_modifier_combo(name, applied)
 
     signed = await autofill_and_sign(txn, client, wallet)
     for cosign in cosigns:

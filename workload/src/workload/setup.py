@@ -26,8 +26,10 @@ from xrpl.models.transactions import (
     AccountSet,
     AccountSetAsfFlag,
     AMMCreate,
+    CheckCreate,
     CredentialAccept,
     CredentialCreate,
+    DelegateSet,
     LoanBrokerCoverDeposit,
     LoanBrokerSet,
     LoanPay,
@@ -50,7 +52,9 @@ from xrpl.models.transactions import (
     VaultCreate,
     VaultDeposit,
 )
+from xrpl.models.transactions.delegate_set import Permission
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
+from xrpl.models.transactions.types import TransactionType
 from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
@@ -727,6 +731,224 @@ async def _setup_sponsorships(
     summary["sponsorships"] = await _run_phase(workload, "sponsorships", txns, _sponsorship_exists)
 
 
+# ── Cross-resource accounts (Phase 4) ────────────────────────────────────
+# Modifier combos fire only when one account holds multiple resources; the base
+# setup places tickets / delegations / sponsorships on disjoint account ranges
+# (~0 overlap). This pool gives ~20 accounts ALL of: a ticket pool, a delegate
+# authorized for common types, and a prefunded sponsee Sponsorship -- so
+# ticket+delegate and ticket+sponsor become reachable. Seeding is best-effort
+# (thin combos, not correctness); it never fails the run. Counts + the coverage
+# model's predicted hits live in docs/transaction-modifiers.md and are checked by
+# scripts/modifier-coverage-model.
+_CROSS_RESOURCE_RICH_RANGE = range(77, 97)  # accounts[77..96]: ticket + delegate-source + sponsee
+_CROSS_RESOURCE_DELEGATE_INDICES = (97, 98)  # authorized delegates (perm chunk A / chunk B)
+_CROSS_RESOURCE_FUNDED_SPONSOR_INDEX = 99  # funds a fee+reserve Sponsorship for every rich acct
+_CROSS_RESOURCE_EXHAUSTED_SPONSOR_INDEX = 6  # fee-only (reserve budget 0) -> prefunded_exhausted
+_CROSS_RESOURCE_TICKET_SEED = 60  # generous so the ticket pool outlasts driver consumption
+_CROSS_RESOURCE_EXHAUSTED_COUNT = 4  # rich accts that also get an exhausted-reserve sponsorship
+_DELEGATE_PERMS_MAX = 10  # rippled PERMISSIONS_MAX_LENGTH per DelegateSet
+
+# Delegate permissions granted to the rich-account delegates. Sponsor-supported
+# types are excluded on purpose: those decorate via the sponsor modifier
+# (ticket+sponsor), leaving these for ticket+delegate so the two combos don't
+# compete. Front-loaded with types a fresh account can submit unconditionally
+# (creators) so the delegation is active early; object-dependent types activate
+# as the account accumulates objects. Filtered against the live delegable set at
+# runtime so a xrpl-py delegability change just thins combos, never aborts setup.
+_CROSS_RESOURCE_PERM_ORDER = [
+    "Payment",
+    "OfferCreate",
+    "NFTokenMint",
+    "DIDSet",
+    "MPTokenIssuanceCreate",
+    "VaultCreate",
+    "NFTokenBurn",
+    "NFTokenModify",
+    "NFTokenCreateOffer",
+    "OfferCancel",
+    "DIDDelete",
+    "MPTokenIssuanceSet",
+    "MPTokenIssuanceDestroy",
+    "VaultDeposit",
+    "VaultSet",
+    "VaultWithdraw",
+    "VaultDelete",
+    "PermissionedDomainSet",
+    "PermissionedDomainDelete",
+    "NFTokenAcceptOffer",
+]
+
+
+def _cross_resource_delegate_perms() -> list[str]:
+    """Curated permission names filtered to those actually delegable +
+    ticket-supported + non-sponsor (single source of truth: the modifier sets)."""
+    from workload.modifiers import _SPONSOR_SUPPORTED, _TICKET_SUPPORTED
+    from workload.transactions import TX_TYPES
+    from workload.transactions.delegation import DELEGABLE_TX_TYPES
+
+    delegable = {t.value for t in DELEGABLE_TX_TYPES}
+    eligible = (delegable & _TICKET_SUPPORTED & set(TX_TYPES)) - _SPONSOR_SUPPORTED
+    return [t for t in _CROSS_RESOURCE_PERM_ORDER if t in eligible]
+
+
+async def _setup_cross_resource(
+    workload: Workload, accs: list[UserAccount], summary: dict[str, int]
+) -> None:
+    client, seq = workload.client, workload.seq
+    rich = [accs[i] for i in _CROSS_RESOURCE_RICH_RANGE if i < len(accs)]
+    if not rich:
+        return
+    rich_addrs = {r.address for r in rich}
+    delegates = [accs[i] for i in _CROSS_RESOURCE_DELEGATE_INDICES if i < len(accs)]
+    perms = _cross_resource_delegate_perms()
+    perm_chunks = [
+        perms[i : i + _DELEGATE_PERMS_MAX] for i in range(0, len(perms), _DELEGATE_PERMS_MAX)
+    ]
+
+    # ── 1. Delegations (rich = source). Submitted BEFORE tickets exist so the
+    #      ticket modifier can't zero these txns' Sequence and desync the tracker.
+    delegate_txns: list[tuple[str, Transaction, Wallet]] = []
+    for r in rich:
+        for d_acc, chunk in zip(delegates, perm_chunks, strict=False):
+            if not chunk:
+                continue
+            delegate_txns.append(
+                (
+                    "DelegateSet",
+                    DelegateSet(
+                        account=r.address,
+                        authorize=d_acc.address,
+                        permissions=[
+                            Permission(permission_value=TransactionType(p)) for p in chunk
+                        ],
+                    ),
+                    r.wallet,
+                )
+            )
+    n_deleg = await _submit_batch("cross_resource_delegates", delegate_txns, client, seq)
+
+    # ── 2. Prefunded Sponsorships: every rich acct a fee+reserve sponsee (co-sign-
+    #      free paths), plus a few fee-only (reserve budget 0) for prefunded_exhausted.
+    sponsor_txns: list[tuple[str, Transaction, Wallet]] = []
+    funded = (
+        accs[_CROSS_RESOURCE_FUNDED_SPONSOR_INDEX]
+        if len(accs) > _CROSS_RESOURCE_FUNDED_SPONSOR_INDEX
+        else None
+    )
+    if funded is not None:
+        for r in rich:
+            sponsor_txns.append(
+                (
+                    "SponsorshipSet",
+                    SponsorshipSet(
+                        account=funded.address,
+                        sponsee=r.address,
+                        fee_amount=params.sponsorship_fee_amount(),
+                        max_fee=params.sponsorship_max_fee(),
+                        remaining_owner_count=max(5, params.sponsorship_reserve_count()),
+                    ),
+                    funded.wallet,
+                )
+            )
+    exhausted = (
+        accs[_CROSS_RESOURCE_EXHAUSTED_SPONSOR_INDEX]
+        if len(accs) > _CROSS_RESOURCE_EXHAUSTED_SPONSOR_INDEX
+        else None
+    )
+    if exhausted is not None:
+        # Omitting remaining_owner_count -> RemainingOwnerCount 0: a valid fee-only
+        # Sponsorship that a reserve-flag tx drains to tecINSUFFICIENT_RESERVE.
+        for r in rich[:_CROSS_RESOURCE_EXHAUSTED_COUNT]:
+            sponsor_txns.append(
+                (
+                    "SponsorshipSet",
+                    SponsorshipSet(
+                        account=exhausted.address,
+                        sponsee=r.address,
+                        fee_amount=params.sponsorship_fee_amount(),
+                    ),
+                    exhausted.wallet,
+                )
+            )
+    n_spons = await _submit_batch("cross_resource_sponsorships", sponsor_txns, client, seq)
+
+    # ── 3. Unsponsored sponsorable objects: one Check per rich acct so
+    #      SponsorshipTransfer has owned candidates from the first driver tick.
+    check_txns: list[tuple[str, Transaction, Wallet]] = []
+    if funded is not None:
+        for r in rich:
+            check_txns.append(
+                (
+                    "CheckCreate",
+                    CheckCreate(
+                        account=r.address,
+                        destination=funded.address,
+                        send_max=params.check_send_max(),
+                    ),
+                    r.wallet,
+                )
+            )
+    n_checks = await _submit_batch("cross_resource_checks", check_txns, client, seq)
+
+    # ── 4. Tickets LAST: after this the ticket modifier may decorate rich-acct
+    #      submits, so no further cross-resource txn from a rich acct may follow.
+    ticket_txns: list[tuple[str, Transaction, Wallet]] = [
+        (
+            "TicketCreate",
+            TicketCreate(account=r.address, ticket_count=_CROSS_RESOURCE_TICKET_SEED),
+            r.wallet,
+        )
+        for r in rich
+    ]
+    n_tickets = await _submit_batch("cross_resource_tickets", ticket_txns, client, seq)
+    for r in rich:
+        seq.advance(r.address, _CROSS_RESOURCE_TICKET_SEED)
+
+    # Let the WS listener track the seeded state (modifier ctx reads tracked
+    # delegates / sponsorships / per-account tickets).
+    await _poll(
+        lambda: all(
+            workload.accounts[r.address].tickets for r in rich if r.address in workload.accounts
+        )
+    )
+    summary["cross_resource_rich"] = len(rich)
+    tracked_deleg = sum(1 for d in workload.delegates if d.source in rich_addrs)
+    tracked_spons = sum(1 for s in workload.sponsorships if s.sponsee in rich_addrs)
+    tracked_tickets = sum(1 for r in rich if workload.accounts[r.address].tickets)
+    send_event(
+        "workload::setup_cross_resource",
+        {
+            "rich": len(rich),
+            "perms": len(perms),
+            "delegations_accepted": n_deleg,
+            "delegations_tracked": tracked_deleg,
+            "sponsorships_accepted": n_spons,
+            "sponsorships_tracked": tracked_spons,
+            "checks_accepted": n_checks,
+            "tickets_accepted": n_tickets,
+            "tickets_tracked": tracked_tickets,
+        },
+    )
+    # Under-seeded: combos just get thinner (not a correctness failure), but flag
+    # it so a starved sometimes(combo) is diagnosable rather than mysterious.
+    under_seeded = (
+        tracked_deleg < len(delegate_txns)
+        or tracked_spons < len(rich)
+        or tracked_tickets < len(rich)
+    )
+    if under_seeded:
+        send_event(
+            "workload::setup_cross_resource_partial",
+            {
+                "rich": len(rich),
+                "delegations_tracked": tracked_deleg,
+                "delegations_expected": len(delegate_txns),
+                "sponsorships_tracked": tracked_spons,
+                "tickets_tracked": tracked_tickets,
+            },
+        )
+
+
 async def run_setup(workload: Workload) -> dict[str, int]:
     await _probe_node(workload)
     accs = _accounts_list(workload)
@@ -747,6 +969,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         | set(range(50, 53))
         | set(range(60, 72))
         | set(range(72, 77))
+        # Cross-resource pool (Phase 4): rich accts + their delegates/sponsors must
+        # not be deleted mid-run, else the combo source vanishes.
+        | set(_CROSS_RESOURCE_RICH_RANGE)
+        | set(_CROSS_RESOURCE_DELEGATE_INDICES)
+        | {_CROSS_RESOURCE_FUNDED_SPONSOR_INDEX, _CROSS_RESOURCE_EXHAUSTED_SPONSOR_INDEX}
     )
     workload.protected_accounts.update(accs[i].address for i in _setup_indices if i < len(accs))
 
@@ -1359,6 +1586,18 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                             )
                 except Exception:
                     pass
+
+    # ── 14. Cross-resource pool (Phase 4): overlap for modifier combos ───
+    # Best-effort (thin combos, not correctness); contained so a raise can't
+    # abort the run. Runs last so its late ticket seeding can't desync any
+    # earlier phase's sequence tracking.
+    try:
+        await _setup_cross_resource(workload, accs, summary)
+    except Exception as e:
+        send_event(
+            "workload::setup_error : cross_resource",
+            {"phase": "cross_resource", "error": f"{type(e).__name__}: {e}"},
+        )
 
     # ── Done ─────────────────────────────────────────────────────────
     for key, count in summary.items():

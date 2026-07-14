@@ -256,6 +256,12 @@ def register_assertions() -> None:
     _emit_catalog_entry(
         "workload::sometimes : ticket_used", "sometimes", "Sometimes", must_hit=True
     )
+    # Modifier composition (workload.modifiers): >=2 compatible modifiers stacked
+    # on one tx. Fired from the submit path (assert_modifier_combo).
+    for combo_key in ("modifiers_ticket_sponsor", "modifiers_ticket_delegate"):
+        _emit_catalog_entry(
+            f"workload::sometimes : {combo_key}", "sometimes", "Sometimes", must_hit=True
+        )
     for key in (
         "sponsor_fee_prefunded_used",
         "sponsor_fee_cosigned_used",
@@ -441,6 +447,25 @@ def assert_sponsorship_audit(kind: str, consistent: bool) -> None:
 def assert_ticket_used(tx_type: str, tx_hash: str) -> None:
     """A validated tx carrying TicketSequence consumed a ticket (workload.modifiers)."""
     _fire_sometimes("ticket_used", True, {"tx_type": tx_type, "hash": tx_hash})
+
+
+# Valid stackable combos (Phase 1: delegate+sponsor is incompatible, so never stacks).
+_MODIFIER_COMBOS: dict[str, frozenset[str]] = {
+    "modifiers_ticket_sponsor": frozenset({"ticket", "sponsor"}),
+    "modifiers_ticket_delegate": frozenset({"ticket", "delegate"}),
+}
+
+
+def assert_modifier_combo(name: str, applied: list[str]) -> None:
+    """Fire the per-combo sometimes dim when >=2 modifiers decorated one tx.
+    Called from the submit path off apply_modifiers' applied-tags set -- the
+    observable margin confirming compatible modifiers actually stack."""
+    if len(applied) < 2:
+        return
+    tags = set(applied)
+    for key, combo in _MODIFIER_COMBOS.items():
+        if combo <= tags:
+            _fire_sometimes(key, True, {"tx_type": name, "modifiers": "+".join(sorted(tags))})
 
 
 def tx_submitted(

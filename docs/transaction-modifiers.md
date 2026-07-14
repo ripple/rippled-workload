@@ -65,6 +65,39 @@ Combos are only reachable if the **same account holds multiple resources**. Toda
 
 Deliverable: a small **coverage model** (documented calc or tiny script) — `per-modifier probability × resource-availability × account-overlap × expected txn volume → predicted hits per combo` — used to tune probabilities so every combo clears a safe `sometimes` margin (≥ ~10 hits/run) without drowning plain txns. Rough sizing: a 30-min run submits O(10–50k) txns; at ~10% overlap and ~12% per-modifier fire, `P(ticket+sponsor) ≈ 0.0014` → ~30 hits over 20k txns (enough). The actionable output feeds setup: place cross-resource accounts (see below).
 
+### Coverage model (Phase 4, `scripts/modifier-coverage-model`)
+
+Runnable, not a CI gate; reads live weights from `MODIFIERS` and the cross-resource
+counts from `setup.py` (single source of truth). Model per combo:
+
+```
+hits ≈ Σ_submits  P(ticket fires) × P(second modifier fires)
+```
+
+- **Volume** `V` — assumption **15,000–17,500 submits / 30-min run** (each of the 76
+  tx-type endpoints ≈ uniform; source account ≈ uniform over N=100 accounts).
+- **ticket+sponsor** — the sponsor modifier co-signs for *any* account, so the general
+  driver-minted ticket-holder population dominates
+  (`V × (8/76) × f_ticket × w_ticket × w_sponsor`, `f_ticket≈0.5`), with a guaranteed
+  floor from the rich pool.
+- **ticket+delegate** — *both* resources key on the submitting account, so only the
+  seeded rich pool reliably supplies it:
+  `R × (perms·d_eff) × (V/76/N) × (a_t·w_ticket) × w_delegate`, with `a_t≈0.85`
+  (ticket availability), `d_eff≈0.5` (fraction of granted perms a rich account actually
+  submits — creators early, object-dependent types later).
+
+Chosen: **R=20**, **perms=20**, weights **ticket 0.20 / delegate 0.20 / sponsor 0.15**.
+
+| volume | ticket+sponsor | ticket+delegate |
+|---|---|---|
+| 15,000 | ~32 | ~15 |
+| 17,500 | ~37 | ~17 |
+
+Both clear the ≥~10 margin. Global modified fraction stays ~15% (≈`f_ticket·w_ticket`
+ticketed + ~1% delegated + ~2% sponsored) → plain (unmodified) submission stays
+dominant at ~85%. delegate+sponsor never stacks (`incompatible_with`), so there is no
+third combo to cover.
+
 ## Setup robustness (decision: make it fully robust)
 
 Today setup is best-effort (`_wait_for_state` times out → `setup_state_partial` → proceeds with partial state), which is the root of recurring assertion starvation. Make it deterministic:
@@ -79,7 +112,17 @@ Today setup is best-effort (`_wait_for_state` times out → `setup_state_partial
 1. **Framework + coverage gate** (`check-modifier-coverage`, runtime `unreachable`, CLAUDE.md checklist) + migrate **delegate**. Verify the compatibility matrix against `develop`.
 2. **DONE.** Migrated **ticket** to a pure decorator (`modifiers.py`, registered first, weight 0.10); deleted `_TICKET_BUILDERS`, the domain builders, `TicketCtx`, `check_ticket_coverage`, and the `/tickets/use` endpoint + driver. `TicketCreate` stays a normal workload. Excluded only genuine cases: `Batch` (inner-tx Sequences + Fee=0), `TicketCreate` (circular seq numbering), and the four proof-binding `ConfidentialMPT*` types (zeroed Sequence → `tecBAD_PROOF`); `ConfidentialMPTMergeInbox` binds no sequence so it stays supported. `sometimes : ticket_used` fires from `ws_listener` when a validated tx carries `TicketSequence`.
 3. **DONE.** Unified **sponsor** modifier (`modifiers.py`, registered last, weight 0.12, `incompatible_with={"delegate"}`): attaches `Sponsor`+`SponsorFlags` (fee/reserve/both) to the object-creating allow-list subset (`CheckCreate`, `EscrowCreate`, `PaymentChannelCreate`, `TrustSet`, `CredentialCreate`, `SignerListSet`, `MPTokenAuthorize`); prefunded (no co-sign) or co-signed via a post-sign `sign_as_sponsor` hook; ~20% model-expressible faults (`nonexistent_sponsor`, `prefunded_exhausted`, `garbage_signature`). Folded the fee `maybe_sponsor` in (`sponsorship.pick_prefunded_fee_sponsor`) and removed the inline `submit_tx` fee block. Codec-rejected faults moved to one type-agnostic `SponsorMalformation` raw endpoint (`/sponsor/malformation/random`): `invalid_flag_bits`, `sponsor_equals_account`, `flags_without_sponsor`, `disallowed_type`. Deleted `sponsored_create.py`, its 8 REGISTRY entries, 8 drivers, and the synthetic `Sponsored*` names. New dimensions: `sponsor_reserve_succeeded/_failed/_exhausted` (validated, `_assert_sponsor_reserve_usage`), `sponsor_disallowed_type_rejected` (submit-time); fee dimensions kept.
-4. **Composition tuning** — coverage model, set probabilities, add cross-resource accounts to setup, confirm every combo clears its `sometimes` margin; docs.
+4. **DONE.** Composition observability + reachability. Added submit-path per-combo
+   dims `modifiers_ticket_sponsor` / `modifiers_ticket_delegate` (`assertions.assert_modifier_combo`,
+   fired off `apply_modifiers`' applied-tags set, registered `must_hit`). Added a
+   best-effort cross-resource setup pool (`setup._setup_cross_resource`, chain step 14):
+   20 "rich" accounts (indices 77–96) that each get a 60-ticket pool, a delegate
+   authorized for ~20 common delegable/ticket-supported/non-sponsor types (2 delegates
+   ×≤10 perms, indices 97/98), and a prefunded fee+reserve sponsee Sponsorship (sponsor
+   99); plus 4 fee-only (reserve-budget-0) Sponsorships (sponsor 6) feeding the sponsor
+   modifier's `prefunded_exhausted` fault, and one Check per rich account (unsponsored
+   sponsorable stock for `SponsorshipTransfer`). Tuned weights ticket **0.20** / delegate
+   **0.20** / sponsor **0.15** (`scripts/modifier-coverage-model`). See below for the model.
 
 Each phase must leave all gates green: `check-imports`, `check-endpoints`, `check-fuzz-coverage`, `check-modifier-coverage`, `ruff check`, `ruff format --check`, `mypy`, `basedpyright`.
 

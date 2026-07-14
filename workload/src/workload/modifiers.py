@@ -260,12 +260,16 @@ def _apply_sponsor(
 
 # Registry order matters: ticket → delegate → sponsor.
 MODIFIERS: list[Modifier] = [
+    # Weights tuned by scripts/modifier-coverage-model so both valid combos
+    # (ticket+sponsor, ticket+delegate) clear a safe sometimes margin (>=~10
+    # hits/run) off the cross-resource setup pool, while plain (unmodified)
+    # submission stays dominant (~85%). See docs/transaction-modifiers.md.
     Modifier(
         name="ticket",
         supported=_TICKET_SUPPORTED,
         excluded=_TICKET_EXCLUDED,
         incompatible_with=set(),
-        weight=0.10,
+        weight=0.20,
         apply=_apply_ticket,
     ),
     Modifier(
@@ -273,7 +277,7 @@ MODIFIERS: list[Modifier] = [
         supported=_DELEGATE_SUPPORTED,
         excluded=_DELEGATE_EXCLUDED,
         incompatible_with={"sponsor"},
-        weight=0.10,
+        weight=0.20,
         apply=_apply_delegate,
     ),
     Modifier(
@@ -281,7 +285,7 @@ MODIFIERS: list[Modifier] = [
         supported=_SPONSOR_SUPPORTED,
         excluded=_SPONSOR_EXCLUDED,
         incompatible_with={"delegate"},
-        weight=0.12,
+        weight=0.15,
         apply=_apply_sponsor,
     ),
 ]
