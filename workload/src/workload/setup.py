@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from workload.app import Workload
+
+    # (txn, workload) -> True once the submission's ledger object is tracked.
+    _ExistsFn = Callable[[Any, Workload], bool]
 
 import xrpl.models
 from antithesis.assertions import reachable, unreachable
@@ -73,6 +78,13 @@ _LOAN_INTERVAL = 3600  # 1 hour
 _LOAN_TOTAL = 3  # 3 payments
 _LOAN_GRACE = 600  # 10 minutes
 
+# Verify-and-retry bound: each phase re-submits its shortfall and re-polls
+# tracked state for up to _RETRY_ROUNDS rounds of _SETTLE_TIMEOUT each (~60s).
+_RETRY_ROUNDS = 5
+_SETTLE_TIMEOUT = 12.0
+_SETTLE_POLL = 1.5
+_ACCEPTED = ("tesSUCCESS", "terQUEUED", "terPRE_SEQ")
+
 # Gateway assignments: (account_index, [currencies])
 _GATEWAYS = [
     (60, ["USD", "BTC"]),
@@ -94,44 +106,36 @@ def _accounts_list(workload: Workload) -> list[UserAccount]:
     return list(workload.accounts.values())
 
 
-async def _wait_for_state(
-    items: list, expected: int, label: str, timeout: float = 15, poll: float = 1
-) -> int:
-    elapsed = 0.0
-    while len(items) < expected and elapsed < timeout:
-        await asyncio.sleep(poll)
-        elapsed += poll
-    if len(items) < expected:
-        send_event(
-            f"workload::setup_state_partial : {label}",
-            {"expected": expected, "got": len(items), "timeout_s": timeout},
-        )
-    return len(items)
+@dataclass
+class _Submission:
+    tx_type: str
+    txn: Transaction
+    wallet: Wallet
+    accepted: bool = False  # last submit returned an _ACCEPTED engine_result
 
 
-async def _submit_batch(
+async def _submit_round(
     name: str,
-    txns: list[tuple[str, Transaction, Wallet]],
+    subs: list[_Submission],
     client: AsyncJsonRpcClient,
     seq: SequenceTracker,
-) -> int:
-    if not txns:
-        return 0
-    created = 0
-    for tx_type, txn, wallet in txns:
+) -> None:
+    """Submit each pending submission once; record acceptance and emit
+    setup_reject/setup_error for observability. Never raises."""
+    for s in subs:
+        s.accepted = False
         try:
-            seq_num = await seq.next_seq(wallet.address)
-            result = await submit_tx(tx_type, txn, client, wallet, seq=seq_num)
+            seq_num = await seq.next_seq(s.wallet.address)
+            result = await submit_tx(s.tx_type, s.txn, client, s.wallet, seq=seq_num)
             engine = result.get("engine_result", "")
-            if engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ"):
-                created += 1
-            else:
+            s.accepted = engine in _ACCEPTED
+            if not s.accepted:
                 send_event(
                     f"workload::setup_reject : {name}",
                     {
                         "phase": name,
-                        "tx_type": tx_type,
-                        "account": wallet.address,
+                        "tx_type": s.tx_type,
+                        "account": s.wallet.address,
                         "sequence": seq_num,
                         "engine_result": engine,
                     },
@@ -141,12 +145,156 @@ async def _submit_batch(
                 f"workload::setup_error : {name}",
                 {
                     "phase": name,
-                    "tx_type": tx_type,
-                    "account": wallet.address,
+                    "tx_type": s.tx_type,
+                    "account": s.wallet.address,
                     "error": f"{type(e).__name__}: {e}",
                 },
             )
-    return created
+
+
+async def _run_phase(
+    workload: Workload,
+    name: str,
+    txns: list[tuple[str, Transaction, Wallet]],
+    exists: _ExistsFn | None = None,
+) -> int:
+    """Submit ``txns``, then verify + retry the shortfall until every submission
+    is confirmed or the bound (~_RETRY_ROUNDS / ~60s) is hit — then fail loud.
+
+    ``exists`` confirms a submission's ledger object is tracked (async WS state,
+    authoritative); ``None`` falls back to submit-time acceptance for pure
+    side-effect phases with no object. Between rounds each retried account's
+    sequence is re-fetched from the (now settled) ledger so re-submits don't
+    collide (tefPAST_SEQ). Fail loud aborts the run rather than proceed on
+    partial state."""
+    subs = [_Submission(t, txn, w) for t, txn, w in txns]
+    if not subs:
+        return 0
+    client, seq = workload.client, workload.seq
+    loop = asyncio.get_event_loop()
+
+    def satisfied(s: _Submission) -> bool:
+        return exists(s.txn, workload) if exists is not None else s.accepted
+
+    for round_i in range(_RETRY_ROUNDS):
+        pending = [s for s in subs if not satisfied(s)]
+        if not pending:
+            break
+        if round_i > 0:
+            for addr in {s.wallet.address for s in pending}:
+                seq.reset(addr)
+        await _submit_round(name, pending, client, seq)
+        deadline = loop.time() + _SETTLE_TIMEOUT
+        while loop.time() < deadline and any(not satisfied(s) for s in subs):
+            await asyncio.sleep(_SETTLE_POLL)
+
+    got = sum(1 for s in subs if satisfied(s))
+    if got < len(subs):
+        unreachable(
+            "workload::setup_incomplete",
+            {"phase": name, "expected": len(subs), "got": got},
+        )
+        raise RuntimeError(f"setup phase {name} incomplete: {got}/{len(subs)}")
+    return got
+
+
+async def _submit_batch(
+    name: str,
+    txns: list[tuple[str, Transaction, Wallet]],
+    client: AsyncJsonRpcClient,
+    seq: SequenceTracker,
+) -> int:
+    """Best-effort submit (no retry, no fail-loud): for graceful-degradation
+    phases (Confidential MPT, designed-partial MPT cohorts) where partial state
+    is acceptable. Returns the count accepted into a ledger."""
+    subs = [_Submission(t, txn, w) for t, txn, w in txns]
+    await _submit_round(name, subs, client, seq)
+    return sum(1 for s in subs if s.accepted)
+
+
+async def _poll(predicate: Callable[[], bool], timeout: float = _SETTLE_TIMEOUT) -> bool:
+    """Best-effort wait for ``predicate`` (no fail-loud); returns its final value."""
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(_SETTLE_POLL)
+    return predicate()
+
+
+# ── Phase object-existence predicates (used by _run_phase) ───────────────
+def _trust_line_exists(txn: Any, w: Workload) -> bool:
+    limit = txn.limit_amount
+    pair = {txn.account, limit.issuer}
+    return any(
+        {tl.account_a, tl.account_b} == pair and tl.currency == limit.currency
+        for tl in w.trust_lines
+    )
+
+
+def _mpt_issuance_exists(txn: Any, w: Workload) -> bool:
+    return any(m.issuer == txn.account for m in w.mpt_issuances)
+
+
+def _mpt_authorized(txn: Any, w: Workload) -> bool:
+    return any(
+        m.mpt_issuance_id == txn.mptoken_issuance_id and txn.account in m.holders
+        for m in w.mpt_issuances
+    )
+
+
+def _vault_exists(txn: Any, w: Workload) -> bool:
+    return any(v.owner == txn.account for v in w.vaults)
+
+
+def _nft_exists(txn: Any, w: Workload) -> bool:
+    return any(n.owner == txn.account for n in w.nfts)
+
+
+def _nft_offer_exists(txn: Any, w: Workload) -> bool:
+    return any(o.nftoken_id == txn.nftoken_id for o in w.nft_offers)
+
+
+def _amm_exists(txn: Any, w: Workload) -> bool:
+    return any(a.account == txn.account for a in w.amms)
+
+
+def _credential_exists(txn: Any, w: Workload) -> bool:
+    return any(
+        c.issuer == txn.account
+        and c.subject == txn.subject
+        and c.credential_type == txn.credential_type
+        for c in w.credentials
+    )
+
+
+def _credential_accepted(txn: Any, w: Workload) -> bool:
+    return any(
+        c.issuer == txn.issuer
+        and c.subject == txn.account
+        and c.credential_type == txn.credential_type
+        and c.accepted
+        for c in w.credentials
+    )
+
+
+def _domain_exists(txn: Any, w: Workload) -> bool:
+    return any(d.owner == txn.account for d in w.domains)
+
+
+def _broker_exists(txn: Any, w: Workload) -> bool:
+    return any(b.owner == txn.account and b.vault_id == txn.vault_id for b in w.loan_brokers)
+
+
+def _cover_deposited(txn: Any, w: Workload) -> bool:
+    return any(
+        b.loan_broker_id == txn.loan_broker_id and b.cover_balance > 0 for b in w.loan_brokers
+    )
+
+
+def _sponsorship_exists(txn: Any, w: Workload) -> bool:
+    return any(s.sponsor == txn.account and s.sponsee == txn.sponsee for s in w.sponsorships)
 
 
 async def _submit_loan(
@@ -188,6 +336,63 @@ async def _submit_loan(
             },
         )
     return ok
+
+
+@dataclass
+class _LoanAttempt:
+    broker_wallet: Wallet
+    broker_owner: str
+    broker_id: str
+    borrower: UserAccount
+
+
+async def _run_loans(workload: Workload, attempts: list[_LoanAttempt]) -> int:
+    """Co-signed LoanSet analogue of _run_phase: submit, verify against tracked
+    loans, retry the shortfall, then fail loud. LoanSet needs a counterparty
+    co-sign so it can't ride _submit_round."""
+    if not attempts:
+        return 0
+    loop = asyncio.get_event_loop()
+
+    def landed(a: _LoanAttempt) -> bool:
+        return any(
+            loan.borrower == a.borrower.address and loan.loan_broker_id == a.broker_id
+            for loan in workload.loans
+        )
+
+    for round_i in range(_RETRY_ROUNDS):
+        pending = [a for a in attempts if not landed(a)]
+        if not pending:
+            break
+        if round_i > 0:
+            for a in pending:
+                workload.seq.reset(a.borrower.address)
+        for a in pending:
+            try:
+                await _submit_loan(
+                    workload, a.broker_wallet, a.broker_owner, a.broker_id, a.borrower
+                )
+            except Exception as e:
+                send_event(
+                    "workload::setup_error : loans",
+                    {
+                        "phase": "loans",
+                        "borrower": a.borrower.address,
+                        "error": f"{type(e).__name__}: {e}",
+                    },
+                )
+        deadline = loop.time() + _SETTLE_TIMEOUT
+        while loop.time() < deadline and any(not landed(a) for a in attempts):
+            await asyncio.sleep(_SETTLE_POLL)
+
+    got = sum(1 for a in attempts if landed(a))
+    if got < len(attempts):
+        unreachable(
+            "workload::setup_incomplete",
+            {"phase": "loans", "expected": len(attempts), "got": got},
+        )
+        raise RuntimeError(f"setup phase loans incomplete: {got}/{len(attempts)}")
+    return got
 
 
 async def _probe_node(workload: Workload) -> None:
@@ -274,9 +479,9 @@ async def _setup_confidential_mpt(
         client,
         seq,
     )
-    await _wait_for_state(
-        workload.mpt_issuances, before + summary["conf_mpt_issuances"], "conf_mpt_issuances"
-    )
+    # Graceful degradation: conf MPT is allowed partial state (crypto/RPC races),
+    # so best-effort poll rather than fail loud.
+    await _poll(lambda: len(workload.mpt_issuances) >= before + summary["conf_mpt_issuances"])
 
     conf_issuer_addrs = {accs[i].address for i in issuer_indices}
     conf_issuances = [m for m in workload.mpt_issuances if m.issuer in conf_issuer_addrs]
@@ -490,8 +695,6 @@ async def _setup_sponsorships(
     working budgets from the first tick. Generous fee pools/reserve
     counts -- params.sponsorship_* alone can hand back a thin or zero
     budget, which is the point for driver-time exploration but not here."""
-    client = workload.client
-    seq = workload.seq
     txns: list[tuple[str, Transaction, Wallet]] = []
     for sponsor_idx, sponsee_idx, mode, req_fee, req_reserve in _SPONSORSHIP_PAIRS:
         if sponsor_idx >= len(accs) or sponsee_idx >= len(accs):
@@ -521,7 +724,7 @@ async def _setup_sponsorships(
                 sponsor.wallet,
             )
         )
-    summary["sponsorships"] = await _submit_batch("sponsorships", txns, client, seq)
+    summary["sponsorships"] = await _run_phase(workload, "sponsorships", txns, _sponsorship_exists)
 
 
 async def run_setup(workload: Workload) -> dict[str, int]:
@@ -569,18 +772,12 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 gw.wallet,
             )
         )
-    summary["gateways"] = await _submit_batch("gateways", gw_txns, client, seq)
+    summary["gateways"] = await _run_phase(workload, "gateways", gw_txns)
 
     # ── 1b. Sponsorships (XLS-68): prefund fee/reserve pools ─────────
-    # Independent of everything else -- accounts are funded at genesis --
-    # so this runs early. Contained: a raise here must not abort run_setup.
-    try:
-        await _setup_sponsorships(workload, accs, summary)
-    except Exception as e:
-        send_event(
-            "workload::setup_error : sponsorships",
-            {"phase": "sponsorships", "error": f"{type(e).__name__}: {e}"},
-        )
+    # Independent of everything else -- accounts are funded at genesis -- so
+    # this runs early. Fail-loud: driver sponsor paths starve without budgets.
+    await _setup_sponsorships(workload, accs, summary)
 
     # ── 2. Trust lines: holders → gateways for each currency ─────────
     trust_txns = []
@@ -605,7 +802,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         holder.wallet,
                     )
                 )
-    summary["trust_lines"] = await _submit_batch("trust_lines", trust_txns, client, seq)
+    summary["trust_lines"] = await _run_phase(
+        workload, "trust_lines", trust_txns, _trust_line_exists
+    )
 
     # ── 3. IOU distribution: gateways send tokens to holders ─────────
     iou_txns = []
@@ -633,7 +832,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         gateway.wallet,
                     )
                 )
-    summary["iou_distribution"] = await _submit_batch("iou_distribution", iou_txns, client, seq)
+    summary["iou_distribution"] = await _run_phase(workload, "iou_distribution", iou_txns)
 
     # ── 4. MPT issuances: 6 flag-distinct cohorts, one issuer each ───
     # Flag-distinct cohorts so valid DEX/AMM paths AND XLS-82 fault gates
@@ -652,8 +851,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         (4, _LOCK | _TRADE | _XFER | _AUTH),  # require-auth
         (5, _LOCK | _CLAW | _TRADE | _XFER),  # lockable (locked in 6b)
     ]
-    summary["mpt_issuances"] = await _submit_batch(
-        "mpt",
+    summary["mpt_issuances"] = await _run_phase(
+        workload,
+        "mpt_issuances",
         [
             (
                 "MPTokenIssuanceCreate",
@@ -663,12 +863,10 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             for i, flags in _mpt_cohorts
             if i < len(accs)
         ],
-        client,
-        seq,
+        _mpt_issuance_exists,
     )
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
-    await _wait_for_state(workload.mpt_issuances, summary["mpt_issuances"], "mpt_issuances")
     mpt_auth_txns = []
     for mpt in workload.mpt_issuances:
         for holder_idx in holder_indices:
@@ -686,7 +884,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                     holder.wallet,
                 )
             )
-    summary["mpt_authorizations"] = await _submit_batch("mpt_auth", mpt_auth_txns, client, seq)
+    summary["mpt_authorizations"] = await _run_phase(
+        workload, "mpt_authorizations", mpt_auth_txns, _mpt_authorized
+    )
 
     # ── 6. MPT distribution: issuers send tokens to authorized holders
     mpt_dist_txns = []
@@ -805,10 +1005,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         src.wallet,
                     )
                 )
-    summary["vaults"] = await _submit_batch("vaults", vault_txns, client, seq)
+    summary["vaults"] = await _run_phase(workload, "vaults", vault_txns, _vault_exists)
 
     # ── 7b. Vault deposits: owners deposit into their vaults ─────────
-    await _wait_for_state(workload.vaults, summary["vaults"], "vaults")
+    # Best-effort: the second MPT vault's owner (accs[17], outside the funded
+    # holder ranges) has no MPT balance, so its deposit fails by design.
     deposit_txns = []
     for vault in workload.vaults:
         if vault.owner not in workload.accounts:
@@ -863,7 +1064,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 8. NFTs: 5 from accounts[20..24] ─────────────────────────────
-    summary["nfts"] = await _submit_batch(
+    summary["nfts"] = await _run_phase(
+        workload,
         "nfts",
         [
             (
@@ -877,12 +1079,10 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             )
             for i in range(min(5, max(0, len(accs) - 20)))
         ],
-        client,
-        seq,
+        _nft_exists,
     )
 
     # ── 8b. NFT offers ───────────────────────────────────────────────
-    await _wait_for_state(workload.nfts, summary["nfts"], "nfts")
     nft_offer_txns = []
     for nft in workload.nfts:
         if nft.owner not in workload.accounts:
@@ -900,7 +1100,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 owner.wallet,
             )
         )
-    summary["nft_offers"] = await _submit_batch("nft_offers", nft_offer_txns, client, seq)
+    summary["nft_offers"] = await _run_phase(
+        workload, "nft_offers", nft_offer_txns, _nft_offer_exists
+    )
 
     # ── 8c. AMMs: seed pools so Deposit/Withdraw/Vote/Bid/Delete aren't no-ops
     amm_txns = []
@@ -949,12 +1151,13 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                     accs[63].wallet,
                 )
             )
-    summary["amms"] = await _submit_batch("amms", amm_txns, client, seq)
+    summary["amms"] = await _run_phase(workload, "amms", amm_txns, _amm_exists)
 
     # ── 9. Credentials ───────────────────────────────────────────────
     if len(accs) > 35:
         issuer = accs[30]
-        summary["credentials"] = await _submit_batch(
+        summary["credentials"] = await _run_phase(
+            workload,
             "credentials",
             [
                 (
@@ -968,12 +1171,12 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 )
                 for i in range(5)
             ],
-            client,
-            seq,
+            _credential_exists,
         )
         # Subjects accept so they become members of the step-11 domains; setup
         # credentials never expire, so membership stays stable.
-        summary["credential_accepts"] = await _submit_batch(
+        summary["credential_accepts"] = await _run_phase(
+            workload,
             "credential_accepts",
             [
                 (
@@ -987,8 +1190,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 )
                 for i in range(5)
             ],
-            client,
-            seq,
+            _credential_accepted,
         )
     else:
         summary["credentials"] = 0
@@ -1020,7 +1222,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     # ── 11. Permissioned domains ─────────────────────────────────────
     if len(accs) > 52:
         cred_issuer = accs[30].address
-        summary["domains"] = await _submit_batch(
+        summary["domains"] = await _run_phase(
+            workload,
             "domains",
             [
                 (
@@ -1037,8 +1240,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 )
                 for i in range(3)
             ],
-            client,
-            seq,
+            _domain_exists,
         )
     else:
         summary["domains"] = 0
@@ -1065,10 +1267,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 owner.wallet,
             )
         )
-    summary["loan_brokers"] = await _submit_batch("loan_brokers", broker_txns, client, seq)
+    summary["loan_brokers"] = await _run_phase(
+        workload, "loan_brokers", broker_txns, _broker_exists
+    )
 
     # ── 12b. Broker cover deposits ───────────────────────────────────
-    await _wait_for_state(workload.loan_brokers, summary["loan_brokers"], "loan_brokers")
     cover_txns = []
     for broker in workload.loan_brokers[:4]:
         if broker.owner not in workload.accounts:
@@ -1085,29 +1288,31 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 owner.wallet,
             )
         )
-    summary["cover_deposits"] = await _submit_batch("cover_deposits", cover_txns, client, seq)
+    summary["cover_deposits"] = await _run_phase(
+        workload, "cover_deposits", cover_txns, _cover_deposited
+    )
 
     # ── 13. Loans (co-signed) ────────────────────────────────────────
-    await asyncio.sleep(3)
-    loan_count = 0
     borrower_indices = list(_HOLDER_RANGE)
+    loan_attempts: list[_LoanAttempt] = []
     for idx, broker in enumerate(workload.loan_brokers[:3]):
         if broker.owner not in workload.accounts:
             continue
-        broker_wallet = workload.accounts[broker.owner].wallet
         b_idx = borrower_indices[idx] if idx < len(borrower_indices) else None
         if b_idx is None or b_idx >= len(accs) or accs[b_idx].address == broker.owner:
             continue
-        try:
-            if await _submit_loan(
-                workload, broker_wallet, broker.owner, broker.loan_broker_id, accs[b_idx]
-            ):
-                loan_count += 1
-        except Exception:
-            pass
-    summary["loans"] = loan_count
+        loan_attempts.append(
+            _LoanAttempt(
+                broker_wallet=workload.accounts[broker.owner].wallet,
+                broker_owner=broker.owner,
+                broker_id=broker.loan_broker_id,
+                borrower=accs[b_idx],
+            )
+        )
+    summary["loans"] = await _run_loans(workload, loan_attempts)
 
     # ── 13b. Zero-interest loan + payoff (for LoanDelete) ────────────
+    # Auxiliary (LoanDelete reachability): best-effort, must not abort the run.
     await asyncio.sleep(3)
     if workload.loan_brokers:
         broker = workload.loan_brokers[0]
@@ -1127,9 +1332,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         payment_total=1,
                     )
                     if ok:
-                        await _wait_for_state(
-                            workload.loans, summary["loans"] + 1, "zero_interest_loan"
-                        )
+                        await _poll(lambda: len(workload.loans) >= summary["loans"] + 1)
                         if workload.loans:
                             zero_loan = workload.loans[-1]
                             summary["loan_payoff"] = await _submit_batch(
