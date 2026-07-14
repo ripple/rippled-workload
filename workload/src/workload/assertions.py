@@ -4,8 +4,6 @@ from antithesis.assertions import assert_raw
 from antithesis.lifecycle import send_event
 from xrpl.models import Transaction, TransactionFlag
 
-from workload.features import SPONSOR
-
 _LOC_FILE = "workload/assertions.py"
 _LOC_CLASS = ""
 _LOC_COL = 0
@@ -215,25 +213,17 @@ def register_assertions() -> None:
         "Sometimes",
         must_hit=True,
     )
-    # Gated: none of these ever fire with the Sponsor feature off (no Sponsor field,
-    # no Sponsor*/SponsorshipAudit traffic), so registering them unconditionally
-    # would starve must_hit=True on a non-sponsor branch.
-    if SPONSOR:
-        _emit_catalog_entry(
-            "workload::always : no_sponsored_queue", "always", "Always", must_hit=True
-        )
-        for key in (
-            "sponsor_fee_prefunded_used",
-            "sponsor_fee_cosigned_used",
-            "sponsor_reserve_budget_exhausted",
-            "sponsor_no_permission_seen",
-            "sponsor_has_obligations_seen",
-            "sponsorship_audit_object_consistent",
-            "sponsorship_audit_account_consistent",
-        ):
-            _emit_catalog_entry(
-                f"workload::sometimes : {key}", "sometimes", "Sometimes", must_hit=True
-            )
+    _emit_catalog_entry("workload::always : no_sponsored_queue", "always", "Always", must_hit=True)
+    for key in (
+        "sponsor_fee_prefunded_used",
+        "sponsor_fee_cosigned_used",
+        "sponsor_reserve_budget_exhausted",
+        "sponsor_no_permission_seen",
+        "sponsor_has_obligations_seen",
+        "sponsorship_audit_object_consistent",
+        "sponsorship_audit_account_consistent",
+    ):
+        _emit_catalog_entry(f"workload::sometimes : {key}", "sometimes", "Sometimes", must_hit=True)
     for setup_key in [
         "gateways",
         "trust_lines",
@@ -312,8 +302,6 @@ def _assert_sponsor_submit_signals(name: str, raw: dict, result: dict) -> None:
     the submit response (no extra RPCs, no waiting on validation). ``ter*`` results
     never enter a ledger, so terNO_SPONSORSHIP would never reach tx_result's
     validated stream -- this is the only place that can catch it."""
-    if not SPONSOR:
-        return
     engine_result = result.get("engine_result", "") or ""
     if not engine_result:
         return
@@ -359,7 +347,7 @@ def _assert_sponsor_fee_usage(name: str, tx_json: dict, engine_result: str, tx_h
     Sponsorship budget (no counter-signature) vs. a co-signed one. Needs the
     validated tx, unlike the submit-time checks above -- SponsorSignature is present
     on the wire either way, but "did it actually land" is only certain post-validation."""
-    if not SPONSOR or engine_result != "tesSUCCESS":
+    if engine_result != "tesSUCCESS":
         return
     sponsor_flags = int(tx_json.get("SponsorFlags", 0) or 0)
     if not tx_json.get("Sponsor") or not (sponsor_flags & _SPF_SPONSOR_FEE):

@@ -15,7 +15,6 @@ from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import MPTokenIssuanceCreateFlag
 
 from workload import params
-from workload.features import CONFIDENTIAL_MPT, SPONSOR
 from workload.models import (
     AMM,
     DID,
@@ -50,6 +49,13 @@ from workload.transactions.amm import (
 from workload.transactions.batch import batch_random
 from workload.transactions.checks import check_cancel, check_cash, check_create
 from workload.transactions.clawback import clawback
+from workload.transactions.confidential_mpt import (
+    conf_mpt_clawback,
+    conf_mpt_convert,
+    conf_mpt_convert_back,
+    conf_mpt_merge_inbox,
+    conf_mpt_send,
+)
 from workload.transactions.credentials import (
     credential_accept,
     credential_create,
@@ -94,6 +100,23 @@ from workload.transactions.permissioned_dex import (
 )
 from workload.transactions.set_regular_key import set_regular_key
 from workload.transactions.signer_list_set import signer_list_set
+from workload.transactions.sponsored_create import (
+    sponsored_channel_create,
+    sponsored_check_create,
+    sponsored_credential_create,
+    sponsored_deposit_preauth,
+    sponsored_escrow_create,
+    sponsored_mpt_authorize,
+    sponsored_signer_list_set,
+    sponsored_trustline_create,
+)
+from workload.transactions.sponsorship import (
+    payment_sponsored_account,
+    sponsorship_set,
+    sponsorship_set_delete,
+    sponsorship_transfer,
+    sponsorship_transfer_account,
+)
 from workload.transactions.tickets import ticket_create, ticket_use
 from workload.transactions.trustlines import trustline_create
 from workload.transactions.vaults import (
@@ -849,203 +872,166 @@ Handler = Callable[..., Awaitable[Any]]
 ArgsFn = Callable[[Any], tuple[Any, ...]]
 StateUpdater = Callable[["Workload", dict, dict], None]
 
-# Gated (workload/features.py): this branch's pinned xrpl-py lacks the
-# ConfidentialMPT* models. Import + entries share one guard so conf_mpt_* stays
-# bound wherever it's referenced below.
-if CONFIDENTIAL_MPT:
-    from workload.transactions.confidential_mpt import (
-        conf_mpt_clawback,
-        conf_mpt_convert,
-        conf_mpt_convert_back,
+_CONFIDENTIAL_REGISTRY_ENTRIES: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
+    (
+        "ConfidentialMPTMergeInbox",
+        "/confidential/merge_inbox/random",
         conf_mpt_merge_inbox,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_merge_inbox,
+    ),
+    (
+        "ConfidentialMPTConvert",
+        "/confidential/convert/random",
+        conf_mpt_convert,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_convert,
+    ),
+    (
+        "ConfidentialMPTSend",
+        "/confidential/send/random",
         conf_mpt_send,
-    )
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_send,
+    ),
+    (
+        "ConfidentialMPTConvertBack",
+        "/confidential/convert_back/random",
+        conf_mpt_convert_back,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_convert_back,
+    ),
+    (
+        "ConfidentialMPTClawback",
+        "/confidential/clawback/random",
+        conf_mpt_clawback,
+        lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
+        _on_conf_clawback,
+    ),
+]
 
-    _CONFIDENTIAL_REGISTRY_ENTRIES: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
-        (
-            "ConfidentialMPTMergeInbox",
-            "/confidential/merge_inbox/random",
-            conf_mpt_merge_inbox,
-            lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
-            _on_conf_merge_inbox,
-        ),
-        (
-            "ConfidentialMPTConvert",
-            "/confidential/convert/random",
-            conf_mpt_convert,
-            lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
-            _on_conf_convert,
-        ),
-        (
-            "ConfidentialMPTSend",
-            "/confidential/send/random",
-            conf_mpt_send,
-            lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
-            _on_conf_send,
-        ),
-        (
-            "ConfidentialMPTConvertBack",
-            "/confidential/convert_back/random",
-            conf_mpt_convert_back,
-            lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
-            _on_conf_convert_back,
-        ),
-        (
-            "ConfidentialMPTClawback",
-            "/confidential/clawback/random",
-            conf_mpt_clawback,
-            lambda w: (w.accounts, w.mpt_issuances, w.confidential_mpt_issuances, w.client),
-            _on_conf_clawback,
-        ),
-    ]
-else:
-    _CONFIDENTIAL_REGISTRY_ENTRIES = []
-
-# Gated (workload/features.py): SponsorshipSet/SponsorshipTransfer models only
-# exist on xrpl-py's sponsoredFeesDraft1 branch. SponsorshipSetDelete,
-# SponsorshipTransferAccount, and PaymentSponsoredAccount are synthetic buckets
-# on top of the real SponsorshipSet/SponsorshipTransfer/Payment types
-# (ws_listener.py maps results back), so they pass state_updater=None here --
+# SponsorshipSetDelete, SponsorshipTransferAccount, and PaymentSponsoredAccount are
+# synthetic buckets on top of the real SponsorshipSet/SponsorshipTransfer/Payment
+# types (ws_listener.py maps results back), so they pass state_updater=None here --
 # PaymentSponsoredAccount's actual state update lives on the real "Payment" row
 # above (_on_payment_maybe_sponsored_account), since STATE_UPDATERS is keyed by
-# real TransactionType and "Payment" isn't itself gated.
-if SPONSOR:
-    from workload.transactions.sponsored_create import (
-        sponsored_channel_create,
-        sponsored_check_create,
-        sponsored_credential_create,
-        sponsored_deposit_preauth,
-        sponsored_escrow_create,
-        sponsored_mpt_authorize,
-        sponsored_signer_list_set,
-        sponsored_trustline_create,
-    )
-    from workload.transactions.sponsorship import (
-        payment_sponsored_account,
+# real TransactionType.
+_SPONSOR_REGISTRY_ENTRIES: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
+    (
+        "SponsorshipSet",
+        "/sponsorship/set/random",
         sponsorship_set,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        _on_sponsorship_set,
+    ),
+    (
+        "SponsorshipSetDelete",
+        "/sponsorship/delete/random",
         sponsorship_set_delete,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsorshipTransfer",
+        "/sponsorship/transfer/random",
         sponsorship_transfer,
+        lambda w: (
+            w.accounts,
+            w.sponsorships,
+            w.checks,
+            w.escrows,
+            w.payment_channels,
+            w.trust_lines,
+            w.credentials,
+            w.sponsored_objects,
+            w.offers,
+            w.client,
+        ),
+        _on_sponsorship_transfer,
+    ),
+    (
+        "SponsorshipTransferAccount",
+        "/sponsorship/transfer/account/random",
         sponsorship_transfer_account,
-    )
-
-    _SPONSOR_REGISTRY_ENTRIES: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
-        (
-            "SponsorshipSet",
-            "/sponsorship/set/random",
-            sponsorship_set,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            _on_sponsorship_set,
+        lambda w: (
+            w.accounts,
+            w.sponsorships,
+            w.sponsored_accounts,
+            w.protected_accounts,
+            w.client,
         ),
-        (
-            "SponsorshipSetDelete",
-            "/sponsorship/delete/random",
-            sponsorship_set_delete,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsorshipTransfer",
-            "/sponsorship/transfer/random",
-            sponsorship_transfer,
-            lambda w: (
-                w.accounts,
-                w.sponsorships,
-                w.checks,
-                w.escrows,
-                w.payment_channels,
-                w.trust_lines,
-                w.credentials,
-                w.sponsored_objects,
-                w.offers,
-                w.client,
-            ),
-            _on_sponsorship_transfer,
-        ),
-        (
-            "SponsorshipTransferAccount",
-            "/sponsorship/transfer/account/random",
-            sponsorship_transfer_account,
-            lambda w: (
-                w.accounts,
-                w.sponsorships,
-                w.sponsored_accounts,
-                w.protected_accounts,
-                w.client,
-            ),
-            None,
-        ),
-        (
-            "PaymentSponsoredAccount",
-            "/payment/sponsored_account/random",
-            payment_sponsored_account,
-            lambda w: (w.accounts, w.client),
-            None,
-        ),
-        # ── Reserve-sponsored object creation (sponsored_create.py) ──────
-        # Synthetic names; on-ledger type is the real creator tx (CheckCreate,
-        # EscrowCreate, ...). Real-type rows above already carry the state
-        # updater that tracks the created object; ws_listener's generic
-        # reserve-sponsor rule fires these buckets and records
-        # w.sponsored_objects, so state_updater=None here.
-        (
-            "SponsoredCheckCreate",
-            "/sponsored/check/random",
-            sponsored_check_create,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsoredEscrowCreate",
-            "/sponsored/escrow/random",
-            sponsored_escrow_create,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsoredPaymentChannelCreate",
-            "/sponsored/channel/random",
-            sponsored_channel_create,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsoredTrustSet",
-            "/sponsored/trustline/random",
-            sponsored_trustline_create,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsoredCredentialCreate",
-            "/sponsored/credential/random",
-            sponsored_credential_create,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsoredSignerListSet",
-            "/sponsored/signer_list/random",
-            sponsored_signer_list_set,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsoredDepositPreauth",
-            "/sponsored/deposit_preauth/random",
-            sponsored_deposit_preauth,
-            lambda w: (w.accounts, w.sponsorships, w.client),
-            None,
-        ),
-        (
-            "SponsoredMPTokenAuthorize",
-            "/sponsored/mpt/random",
-            sponsored_mpt_authorize,
-            lambda w: (w.accounts, w.mpt_issuances, w.sponsorships, w.client),
-            None,
-        ),
-    ]
-else:
-    _SPONSOR_REGISTRY_ENTRIES = []
+        None,
+    ),
+    (
+        "PaymentSponsoredAccount",
+        "/payment/sponsored_account/random",
+        payment_sponsored_account,
+        lambda w: (w.accounts, w.client),
+        None,
+    ),
+    # ── Reserve-sponsored object creation (sponsored_create.py) ──────
+    # Synthetic names; on-ledger type is the real creator tx (CheckCreate,
+    # EscrowCreate, ...). Real-type rows above already carry the state
+    # updater that tracks the created object; ws_listener's generic
+    # reserve-sponsor rule fires these buckets and records
+    # w.sponsored_objects, so state_updater=None here.
+    (
+        "SponsoredCheckCreate",
+        "/sponsored/check/random",
+        sponsored_check_create,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsoredEscrowCreate",
+        "/sponsored/escrow/random",
+        sponsored_escrow_create,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsoredPaymentChannelCreate",
+        "/sponsored/channel/random",
+        sponsored_channel_create,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsoredTrustSet",
+        "/sponsored/trustline/random",
+        sponsored_trustline_create,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsoredCredentialCreate",
+        "/sponsored/credential/random",
+        sponsored_credential_create,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsoredSignerListSet",
+        "/sponsored/signer_list/random",
+        sponsored_signer_list_set,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsoredDepositPreauth",
+        "/sponsored/deposit_preauth/random",
+        sponsored_deposit_preauth,
+        lambda w: (w.accounts, w.sponsorships, w.client),
+        None,
+    ),
+    (
+        "SponsoredMPTokenAuthorize",
+        "/sponsored/mpt/random",
+        sponsored_mpt_authorize,
+        lambda w: (w.accounts, w.mpt_issuances, w.sponsorships, w.client),
+        None,
+    ),
+]
 
 REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
     (

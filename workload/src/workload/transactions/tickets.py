@@ -19,6 +19,7 @@ from xrpl.models.transactions import (
     PermissionedDomainSet,
     SetRegularKey,
     SignerListSet,
+    SponsorshipSet,
     TrustSet,
 )
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
@@ -31,7 +32,6 @@ from xrpl.wallet import Wallet
 
 from workload import params
 from workload.assertions import tx_submitted
-from workload.features import SPONSOR
 from workload.fuzz import submit_fuzzed
 from workload.models import AMM, Credential, PermissionedDomain, UserAccount
 from workload.randoms import choice
@@ -187,20 +187,16 @@ _TICKET_BUILDERS: dict[str, _TicketBuilder] = {
     "PaymentDomainXC": lambda ctx: _ticket_domain_payment(ctx, cross_currency=True),
 }
 
-# Gated (workload/features.py): SponsorshipSet only exists on xrpl-py's
-# sponsoredFeesDraft1 branch. Create/update needs no pre-existing state (dst
-# just becomes the sponsee), unlike SponsorshipTransfer/SponsorshipSetDelete
-# below, which need a tracked Sponsorship/object -- excluded instead.
-if SPONSOR:
-    from xrpl.models.transactions import SponsorshipSet
-
-    _TICKET_BUILDERS["SponsorshipSet"] = lambda ctx: SponsorshipSet(
-        sponsee=ctx.dst,
-        fee_amount=params.sponsorship_fee_amount(),
-        max_fee=params.sponsorship_max_fee(),
-        remaining_owner_count=params.sponsorship_reserve_count(),
-        **ctx.common,
-    )
+# SponsorshipSet Create/update needs no pre-existing state (dst just becomes the
+# sponsee), unlike SponsorshipTransfer/SponsorshipSetDelete below, which need a
+# tracked Sponsorship/object -- excluded instead.
+_TICKET_BUILDERS["SponsorshipSet"] = lambda ctx: SponsorshipSet(
+    sponsee=ctx.dst,
+    fee_amount=params.sponsorship_fee_amount(),
+    max_fee=params.sponsorship_max_fee(),
+    remaining_owner_count=params.sponsorship_reserve_count(),
+    **ctx.common,
+)
 
 # Types the (dst, common)-only builder signature can't reach: objects (need
 # pre-existing IDs), circular (tickets on tickets), cosign, batch.

@@ -19,7 +19,6 @@ from workload import logger
 from workload.assertions import register_assertions
 from workload.check_xrpld_sync_state import is_xrpld_synced
 from workload.config import conf_file, config_file
-from workload.features import SPONSOR
 from workload.models import (
     AMM,
     DID,
@@ -233,17 +232,16 @@ def create_app(workload: Workload) -> FastAPI:
     # (register_assertions() would starve waiting for a hit that never comes).
     # Wired directly with the same _make_endpoint plumbing (XRPLException/
     # timeout handling) instead.
-    if SPONSOR:
-        from workload.transactions.sponsorship import sponsorship_audit_random
+    from workload.transactions.sponsorship import sponsorship_audit_random
 
-        app.get("/sponsorship/audit/random")(
-            _make_endpoint(
-                "/sponsorship/audit/random",
-                "SponsorshipAudit",
-                sponsorship_audit_random,
-                lambda w: (w.sponsorships, w.sponsored_accounts, w.client),
-            )
+    app.get("/sponsorship/audit/random")(
+        _make_endpoint(
+            "/sponsorship/audit/random",
+            "SponsorshipAudit",
+            sponsorship_audit_random,
+            lambda w: (w.sponsorships, w.sponsored_accounts, w.client),
         )
+    )
 
     return app
 

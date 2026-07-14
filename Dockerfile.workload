@@ -18,19 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Confidential MPT (XLS-0096) crypto: the proof code (xrpl.ext.confidential) is
 # excluded from xrpl-py's core wheel, so build it into the venv. The script pins
 # mpt-crypto from the branch and fails on divergence from rippled's conan pin.
-# Gated (workload/features.py): off by default here -- this branch's pinned
-# xrpl-py (sponsoredFeesDraft1) doesn't carry the ConfidentialMPT* models this
-# crypto pairs with, so building it would be wasted work. Set --build-arg
-# WORKLOAD_FEATURE_CONFIDENTIAL_MPT=1 to re-enable on a confidential-mpt build.
-ARG WORKLOAD_FEATURE_CONFIDENTIAL_MPT=0
-ENV WORKLOAD_FEATURE_CONFIDENTIAL_MPT=$WORKLOAD_FEATURE_CONFIDENTIAL_MPT
 ARG XRPL_PY_REF=confidential-mpt
 ARG XRPLD_COMMIT=develop
-RUN if [ "$WORKLOAD_FEATURE_CONFIDENTIAL_MPT" = "1" ]; then \
-        PYTHON=/opt/venv/bin/python bash scripts/setup-confidential-crypto.sh "$XRPL_PY_REF" "$XRPLD_COMMIT"; \
-    else \
-        echo "WORKLOAD_FEATURE_CONFIDENTIAL_MPT=0 -- skipping confidential MPT crypto build"; \
-    fi
+RUN PYTHON=/opt/venv/bin/python bash scripts/setup-confidential-crypto.sh "$XRPL_PY_REF" "$XRPLD_COMMIT"
 
 COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
 

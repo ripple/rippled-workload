@@ -1,12 +1,5 @@
 {
   "venvPath": "workload",
   "venv": ".venv",
-  "typeCheckingMode": "standard",
-  // Confidential MPT (XLS-0096): CONFIDENTIAL_MPT-gated (workload/features.py).
-  // These two import ConfidentialMPT* models that only exist on xrpl-py's
-  // confidential-mpt branch, not this branch's pinned one.
-  "exclude": [
-    "workload/src/workload/confidential_crypto.py",
-    "workload/src/workload/transactions/confidential_mpt.py"
-  ]
+  "typeCheckingMode": "standard"
 }

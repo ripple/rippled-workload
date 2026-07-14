@@ -94,11 +94,8 @@ Read-only `ledger_entry`/`account_info` cross-check of tracked sponsor state aga
 ### Logging
 No logger calls in `setup.py` or handlers — `send_event` + assertions cover observability. `setup.py` emits `workload::setup_reject : {phase}` / `setup_error : {phase}`. Only `ws_listener.py` keeps warn/error logs; `sequence.py` one debug log.
 
-### Feature gates (`features.py`)
-Workload branches track different rippled feature branches, and each new amendment's xrpl-py support lives on its own, incompatible xrpl-py branch — importing a feature's xrpl models when the pinned xrpl-py branch lacks them crashes at import time. `CONFIDENTIAL_MPT` and `SPONSOR` gate their features; each names the xrpl-py branch + rippled amendment it needs. Override via env var (`WORKLOAD_FEATURE_CONFIDENTIAL_MPT=1`, docker-compose-settable) without a code edit. Gating a feature off means: the module importing its xrpl model types is imported only inside `if <GATE>:`, its `REGISTRY`/setup entries are built conditionally (splice pattern in `transactions/__init__.py`, `_CONFIDENTIAL_REGISTRY_ENTRIES`), and the module itself is excluded from mypy/basedpyright (`workload/pyproject.toml` `[tool.mypy] exclude`, root `pyrightconfig.json` `exclude`) since it imports xrpl symbols the pinned branch doesn't have.
-
 ### Confidential MPT (XLS-0096)
-Gated off on this branch (`features.CONFIDENTIAL_MPT = False`) — sponsor-workload pins xrpl-py to `sponsoredFeesDraft1`, which doesn't carry the `ConfidentialMPT*` models below. `Dockerfile.workload`'s crypto build (`scripts/setup-confidential-crypto.sh`) is gated the same way via `--build-arg WORKLOAD_FEATURE_CONFIDENTIAL_MPT=1`. Flip the gate on a branch whose xrpl-py carries these models.
+Unconditionally on: the pinned `pre-3.3-release-group` xrpl-py carries the `ConfidentialMPT*` models and xrpld `develop` carries the `ConfidentialTransfer` amendment. `Dockerfile.workload` always runs the crypto build (`scripts/setup-confidential-crypto.sh`).
 
 Five real on-ledger handlers (`transactions/confidential_mpt.py`: MergeInbox, Convert, Send, ConvertBack, Clawback) — true `ConfidentialMPT*` type, real-type `STATE_UPDATERS`, no synthetic-name mapping.
 

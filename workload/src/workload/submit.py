@@ -10,7 +10,7 @@ from xrpl.models.requests import SubmitOnly
 from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
-from workload import features, logging, params
+from workload import logging, params
 from workload.assertions import tx_submitted
 
 log = logging.getLogger(__name__)
@@ -67,13 +67,7 @@ async def submit_tx(
     # Batch's Fee must be zero (TapBatch), and a txn built with sponsor fields
     # already set (e.g. sponsorship.py's prefunded co-sign helpers) must not be
     # clobbered here.
-    if (
-        not delegated
-        and features.SPONSOR
-        and _sponsorships
-        and name != "Batch"
-        and txn.sponsor is None
-    ):
+    if not delegated and _sponsorships and name != "Batch" and txn.sponsor is None:
         from workload.transactions.sponsorship import maybe_sponsor
 
         sponsor_addr = maybe_sponsor(txn.account, _sponsorships)

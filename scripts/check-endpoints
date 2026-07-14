@@ -62,32 +62,29 @@ try:
         '/loan/manage/random',
         '/loan/pay/random',
     ]
-    from workload import features
-    if features.CONFIDENTIAL_MPT:
-        expected += [
-            '/confidential/merge_inbox/random',
-            '/confidential/convert/random',
-            '/confidential/send/random',
-            '/confidential/convert_back/random',
-            '/confidential/clawback/random',
-        ]
-    if features.SPONSOR:
-        expected += [
-            '/sponsorship/set/random',
-            '/sponsorship/delete/random',
-            '/sponsorship/transfer/random',
-            '/sponsorship/transfer/account/random',
-            '/payment/sponsored_account/random',
-            '/sponsored/check/random',
-            '/sponsored/escrow/random',
-            '/sponsored/channel/random',
-            '/sponsored/trustline/random',
-            '/sponsored/credential/random',
-            '/sponsored/signer_list/random',
-            '/sponsored/deposit_preauth/random',
-            '/sponsored/mpt/random',
-            '/sponsorship/audit/random',
-        ]
+    expected += [
+        '/confidential/merge_inbox/random',
+        '/confidential/convert/random',
+        '/confidential/send/random',
+        '/confidential/convert_back/random',
+        '/confidential/clawback/random',
+    ]
+    expected += [
+        '/sponsorship/set/random',
+        '/sponsorship/delete/random',
+        '/sponsorship/transfer/random',
+        '/sponsorship/transfer/account/random',
+        '/payment/sponsored_account/random',
+        '/sponsored/check/random',
+        '/sponsored/escrow/random',
+        '/sponsored/channel/random',
+        '/sponsored/trustline/random',
+        '/sponsored/credential/random',
+        '/sponsored/signer_list/random',
+        '/sponsored/deposit_preauth/random',
+        '/sponsored/mpt/random',
+        '/sponsorship/audit/random',
+    ]
 
     missing = [e for e in expected if e not in routes]
     if missing:
