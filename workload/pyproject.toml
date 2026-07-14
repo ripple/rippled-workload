@@ -34,9 +34,9 @@ warn_unused_ignores = true
 # complementary flow/annotation checker, so third-party types resolve as Any here.
 ignore_missing_imports = true
 
-# Confidential MPT (XLS-0096) models come from xrpl-py's confidential-mpt branch
-# (not yet released). Proof generation (xrpl/ext/confidential) is EXCLUDED from the
-# core wheel this installs and is built separately in the Antithesis image; see
-# scripts/setup-confidential-crypto.sh.
+# Confidential MPT (XLS-0096) and sponsor models come from xrpl-py's pre-3.3-release-group
+# branch (converges the pre-release WIP branches; not yet released). Proof generation
+# (xrpl/ext/confidential) is EXCLUDED from the core wheel this installs and is built
+# separately in the Antithesis image; see scripts/setup-confidential-crypto.sh.
 [tool.uv.sources]
-xrpl-py = { git = "https://github.com/XRPLF/xrpl-py.git", branch = "confidential-mpt" }
+xrpl-py = { git = "https://github.com/XRPLF/xrpl-py.git", branch = "pre-3.3-release-group" }
