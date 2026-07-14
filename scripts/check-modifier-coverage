@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(dirname "$0")/../workload"
+
+echo "Checking transaction-modifier coverage of REGISTRY types..."
+uv run python -c "
+from workload.modifiers import MODIFIERS
+from workload.transactions import TX_TYPES
+
+tx_names = set(TX_TYPES)
+problems: list[str] = []
+for mod in MODIFIERS:
+    supported, excluded = set(mod.supported), set(mod.excluded)
+    for t in sorted(tx_names - (supported | excluded)):
+        problems.append(f'{mod.name}: unclassified {t}')
+    for t in sorted((supported | excluded) - tx_names):
+        problems.append(f'{mod.name}: classifies unknown type {t}')
+    for t in sorted(supported & excluded):
+        problems.append(f'{mod.name}: {t} in both supported and excluded')
+
+if problems:
+    print(f'FAILED: {len(problems)} modifier coverage problem(s):')
+    for p in problems:
+        print(f'  {p}')
+    print('Every Modifier must partition REGISTRY types: supported | excluded == types, disjoint.')
+    exit(1)
+print('All modifiers partition REGISTRY types OK')
+"

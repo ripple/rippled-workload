@@ -40,29 +40,21 @@ async def submit_tx(
     """Sign and submit; returns the tentative engine_result (final via WS listener).
 
     ``seq`` (if given) is stamped pre-autofill so xrpl-py skips the RPC seq fetch.
-    With delegation configured, a matching delegate co-signs ~10% of the time.
-    Independently, ~10% of eligible txns get a prefunded fee sponsor attached
-    (mutually exclusive with delegation). Lets XRPLRequestFailureException
-    propagate to the handler's XRPLException catch.
+    Runs the transaction-modifier pipeline (delegate this phase; ticket/sponsor
+    fold in later): a matching delegate signs ~10% of the time. Independently,
+    ~10% of eligible txns get a prefunded fee sponsor attached (still mutually
+    exclusive with delegation until Phase 3 folds it into the sponsor modifier).
+    Lets XRPLRequestFailureException propagate to the handler's XRPLException catch.
     """
     if seq is not None:
         txn = txn.__replace__(sequence=seq)
 
-    # Lazy import: avoids circular dependency.
-    delegated = False
-    if _delegates:
-        from workload.transactions.delegation import maybe_delegate
+    # Lazy import: modifiers -> transactions -> delegation -> submit would cycle.
+    from workload.modifiers import ModifierCtx, apply_modifiers
 
-        delegate_addr, delegate_wallet = maybe_delegate(
-            name,
-            txn.account,
-            _delegates,
-            _accounts,
-        )
-        if delegate_addr is not None and delegate_wallet is not None:
-            txn = txn.__replace__(delegate=delegate_addr)
-            wallet = delegate_wallet
-            delegated = True
+    ctx = ModifierCtx(delegates=_delegates, accounts=_accounts, sponsorships=_sponsorships)
+    txn, wallet, applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
+    delegated = "delegate" in applied
 
     # Batch's Fee must be zero (TapBatch), and a txn built with sponsor fields
     # already set (e.g. sponsorship.py's prefunded co-sign helpers) must not be
@@ -75,6 +67,8 @@ async def submit_tx(
             txn = txn.__replace__(sponsor=sponsor_addr, sponsor_flags=params.SPF_SPONSOR_FEE)
 
     signed = await autofill_and_sign(txn, client, wallet)
+    for cosign in cosigns:
+        signed = cosign(signed)
     response = await submit(signed, client)
     result: dict = response.result
     tx_submitted(name, txn, result)

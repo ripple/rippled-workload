@@ -7,9 +7,10 @@ Antithesis workload generator for rippled fuzzing. FastAPI server emits random X
 `direnv allow` once — `.envrc` auto-loads the flake devshell (Python, uv, ruff, mypy, basedpyright, `scripts/` on PATH) on every `cd` into the tree, and `uv sync`s the venv. Without direnv, prefix commands with `nix develop --command` (what CI does). With the env active:
 
 ```bash
-check-imports        # imports resolve (~2s)
-check-endpoints      # endpoints register (~3s)
-check-fuzz-coverage  # every _faulty wires generative fuzz (~2s)
+check-imports          # imports resolve (~2s)
+check-endpoints        # endpoints register (~3s)
+check-fuzz-coverage    # every _faulty wires generative fuzz (~2s)
+check-modifier-coverage # every Modifier partitions REGISTRY types (~2s)
 ```
 
 ## Add a transaction type
@@ -29,7 +30,8 @@ check-fuzz-coverage  # every _faulty wires generative fuzz (~2s)
 7. `scripts/check-endpoints` — add the endpoint path to `expected`.
 8. `transactions/tickets.py` — classify in `_TICKET_BUILDERS` or `_TICKET_EXCLUDED`. Builders take a `TicketCtx` (src/dst, `common`, workload state) and return a `Transaction` or `None`. Only types that can't be built from the ctx (need object IDs, cosign, circular, batch) go in `_TICKET_EXCLUDED`. Every `REGISTRY` type must be in one; else `check_ticket_coverage` fires `unreachable : ticket_coverage_missing`.
 9. `setup.py` — creation logic if other transactions depend on the object.
-10. Run `check-imports`, `check-endpoints`, and `check-fuzz-coverage`.
+10. `modifiers.py` — classify the new type for **every** `Modifier`: add it to `supported`, or to `excluded` with a reason. `check-modifier-coverage` fails CI otherwise.
+11. Run `check-imports`, `check-endpoints`, `check-fuzz-coverage`, and `check-modifier-coverage`.
 
 ## Patterns
 
@@ -50,6 +52,11 @@ Return early silently on empty state — never raise, never log. Non-XRPL except
 `submit_tx()` (`submit.py`) always — it wires `tx_submitted()`. Never call `xrpl_submit` directly (exception: `LoanSet` co-signs in `lending.py`).
 
 `submit_raw(name, base, mutate, client, wallet)` for malformations xrpl-py rejects at construction (`tfHybrid` w/o `DomainID`, empty/`>10`/duplicate arrays). Autofills a valid `base`, serializes, applies `mutate(dict)`, signs and submits raw so rippled preflight does the rejecting. `_faulty` only. `mutate` MUST keep the dict encodable — no encode guard (only `submit_fuzzed` catches that).
+
+### Transaction modifiers (`modifiers.py`)
+Submit-time decorators applied by `submit_tx` via `apply_modifiers(name, txn, wallet, ctx)` (never `submit_raw`). Each `Modifier` declares `supported: set[str]` / `excluded: dict[str, str]` (a partition over REGISTRY types), a `weight` (fire probability), and `incompatible_with: set[str]` tags. The pipeline runs `MODIFIERS` in registry order (ticket → delegate → sponsor); a modifier fires iff `name in supported`, no already-applied tag is in its `incompatible_with`, `random() < weight`, and its `apply` returns a non-None `ModResult`. Any number stack. `apply_modifiers` returns `(txn, wallet, applied_tags, cosigns)`; `submit_tx` runs each `cosign` over the signed tx (post-sign phase, e.g. sponsor co-sign) before submitting.
+
+Coverage: `supported ∪ excluded == {REGISTRY types}`, disjoint — enforced by `scripts/check-modifier-coverage` (CI) + `check_modifier_coverage()` at startup (fires `unreachable : modifier_coverage_missing` per gap). Only **delegate** exists so far (weight 0.10, `_NON_DELEGABLE_NAMES` → excluded; `incompatible_with={"sponsor"}`); `maybe_delegate` is now a pure candidate picker (the Modifier owns probability + non-delegable filtering). Fee sponsorship stays an inline `submit_tx` block (respects the delegate tag) until Phase 3 folds it into a sponsor modifier; `check_ticket_coverage` stays until Phase 2 makes ticket a modifier. See `docs/transaction-modifiers.md`.
 
 ### Faulty handlers
 One random mutation via `choice()`; never raise; same preconditions as `_valid`. Mutations: `fake_id()`, `zero_domain_id()` (→ `temMALFORMED`), non-owner submit, zero/negative amounts, mismatched assets, overdraw. Keep overdraw/state-aware mutations out of `_valid`.

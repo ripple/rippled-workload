@@ -39,6 +39,7 @@ from workload.models import (
     UserAccount,
     Vault,
 )
+from workload.modifiers import check_modifier_coverage
 from workload.probe import probe_network
 from workload.transactions import REGISTRY
 from workload.transactions.tickets import check_ticket_coverage
@@ -119,6 +120,7 @@ class Workload:
 
         register_assertions()
         check_ticket_coverage()
+        check_modifier_coverage()
 
         logger.info("Workload initialized after %ss", int(time.time() - self.start_time))
 

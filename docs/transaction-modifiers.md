@@ -84,5 +84,12 @@ Today setup is best-effort (`_wait_for_state` times out → `setup_state_partial
 Each phase must leave all gates green: `check-imports`, `check-endpoints`, `check-fuzz-coverage`, `check-modifier-coverage`, `ruff check`, `ruff format --check`, `mypy`, `basedpyright`.
 
 ## Open items
-- Verify delegate×ticket and sponsor×ticket validity against rippled `develop` (Phase 1).
 - Confirm the setup fail-loud threshold value with the owner.
+
+## Compatibility findings (Phase 1, rippled `develop`)
+
+Read `libxrpl/tx/Transactor.cpp` (`preflight1`, `preflight1Sponsor`, `checkSponsor`, `checkSeq`) + `SponsorshipTransfer.cpp`.
+
+- **delegate × ticket → valid.** Ticket/Sequence handling (`checkSeq`, ~L711–757) is fully independent of `sfSponsor`/`sfDelegate`: a ticket just replaces the account Sequence (`Sequence=0` + `TicketSequence`), no coupling. `preflight1` only rejects `Ticket + AccountTxnID`.
+- **sponsor × ticket → valid.** Same reason — orthogonal; nothing in `checkSponsor` or `preflight1Sponsor` reads the sequence/ticket fields.
+- **delegate × sponsor:** more precise than "always invalid." `checkSponsor` (L416–418) returns `temINVALID` only when the sponsor is a **reserve** sponsor and `sfDelegate` is present (`isFieldPresent(sfDelegate) && isReserveSponsored(tx)`). A **fee**-only sponsor + delegate is *not* rejected there; it instead requires the Sponsorship object to be keyed on `(sponsor, initiator=delegate)`, else `terNO_PERMISSION` (L437). So the framework keeps delegate and sponsor mutually exclusive (`incompatible_with={"sponsor"}`); the reserve-sponsor+delegate `temINVALID` remains a deliberate fault vector (note: the previously-cited `terNO_SPONSORSHIP` is now `temINVALID` on `develop`).
