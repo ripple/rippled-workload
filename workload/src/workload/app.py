@@ -198,6 +198,12 @@ def create_app(workload: Workload) -> FastAPI:
         try:
             result = await run_setup(workload)
             reachable("workload::setup_complete_with_state", result)
+            # Signal setup_complete ONLY on success. Calling it after a failed setup
+            # tells Antithesis "faults may begin" and drives the whole run on broken
+            # state (every driver cascades); leaving it unsignaled keeps the run in the
+            # setup phase so setup_failed is the single clear signal.
+            lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
+            ready["value"] = True
         except Exception as e:
             logger.error(f"setup failed: {type(e).__name__}: {e}")
             unreachable(
@@ -205,8 +211,6 @@ def create_app(workload: Workload) -> FastAPI:
                 {"error": f"{type(e).__name__}: {e}"},
             )
 
-        lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
-        ready["value"] = True
         yield
 
         ws_task.cancel()
