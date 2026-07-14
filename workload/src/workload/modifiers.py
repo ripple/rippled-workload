@@ -18,7 +18,7 @@ from typing import Any
 from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
-from workload.randoms import random
+from workload.randoms import choice, random
 from workload.transactions import TX_TYPES
 from workload.transactions.delegation import _NON_DELEGABLE_NAMES, maybe_delegate
 
@@ -52,6 +52,38 @@ class Modifier:
     apply: Callable[..., ModResult | None]  # (name, txn, wallet, ctx) -> decoration | None
 
 
+# ── Ticket modifier ──────────────────────────────────────────────────
+# A ticket is Sequence=0 + TicketSequence consuming one of the account's tracked
+# tickets. Orthogonal to delegate/sponsor (rippled checkSeq is independent of
+# sfDelegate/sfSponsor -- Phase 1 findings), so incompatible_with is empty.
+# Excluded types either fix their own sequence or bind it into a proof, so a
+# ticket's Sequence=0 would break them.
+_TICKET_EXCLUDED: dict[str, str] = {
+    "Batch": "manages inner-tx Sequences + needs Fee=0 (TapBatch); a ticket would desync it",
+    "TicketCreate": "circular: new tickets number from account-root seq, not the tx seq",
+    "ConfidentialMPTConvert": "proof binds account Sequence; ticket zeroes it -> tecBAD_PROOF",
+    "ConfidentialMPTSend": "proof binds account Sequence; ticket zeroes it -> tecBAD_PROOF",
+    "ConfidentialMPTConvertBack": "proof binds account Sequence; ticket zeroes it -> tecBAD_PROOF",
+    "ConfidentialMPTClawback": "proof binds issuer Sequence; ticket zeroes it -> tecBAD_PROOF",
+}
+_TICKET_SUPPORTED: set[str] = _TX_NAMES - set(_TICKET_EXCLUDED)
+
+
+def _apply_ticket(
+    name: str, txn: Transaction, wallet: Wallet, ctx: ModifierCtx
+) -> ModResult | None:
+    acct = ctx.accounts.get(txn.account)
+    if acct is None or not acct.tickets:
+        return None
+    ticket_sequence = choice(sorted(acct.tickets))
+    acct.tickets.discard(ticket_sequence)  # optimistic consume: avoid reuse by concurrent submits
+    return ModResult(
+        txn=txn.__replace__(sequence=0, ticket_sequence=ticket_sequence),
+        wallet=wallet,
+        tag="ticket",
+    )
+
+
 # ── Delegate modifier ────────────────────────────────────────────────
 # Probability + non-delegable filtering are owned here (weight + supported);
 # maybe_delegate is now a pure candidate picker.
@@ -76,8 +108,16 @@ def _apply_delegate(
     )
 
 
-# Registry order matters: ticket → delegate → sponsor (only delegate exists this phase).
+# Registry order matters: ticket → delegate → sponsor (sponsor folds in Phase 3).
 MODIFIERS: list[Modifier] = [
+    Modifier(
+        name="ticket",
+        supported=_TICKET_SUPPORTED,
+        excluded=_TICKET_EXCLUDED,
+        incompatible_with=set(),
+        weight=0.10,
+        apply=_apply_ticket,
+    ),
     Modifier(
         name="delegate",
         supported=_DELEGATE_SUPPORTED,

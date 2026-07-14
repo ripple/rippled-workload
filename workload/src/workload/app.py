@@ -42,7 +42,6 @@ from workload.models import (
 from workload.modifiers import check_modifier_coverage
 from workload.probe import probe_network
 from workload.transactions import REGISTRY
-from workload.transactions.tickets import check_ticket_coverage
 
 
 class Workload:
@@ -119,7 +118,6 @@ class Workload:
         always(True, "workload::sdk_works", {"message": "SDK canary assertion"})
 
         register_assertions()
-        check_ticket_coverage()
         check_modifier_coverage()
 
         logger.info("Workload initialized after %ss", int(time.time() - self.start_time))

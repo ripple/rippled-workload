@@ -13,7 +13,7 @@ from xrpl.asyncio.clients import AsyncWebsocketClient
 from xrpl.models import StreamParameter, Subscribe, TransactionFlag
 
 from workload import logging
-from workload.assertions import tx_result
+from workload.assertions import assert_ticket_used, tx_result
 from workload.transactions import STATE_UPDATERS
 
 log = logging.getLogger(__name__)
@@ -103,9 +103,9 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     }
     tx_result(tx_type, result)
 
-    # TicketSequence ⇒ TicketUse bucket: many tx types drive the ticket path, not just Payment.
+    # TicketSequence ⇒ a ticket was consumed (ticket modifier); tx still buckets under its real type
     if tx.get("TicketSequence") is not None:
-        tx_result("TicketUse", result)
+        assert_ticket_used(tx_type, tx_hash)
 
     # DomainID ⇒ synthetic permissioned-DEX buckets so REGISTRY synthetic-name assertions resolve.
     if tx_type == "OfferCreate" and tx.get("DomainID"):

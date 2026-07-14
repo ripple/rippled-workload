@@ -117,7 +117,7 @@ from workload.transactions.sponsorship import (
     sponsorship_transfer,
     sponsorship_transfer_account,
 )
-from workload.transactions.tickets import ticket_create, ticket_use
+from workload.transactions.tickets import ticket_create
 from workload.transactions.trustlines import trustline_create
 from workload.transactions.vaults import (
     vault_clawback,
@@ -1103,13 +1103,6 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         ticket_create,
         lambda w: (w.accounts, w.client),
         _on_ticket_create,
-    ),
-    (
-        "TicketUse",
-        "/tickets/use/random",
-        ticket_use,
-        lambda w: (w.accounts, w.domains, w.credentials, w.amms, w.client),
-        None,
     ),
     (
         "Batch",

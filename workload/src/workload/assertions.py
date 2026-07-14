@@ -214,6 +214,10 @@ def register_assertions() -> None:
         must_hit=True,
     )
     _emit_catalog_entry("workload::always : no_sponsored_queue", "always", "Always", must_hit=True)
+    # Ticket modifier (workload.modifiers): a validated tx carried a TicketSequence.
+    _emit_catalog_entry(
+        "workload::sometimes : ticket_used", "sometimes", "Sometimes", must_hit=True
+    )
     for key in (
         "sponsor_fee_prefunded_used",
         "sponsor_fee_cosigned_used",
@@ -365,6 +369,11 @@ def assert_sponsorship_audit(kind: str, consistent: bool) -> None:
     genuine miss), so only a systematic break -- this bucket never satisfying --
     is actually worth triaging."""
     _fire_sometimes(f"sponsorship_audit_{kind}_consistent", consistent, {"kind": kind})
+
+
+def assert_ticket_used(tx_type: str, tx_hash: str) -> None:
+    """A validated tx carrying TicketSequence consumed a ticket (workload.modifiers)."""
+    _fire_sometimes("ticket_used", True, {"tx_type": tx_type, "hash": tx_hash})
 
 
 def tx_submitted(

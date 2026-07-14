@@ -77,7 +77,7 @@ Today setup is best-effort (`_wait_for_state` times out → `setup_state_partial
 
 0. **Setup robustness** — deterministic verify-and-retry + fail-loud on the *existing* setup (no modifier knowledge needed). Stabilizes the current sponsor branch too.
 1. **Framework + coverage gate** (`check-modifier-coverage`, runtime `unreachable`, CLAUDE.md checklist) + migrate **delegate**. Verify the compatibility matrix against `develop`.
-2. Migrate **ticket** to a pure decorator; delete `_TICKET_BUILDERS` + domain builders; `ticket_used` dimension.
+2. **DONE.** Migrated **ticket** to a pure decorator (`modifiers.py`, registered first, weight 0.10); deleted `_TICKET_BUILDERS`, the domain builders, `TicketCtx`, `check_ticket_coverage`, and the `/tickets/use` endpoint + driver. `TicketCreate` stays a normal workload. Excluded only genuine cases: `Batch` (inner-tx Sequences + Fee=0), `TicketCreate` (circular seq numbering), and the four proof-binding `ConfidentialMPT*` types (zeroed Sequence → `tecBAD_PROOF`); `ConfidentialMPTMergeInbox` binds no sequence so it stays supported. `sometimes : ticket_used` fires from `ws_listener` when a validated tx carries `TicketSequence`.
 3. **Sponsor** unified modifier (fee+reserve, valid+faulty, co-sign); dimension assertions; delete `sponsored_create.py` + per-type sponsored workloads.
 4. **Composition tuning** — coverage model, set probabilities, add cross-resource accounts to setup, confirm every combo clears its `sometimes` margin; docs.
 
