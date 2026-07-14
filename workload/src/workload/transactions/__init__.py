@@ -552,12 +552,17 @@ def _on_check_create(w: Workload, tx: dict, meta: dict) -> None:
         if c.check_id == tx_hash:
             c.check_id = check_id
             return
+    # check_cash math (int(send_max)) assumes XRP drops; a fuzz-morphed IOU/MPT SendMax
+    # is a non-numeric object, so don't track a check we can't cash.
+    send_max = tx.get("SendMax")
+    if not isinstance(send_max, str):
+        return
     w.checks.append(
         Check(
             check_id=check_id,
             creator=tx.get("Account", ""),
             destination=tx.get("Destination", ""),
-            send_max=str(tx.get("SendMax", "0")),
+            send_max=send_max,
         )
     )
 

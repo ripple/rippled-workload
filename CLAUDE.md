@@ -89,7 +89,7 @@ No logger calls in `setup.py` or handlers — `send_event` + assertions cover ob
 ### Confidential MPT (XLS-0096)
 Five real on-ledger handlers (`transactions/confidential_mpt.py`: MergeInbox, Convert, Send, ConvertBack, Clawback) — true `ConfidentialMPT*` type, real-type `STATE_UPDATERS`, no synthetic-name mapping.
 
-**Packaging.** Models come from xrpl-py's `confidential-mpt` branch (git-pinned, in the core wheel). Proof generation is `xrpl.ext.confidential` — the separate `xrpl-py-confidential` dist, EXCLUDED from the core wheel — so `uv sync` gets models but not proofs. `scripts/setup-confidential-crypto.sh` (in `Dockerfile.workload`) copies `xrpl/ext/confidential` into the venv, fetches `libmpt-crypto.so` from `XRPLF/mpt-crypto`'s public release, and compiles `_mpt_crypto` (fail-loud). Import is guarded: absent add-on → `CRYPTO_AVAILABLE=False`.
+**Packaging.** Models come from xrpl-py's `pre-3.3-release-group` branch (git-pinned, in the core wheel; converges the pre-release sponsor + confidential WIP branches). Proof generation is `xrpl.ext.confidential` — the separate `xrpl-py-confidential` dist, EXCLUDED from the core wheel — so `uv sync` gets models but not proofs. `scripts/setup-confidential-crypto.sh` (in `Dockerfile.workload`) copies `xrpl/ext/confidential` into the venv, fetches `libmpt-crypto.so` from `XRPLF/mpt-crypto`'s public release, and compiles `_mpt_crypto` (fail-loud). Import is guarded: absent add-on → `CRYPTO_AVAILABLE=False`.
 
 **Version coherence (not hardcoded).** The script reads the target from the branch's `MPT_CRYPTO_VERSION` and cross-checks it against rippled's `conanfile.py` `mpt-crypto/*` pin (`ARG XRPLD_COMMIT`, default `develop`); divergence fails the build — mismatched proof formats → rippled rejects → `success` starves. Currently `0.4.0-rc2`.
 
@@ -103,7 +103,7 @@ Builders (`prepare_confidential_*`) take ElGamal keys explicitly + a **sync** `c
 
 **Faulty fee gotcha:** faulty bases must set `fee=params.confidential_fee()` — autofill's base fee draws `telINSUF_FEE_P` (confidential txns cost 10×), and `tel*` never validates, starving `sometimes(failure)`.
 
-Setup (`_setup_confidential_mpt`, chain step 6c): privacy issuances (`TF_MPT_CAN_CONFIDENTIAL_AMOUNT|CAN_CLAWBACK|CAN_TRANSFER`) on `[7..8]`, holders `[72..76]`; crypto steps gated on `CRYPTO_AVAILABLE`. `MPTokenIssuanceSet(issuer_encryption_key=...)` before Convert. Convert binds account Sequence into the proof, so setup/`_convert_valid` stamp `cc.account_sequence` on submit or `tecBAD_PROOF`.
+Setup (`_setup_confidential_mpt`, chain step 6c): privacy issuances (`TF_MPT_CAN_HOLD_CONFIDENTIAL_BALANCE|CAN_CLAWBACK|CAN_TRANSFER`) on `[7..8]`, holders `[72..76]`; crypto steps gated on `CRYPTO_AVAILABLE`. `MPTokenIssuanceSet(issuer_encryption_key=...)` before Convert. Convert binds account Sequence into the proof, so setup/`_convert_valid` stamp `cc.account_sequence` on submit or `tecBAD_PROOF`.
 
 Caveat: `sometimes(success)` + `conf_mpt_version_monotonic` only fire against an XLS-0096 `xrpld` whose mpt-crypto pin matches.
 

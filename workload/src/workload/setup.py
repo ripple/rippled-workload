@@ -255,7 +255,7 @@ async def _setup_confidential_mpt(
 
     # ── 1. Create privacy-enabled MPT issuances (always) ─────────────
     conf_flags = (
-        MPTokenIssuanceCreateFlag.TF_MPT_CAN_CONFIDENTIAL_AMOUNT
+        MPTokenIssuanceCreateFlag.TF_MPT_CAN_HOLD_CONFIDENTIAL_BALANCE
         | MPTokenIssuanceCreateFlag.TF_MPT_CAN_CLAWBACK
         | MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER
     )
