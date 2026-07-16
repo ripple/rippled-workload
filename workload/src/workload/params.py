@@ -1,5 +1,7 @@
 """Centralized random parameter generators; call at point of use, never cache."""
 
+from xrpl.models.transactions import SponsorshipTransferFlag
+
 from workload import confidential_crypto as _cc
 from workload.randoms import choice, randint, random
 
@@ -467,12 +469,9 @@ def confidential_invalid_flags() -> int:
 SPF_SPONSOR_FEE = 0x00000001
 SPF_SPONSOR_RESERVE = 0x00000002
 
-# TEMPORARY: xrpl-py's SponsorshipTransferFlag enum (0x1/0x2/0x4) is 16 bits off from
-# rippled's tfSponsorship{End,Create,Reassign} (0x10000/0x20000/0x40000), so the enum
-# draws temINVALID_FLAG. Mirror rippled's bits until the xrpl-py branch is corrected.
-TF_SPONSORSHIP_END = 0x00010000
-TF_SPONSORSHIP_CREATE = 0x00020000
-TF_SPONSORSHIP_REASSIGN = 0x00040000
+TF_SPONSORSHIP_END = int(SponsorshipTransferFlag.TF_SPONSORSHIP_END)
+TF_SPONSORSHIP_CREATE = int(SponsorshipTransferFlag.TF_SPONSORSHIP_CREATE)
+TF_SPONSORSHIP_REASSIGN = int(SponsorshipTransferFlag.TF_SPONSORSHIP_REASSIGN)
 
 
 def sponsored_account_amount() -> str:
@@ -520,11 +519,6 @@ TF_SPONSORSHIP_CLEAR_REQUIRE_SIGN_FOR_FEE = 0x00020000
 TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_RESERVE = 0x00040000
 TF_SPONSORSHIP_CLEAR_REQUIRE_SIGN_FOR_RESERVE = 0x00080000
 TF_SPONSORSHIP_DELETE_OBJECT = 0x00100000
-
-# SponsorshipTransfer transaction flags — exactly one must be set.
-TF_SPONSORSHIP_END = 0x00000001
-TF_SPONSORSHIP_CREATE = 0x00000002
-TF_SPONSORSHIP_REASSIGN = 0x00000004
 
 
 def sponsorship_set_flags() -> int:
