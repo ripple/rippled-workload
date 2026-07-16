@@ -16,12 +16,33 @@ from workload.models import UserAccount
 from workload.randoms import choice, randint, sample
 from workload.submit import submit_tx
 
-# xrpl-py's NON_DELEGABLE_TRANSACTIONS predates SponsorshipTransfer -- rippled marks
-# it Delegation::NotDelegable (SponsorshipSet stays Delegable) -- so patch it out here.
+# xrpl-py's NON_DELEGABLE_TRANSACTIONS is stale vs rippled develop's transactions.macro:
+# it omits SponsorshipTransfer and the whole Vault (XLS-65) + Loan/LoanBroker families,
+# which develop marks Delegation::NotDelegable. A DelegateSet authorizing any of these
+# draws temMALFORMED, so exclude them until xrpl-py catches up. (SponsorshipSet, the
+# other sponsor tx, stays Delegable.)
+_RIPPLED_NON_DELEGABLE_VALUES = {
+    "SponsorshipTransfer",
+    "VaultCreate",
+    "VaultDeposit",
+    "VaultWithdraw",
+    "VaultSet",
+    "VaultDelete",
+    "VaultClawback",
+    "LoanSet",
+    "LoanDelete",
+    "LoanManage",
+    "LoanPay",
+    "LoanBrokerSet",
+    "LoanBrokerDelete",
+    "LoanBrokerCoverDeposit",
+    "LoanBrokerCoverWithdraw",
+    "LoanBrokerCoverClawback",
+}
 DELEGABLE_TX_TYPES = [
     t
     for t in TransactionType
-    if t not in NON_DELEGABLE_TRANSACTIONS and t != TransactionType.SPONSORSHIP_TRANSFER
+    if t not in NON_DELEGABLE_TRANSACTIONS and t.value not in _RIPPLED_NON_DELEGABLE_VALUES
 ]
 
 

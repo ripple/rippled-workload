@@ -22,7 +22,7 @@ from xrpl.wallet import Wallet
 from workload import params
 from workload.randoms import choice, random, sample
 from workload.transactions import TX_TYPES
-from workload.transactions.delegation import _NON_DELEGABLE_NAMES, maybe_delegate
+from workload.transactions.delegation import DELEGABLE_TX_TYPES, maybe_delegate
 from workload.transactions.sponsorship import _pick_reserve_sponsor, pick_prefunded_fee_sponsor
 
 _TX_NAMES: set[str] = set(TX_TYPES)
@@ -94,12 +94,13 @@ def _apply_ticket(
 
 # ── Delegate modifier ────────────────────────────────────────────────
 # Probability + non-delegable filtering are owned here (weight + supported);
-# maybe_delegate is now a pure candidate picker.
-_DELEGATE_EXCLUDED: dict[str, str] = {
-    n: "non-delegable" for n in _NON_DELEGABLE_NAMES if n in _TX_NAMES
-}
+# maybe_delegate is now a pure candidate picker. Supported = delegation.py's
+# DELEGABLE_TX_TYPES (already reconciled to rippled develop's NotDelegable set);
+# everything else (incl. synthetic names, which key on a name no delegate is
+# authorized for) is excluded.
+_DELEGATE_SUPPORTED: set[str] = {t.value for t in DELEGABLE_TX_TYPES} & _TX_NAMES
+_DELEGATE_EXCLUDED: dict[str, str] = dict.fromkeys(_TX_NAMES - _DELEGATE_SUPPORTED, "non-delegable")
 _DELEGATE_EXCLUDED["SponsorMalformation"] = _RAW_ONLY_REASON
-_DELEGATE_SUPPORTED: set[str] = _TX_NAMES - set(_DELEGATE_EXCLUDED)
 
 
 def _apply_delegate(
