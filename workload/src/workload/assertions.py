@@ -178,18 +178,18 @@ _SIG_FIELDS = ("TxnSignature", "SigningPubKey")
 
 
 def _redact_tx(raw: dict) -> dict:
-    """Full tx body minus signature material (outer + inner Signers/Batch signers)."""
-    out = {k: v for k, v in raw.items() if k not in _SIG_FIELDS}
-    for wrapper, inner in (("Signers", "Signer"), ("BatchSigners", "BatchSigner")):
-        entries = out.get(wrapper)
-        if isinstance(entries, list):
-            out[wrapper] = [
-                {inner: {k: v for k, v in e[inner].items() if k not in _SIG_FIELDS}}
-                if isinstance(e, dict) and isinstance(e.get(inner), dict)
-                else e
-                for e in entries
-            ]
-    return out
+    """Full tx body with signature material stripped at ANY depth -- outer,
+    Signers/BatchSigners, SponsorSignature, CounterpartySignature, Batch inner
+    RawTransactions, etc. Signer Account fields survive; only crypto is dropped."""
+
+    def scrub(o: object) -> object:
+        if isinstance(o, dict):
+            return {k: scrub(v) for k, v in o.items() if k not in _SIG_FIELDS}
+        if isinstance(o, list):
+            return [scrub(e) for e in o]
+        return o
+
+    return {k: scrub(v) for k, v in raw.items() if k not in _SIG_FIELDS}
 
 
 # Ledger entries whose balance movement matters for conservation/rounding analysis.
