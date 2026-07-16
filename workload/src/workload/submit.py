@@ -12,7 +12,7 @@ from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
 from workload import logging
-from workload.assertions import assert_modifier_combo, tx_submitted
+from workload.assertions import assert_modifier_combo, tx_submitted, tx_submitting
 
 log = logging.getLogger(__name__)
 
@@ -72,9 +72,10 @@ async def submit_tx(
     signed = await autofill_and_sign(txn, client, wallet)
     for cosign in cosigns:
         signed = cosign(signed)
+    tx_submitting(name, signed)
     response = await submit(signed, client)
     result: dict = response.result
-    tx_submitted(name, txn, result)
+    tx_submitted(name, signed, result)
     return result
 
 
@@ -101,6 +102,7 @@ async def submit_raw(
     tx_dict["SigningPubKey"] = wallet.public_key
     serialized = encode_for_signing(tx_dict)
     tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
+    tx_submitting(name, tx_dict)
     response = await client.request(SubmitOnly(tx_blob=encode(tx_dict)))
     result: dict = response.result
     tx_submitted(name, tx_dict, result)

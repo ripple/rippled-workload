@@ -173,6 +173,70 @@ def _extract_object_ids(raw: dict) -> dict[str, str]:
     return ids
 
 
+# Signature material: large, reconstruction-irrelevant. Stripped from logged bodies.
+_SIG_FIELDS = ("TxnSignature", "SigningPubKey")
+
+
+def _redact_tx(raw: dict) -> dict:
+    """Full tx body minus signature material (outer + inner Signers/Batch signers)."""
+    out = {k: v for k, v in raw.items() if k not in _SIG_FIELDS}
+    for wrapper, inner in (("Signers", "Signer"), ("BatchSigners", "BatchSigner")):
+        entries = out.get(wrapper)
+        if isinstance(entries, list):
+            out[wrapper] = [
+                {inner: {k: v for k, v in e[inner].items() if k not in _SIG_FIELDS}}
+                if isinstance(e, dict) and isinstance(e.get(inner), dict)
+                else e
+                for e in entries
+            ]
+    return out
+
+
+# Ledger entries whose balance movement matters for conservation/rounding analysis.
+_BALANCE_FIELDS = {
+    "AccountRoot": "Balance",
+    "RippleState": "Balance",
+    "MPToken": "MPTAmount",
+    "MPTokenIssuance": "OutstandingAmount",
+}
+_MAX_BALANCE_CHANGES = 25
+
+
+def _balance_changes(meta: dict) -> tuple[list[dict[str, object]], bool]:
+    """Per-entry balance before/after from meta AffectedNodes. Values stay faithful
+    (XRP drops as strings; IOU/MPT as amount objects) so the reader does the math.
+    This is the on-ledger effect that conservation/rounding failures turn on."""
+    changes: list[dict[str, object]] = []
+    for node in meta.get("AffectedNodes", []):
+        for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
+            n = node.get(kind)
+            if not isinstance(n, dict):
+                continue
+            field = _BALANCE_FIELDS.get(n.get("LedgerEntryType", ""))
+            if field is None:
+                continue
+            final = n.get("FinalFields") or n.get("NewFields") or {}
+            prev = n.get("PreviousFields") or {}
+            if kind == "CreatedNode":
+                before, after = None, final.get(field)
+            elif kind == "DeletedNode":
+                before, after = final.get(field), None
+            else:
+                if field not in prev:
+                    continue  # this modification didn't touch the balance
+                before, after = prev.get(field), final.get(field)
+            changes.append(
+                {
+                    "entry": n.get("LedgerEntryType", ""),
+                    "id": n.get("LedgerIndex", ""),
+                    "account": final.get("Account", ""),
+                    "before": before,
+                    "after": after,
+                }
+            )
+    return changes[:_MAX_BALANCE_CHANGES], len(changes) > _MAX_BALANCE_CHANGES
+
+
 def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
     """hit=False registers existence with Antithesis without claiming a hit."""
     assert_raw(
@@ -468,39 +532,37 @@ def assert_modifier_combo(name: str, applied: list[str]) -> None:
             _fire_sometimes(key, True, {"tx_type": name, "modifiers": "+".join(sorted(tags))})
 
 
-def tx_submitted(
-    name: str, txn: Transaction | dict | None = None, result: dict | None = None
-) -> None:
-    """Passing the /submit response triggers the submit-time tef* check."""
-    details: dict[str, str] = {"tx_type": name}
-    raw: dict = {}
-    if txn is not None:
-        try:
-            # Accept an xrpl-py model or an already-serialized dict (raw-submit
-            # path passes the mutated dict directly).
-            raw = txn.to_xrpl() if isinstance(txn, Transaction) else txn
-            details["account"] = raw.get("Account", "")
-            details["sequence"] = str(raw.get("Sequence", ""))
-            details.update(_extract_object_ids(raw))
-        except Exception:
-            pass
-    if result is not None:
-        engine_result = result.get("engine_result", "") or ""
-        engine_result_message = result.get("engine_result_message", "") or ""
-        tx_hash = result.get("tx_json", {}).get("hash", "") or result.get("hash", "")
-        if engine_result:
-            details["engine_result"] = engine_result
-        if engine_result_message:
-            details["engine_result_message"] = engine_result_message
-        if tx_hash:
-            details["hash"] = tx_hash
+def _tx_body(txn: Transaction | dict | None) -> dict:
+    """Best-effort serialized tx dict from a model or an already-serialized dict.
+    Never raises — a body we can't serialize just yields {}."""
+    if txn is None:
+        return {}
+    try:
+        return txn.to_xrpl() if isinstance(txn, Transaction) else dict(txn)
+    except Exception:
+        return {}
+
+
+def tx_submitting(name: str, txn: Transaction | dict | None = None) -> None:
+    """Emit the full submitted-tx body BEFORE the RPC call, so it lands on the
+    branch at/before any apply-time assert (no vtime-nudge needed to recover it).
+    Fires the `seen` reachability assert. Pass the FINAL signed/co-signed tx so
+    autofilled Sequence/Fee and co-sign signers are captured.
+    """
+    raw = _tx_body(txn)
+    details: dict[str, object] = {"tx_type": name}
+    if raw:
+        details["account"] = raw.get("Account", "")
+        details["sequence"] = str(raw.get("Sequence", ""))
+        details.update(_extract_object_ids(raw))
+        details["tx"] = _redact_tx(raw)
     send_event(f"workload::submitted : {name}", details)
     assert_raw(
         condition=True,
         message=_seen_id(name),
         details={},
         loc_filename=_LOC_FILE,
-        loc_function="tx_submitted",
+        loc_function="tx_submitting",
         loc_class=_LOC_CLASS,
         loc_begin_line=0,
         loc_begin_column=_LOC_COL,
@@ -510,16 +572,25 @@ def tx_submitted(
         display_type="Reachable",
         assert_id=_seen_id(name),
     )
-    if result is not None:
-        assert_no_internal_error_submit(name, result)
-        _assert_sponsor_submit_signals(name, raw, result)
+
+
+def tx_submitted(
+    name: str, txn: Transaction | dict | None = None, result: dict | None = None
+) -> None:
+    """Post-submit: run the submit-time internal-error and sponsor-signal checks
+    against the tentative /submit response. The full body + `seen` are emitted
+    separately by tx_submitting() before the RPC call."""
+    if result is None:
+        return
+    assert_no_internal_error_submit(name, result)
+    _assert_sponsor_submit_signals(name, _tx_body(txn), result)
 
 
 def tx_result(name: str, result: dict) -> None:
     tx_json = result.get("tx_json", {})
     meta = result.get("meta", {})
     engine_result = result.get("engine_result") or meta.get("TransactionResult") or "unknown"
-    details: dict[str, str] = {
+    details: dict[str, object] = {
         "tx_type": name,
         "engine_result": engine_result,
         "account": tx_json.get("Account", ""),
@@ -527,6 +598,9 @@ def tx_result(name: str, result: dict) -> None:
         "hash": result.get("hash", ""),
     }
     details.update(_extract_object_ids(tx_json))
+    delivered = meta.get("delivered_amount")
+    if delivered is not None:
+        details["delivered_amount"] = delivered
     for node in meta.get("AffectedNodes", []):
         created = node.get("CreatedNode", {})
         if created.get("LedgerIndex"):
@@ -539,6 +613,11 @@ def tx_result(name: str, result: dict) -> None:
             details["deleted_id"] = deleted["LedgerIndex"]
             details["deleted_type"] = deleted.get("LedgerEntryType", "")
             break
+    changes, truncated = _balance_changes(meta)
+    if changes:
+        details["balance_changes"] = changes
+        if truncated:
+            details["balance_changes_truncated"] = True
     send_event(f"workload::result : {name}", details)
 
     assert_raw(
@@ -695,5 +774,5 @@ def tx_result(name: str, result: dict) -> None:
             display_type="Always",
             assert_id="workload::always : conf_mpt_version_monotonic",
         )
-    _assert_sponsor_fee_usage(name, tx_json, engine_result, details.get("hash", ""))
-    _assert_sponsor_reserve_usage(name, tx_json, engine_result, details.get("hash", ""))
+    _assert_sponsor_fee_usage(name, tx_json, engine_result, result.get("hash", ""))
+    _assert_sponsor_reserve_usage(name, tx_json, engine_result, result.get("hash", ""))
