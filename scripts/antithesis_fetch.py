@@ -26,6 +26,13 @@ Key API facts this relies on (verified against the live API):
 - Properties embed exactly ONE representative counterexample; no param exposes the rest. Moments
   are re-derived per properties fetch and go stale -- a saved moment gives ``/logs`` HTTP 400, so
   ``crashes`` always works from a fresh properties fetch.
+- A branch log truncates AT the assert moment, but the SDK emits a few more events just past it
+  (e.g. a ``workload::submitted`` naming the failing tx). ``extend`` binary-searches ``/logs`` for
+  the largest still-valid vtime and dumps that tail -- automating the manual vtime-nudge.
+- ``sweep <assert-substr>`` scans EVERY branch moment (all examples+counterexamples), not just the
+  one embedded counterexample, for that assert firing (``condition:false``), reporting each hit
+  with nearby WRN/FTL/ERR lines and the submitted-tx body. Use it to prove a finding is unique or
+  to gather every instance across the run.
 - Log-stream line shapes (every line: ``moment{input_hash,vtime}``, ``source{name,...}``):
   signal deaths ``source.name=processes_terminated_with_signal`` with ``output_text`` JSON
   ``{executable(=thread), signal, pid}``; container exits ``source.name=containers_meta`` with
@@ -560,6 +567,154 @@ def cmd_crashes(api: Api, args: argparse.Namespace) -> None:
     print(f"\nstreams cached in {cache}/")
 
 
+def _logs_code(api: Api, rid: str, ih: str, vt: float) -> int:
+    """HTTP status of /logs at a moment (a branch truncates past its last event
+    with HTTP 400, so this is the validity probe for a vtime)."""
+    code, _ = api.get(f"/api/v0/runs/{rid}/logs?input_hash={ih}&vtime={vt}")
+    return code
+
+
+def cmd_extend(api: Api, args: argparse.Namespace) -> None:
+    """Recover events just PAST a counterexample moment. A branch log truncates
+    at the assert; the SDK still emits a few events after (e.g. the submit event
+    naming the failing tx). Find the largest still-valid vtime, then dump the
+    window from the counterexample moment to there."""
+    r = resolve(api, args.selector)
+    rid = r["run_id"]
+    ih, base = args.input_hash, float(args.vtime)
+    if _logs_code(api, rid, ih, base) != 200:
+        _fail(f"/logs at base vtime {base} -> not 200 (wrong moment?)")
+    # Grow until a 400, then binary-search the boundary to ~ms precision.
+    last_ok, probe = base, base + args.step
+    while probe <= base + args.max_span:
+        if _logs_code(api, rid, ih, probe) == 200:
+            last_ok = probe
+            probe += args.step
+        else:
+            lo, hi = last_ok, probe
+            for _ in range(args.refine):
+                mid = (lo + hi) / 2
+                if _logs_code(api, rid, ih, mid) == 200:
+                    lo = mid
+                else:
+                    hi = mid
+            last_ok = lo
+            break
+    print(f"max valid vtime {last_ok:.6f} (base {base})", file=sys.stderr)
+    path = (
+        f"/api/v0/runs/{rid}/logs?input_hash={ih}&vtime={last_ok}"
+        f"&begin_input_hash={ih}&begin_vtime={base}"
+    )
+    code, body = api.get(path)
+    if code != 200:
+        _fail(f"/logs window -> HTTP {code}")
+    if args.out:
+        Path(args.out).expanduser().write_bytes(body)
+        print(f"wrote {body.count(b'\n') + 1} lines to {args.out}", file=sys.stderr)
+    else:
+        sys.stdout.buffer.write(body)
+
+
+def _all_moments(props: list[dict]) -> dict[str, str]:
+    """input_hash -> max vtime (as str) across every example + counterexample."""
+    best: dict[str, float] = {}
+    keep: dict[str, str] = {}
+    for p in props:
+        for kind in ("examples", "counterexamples"):
+            for e in p.get(kind) or []:
+                if not isinstance(e, dict):
+                    continue
+                m = e.get("moment") or {}
+                ih, vt = m.get("input_hash"), m.get("vtime")
+                if not ih or not vt:
+                    continue
+                v = float(vt)
+                if ih not in best or v > best[ih]:
+                    best[ih] = v
+                    keep[ih] = vt
+    return keep
+
+
+def cmd_sweep(api: Api, args: argparse.Namespace) -> None:
+    """Hunt EVERY branch for an assert firing (condition:false), not just the one
+    counterexample the API embeds. Enumerates all property moments, fetches each
+    branch stream, and reports hits with nearby WRN lines + the submitted-tx body."""
+    r = resolve(api, args.selector)
+    rid = r["run_id"]
+    props = api.paginate(f"/api/v0/runs/{rid}/properties", limit=100)
+    moments = _all_moments(props)
+    print(f"{len(moments)} distinct branches to scan for {args.assert_substr!r}", file=sys.stderr)
+    cache = Path(args.cache_dir).expanduser() / rid / "sweep"
+    cache.mkdir(parents=True, exist_ok=True)
+
+    def fetch(item: tuple[str, str]) -> tuple[str, Path | None]:
+        ih, vt = item
+        dest = cache / f"{ih}.ndjson"
+        if not dest.exists():
+            code, body = api.get(f"/api/v0/runs/{rid}/logs?input_hash={ih}&vtime={vt}")
+            if code != 200:
+                return ih, None
+            dest.write_bytes(body)
+        return ih, dest
+
+    with ThreadPoolExecutor(4) as pool:
+        fetched = list(pool.map(fetch, moments.items()))
+
+    hits: list[dict[str, Any]] = []
+    for ih, path in fetched:
+        if path is None:
+            continue
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for i, line in enumerate(lines):
+            if args.assert_substr not in line or '"condition":false' not in line.replace(" ", ""):
+                continue
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            a = d.get("antithesis_assert") or {}
+            if a.get("condition") is not False:
+                continue
+            ctx: dict[str, Any] = {
+                "input_hash": ih,
+                "vtime": (d.get("moment") or {}).get("vtime", ""),
+                "container": (d.get("source") or {}).get("container", ""),
+                "assert_id": a.get("id", ""),
+            }
+            wrn, submitted = [], None
+            for j in range(max(0, i - 40), min(len(lines), i + 60)):
+                t = lines[j]
+                if ":WRN" in t or ":FTL" in t or ":ERR" in t:
+                    try:
+                        wrn.append(json.loads(t).get("output_text", "")[:180])
+                    except json.JSONDecodeError:
+                        pass
+                elif "workload::submitted :" in t and submitted is None:
+                    try:
+                        ev = json.loads(t)
+                        submitted = next(
+                            (v for k, v in ev.items() if k.startswith("workload::submitted")), None
+                        )
+                    except json.JSONDecodeError:
+                        pass
+            if wrn:
+                ctx["log"] = wrn[-6:]
+            if submitted:
+                ctx["submitted"] = submitted
+            hits.append(ctx)
+
+    print(f"{len(hits)} assert firing(s) across {len(moments)} branches")
+    if args.json:
+        print(json.dumps(hits, indent=2))
+        return
+    for h in hits:
+        print(f"\n== {h['container']} vt {h['vtime']}  branch {h['input_hash']}")
+        for t in h.get("log", []):
+            print(f"   {t}")
+        if "submitted" in h:
+            print(f"   submitted: {json.dumps(h['submitted'])[:400]}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Fetch Antithesis run results via the REST API.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -601,6 +756,23 @@ def main() -> None:
     p.add_argument("selector")
     p.add_argument("--save-dir", help="parent dir (default ~/Downloads/antithesis)")
     p.set_defaults(fn=cmd_fetch)
+
+    p = sub.add_parser("extend", help="recover events just past a counterexample moment")
+    p.add_argument("selector")
+    p.add_argument("--input-hash", required=True)
+    p.add_argument("--vtime", required=True, help="the counterexample moment vtime")
+    p.add_argument("--step", type=float, default=0.25, help="vtime probe step (default 0.25)")
+    p.add_argument("--max-span", type=float, default=5.0, help="max vtime to probe past base")
+    p.add_argument("--refine", type=int, default=6, help="binary-search iters for the boundary")
+    p.add_argument("--out", help="write to this file instead of stdout")
+    p.set_defaults(fn=cmd_extend)
+
+    p = sub.add_parser("sweep", help="hunt every branch for an assert firing (condition:false)")
+    p.add_argument("selector")
+    p.add_argument("assert_substr", help="substring of the assert id/message to hunt")
+    p.add_argument("--cache-dir", default="~/.cache/antithesis-fetch", help="log stream cache")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.set_defaults(fn=cmd_sweep)
 
     p = sub.add_parser("crashes", help="crash dossier: buckets -> logs at moments -> signatures")
     p.add_argument("selector")
