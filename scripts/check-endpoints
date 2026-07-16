@@ -46,6 +46,7 @@ try:
         '/offer/create/mpt/random',
         '/payment/mpt/random',
         '/delegate/set/random',
+        '/deposit_preauth/random',
         '/did/set/random',
         '/did/delete/random',
         '/nft/modify/random',
@@ -53,11 +54,6 @@ try:
         '/mpt/authorize/random',
         '/mpt/set/random',
         '/mpt/destroy/random',
-        '/confidential/merge_inbox/random',
-        '/confidential/convert/random',
-        '/confidential/send/random',
-        '/confidential/convert_back/random',
-        '/confidential/clawback/random',
         '/loan/broker/set/random',
         '/loan/broker/delete/random',
         '/loan/broker/cover/deposit/random',
@@ -66,6 +62,22 @@ try:
         '/loan/delete/random',
         '/loan/manage/random',
         '/loan/pay/random',
+    ]
+    expected += [
+        '/confidential/merge_inbox/random',
+        '/confidential/convert/random',
+        '/confidential/send/random',
+        '/confidential/convert_back/random',
+        '/confidential/clawback/random',
+    ]
+    expected += [
+        '/sponsorship/set/random',
+        '/sponsorship/delete/random',
+        '/sponsorship/transfer/random',
+        '/sponsorship/transfer/account/random',
+        '/payment/sponsored_account/random',
+        '/sponsor/malformation/random',
+        '/sponsorship/audit/random',
     ]
 
     missing = [e for e in expected if e not in routes]

@@ -1,6 +1,7 @@
 """Fire-and-forget transaction submission; ws_listener.py handles validated results."""
 
 from collections.abc import Callable
+from typing import Any
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.asyncio.transaction import autofill, autofill_and_sign, submit
@@ -11,20 +12,34 @@ from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
 from workload import logging
-from workload.assertions import tx_submitted
+from workload.assertions import assert_modifier_combo, tx_submitted
 
 log = logging.getLogger(__name__)
 
-# ── Delegation state (set once via configure()) ──────────────────────
+# ── Delegation/sponsorship state (set once via configure()) ──────────
 _delegates: list = []
 _accounts: dict = {}
+_sponsorships: list = []
 
 
-def configure(delegates: list, accounts: dict) -> None:
-    """Store delegation state once at init so submit_tx can apply it transparently."""
-    global _delegates, _accounts
+def configure(delegates: list, accounts: dict, sponsorships: list) -> None:
+    """Store delegation/sponsorship state once at init so submit_tx can apply
+    it transparently."""
+    global _delegates, _accounts, _sponsorships
     _delegates = delegates
     _accounts = accounts
+    _sponsorships = sponsorships
+
+
+# Modifiers decorate DRIVER submits only. Enabled after setup completes so setup
+# submits stay deterministic — a modifier firing mid-setup would zero a Sequence,
+# swap the signer, or attach a sponsor and could break the fail-loud setup.
+_modifiers_enabled: bool = False
+
+
+def enable_modifiers() -> None:
+    global _modifiers_enabled
+    _modifiers_enabled = True
 
 
 async def submit_tx(
@@ -37,27 +52,26 @@ async def submit_tx(
     """Sign and submit; returns the tentative engine_result (final via WS listener).
 
     ``seq`` (if given) is stamped pre-autofill so xrpl-py skips the RPC seq fetch.
-    With delegation configured, a matching delegate co-signs ~10% of the time.
+    Runs the transaction-modifier pipeline (ticket → delegate → sponsor); the
+    sponsor modifier owns fee + reserve sponsorship (fold of the former inline
+    fee-sponsor block) and may attach a post-sign co-sign hook.
     Lets XRPLRequestFailureException propagate to the handler's XRPLException catch.
     """
     if seq is not None:
         txn = txn.__replace__(sequence=seq)
 
-    # Lazy import: avoids circular dependency.
-    if _delegates:
-        from workload.transactions.delegation import maybe_delegate
+    cosigns: list[Callable[[Any], Any]] = []
+    if _modifiers_enabled:
+        # Lazy import: modifiers -> transactions -> delegation -> submit would cycle.
+        from workload.modifiers import ModifierCtx, apply_modifiers
 
-        delegate_addr, delegate_wallet = maybe_delegate(
-            name,
-            txn.account,
-            _delegates,
-            _accounts,
-        )
-        if delegate_addr is not None and delegate_wallet is not None:
-            txn = txn.__replace__(delegate=delegate_addr)
-            wallet = delegate_wallet
+        ctx = ModifierCtx(delegates=_delegates, accounts=_accounts, sponsorships=_sponsorships)
+        txn, wallet, applied, cosigns = apply_modifiers(name, txn, wallet, ctx)
+        assert_modifier_combo(name, applied)
 
     signed = await autofill_and_sign(txn, client, wallet)
+    for cosign in cosigns:
+        signed = cosign(signed)
     response = await submit(signed, client)
     result: dict = response.result
     tx_submitted(name, txn, result)

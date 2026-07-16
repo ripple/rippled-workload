@@ -12,6 +12,43 @@ _LOC_COL = 0
 # their own AffectedNodes may be empty — skip to avoid false invariant fires.
 _TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 
+# Sponsor (XLS-68) SponsorFlags bits; xrpl-py ships them as raw ints (no enum),
+# same as params.py/ws_listener.py mirror these bitmasks locally.
+_SPF_SPONSOR_FEE = 0x00000001
+_SPF_SPONSOR_RESERVE = 0x00000002
+
+# Real tx types rippled allow-lists for reserve sponsorship (isReserveSponsorAllowed,
+# SponsorHelpers.cpp). A reserve sponsor on any OTHER type is preflight temINVALID_FLAG
+# -- the /sponsor/malformation disallowed_type vector. Mirror, not import (rippled C++);
+# drift only under-fires a `sometimes`, never breaks correctness.
+_RESERVE_SPONSOR_ALLOWED_TYPES = {
+    "DelegateSet",
+    "DepositPreauth",
+    "Payment",
+    "SignerListSet",
+    "CheckCancel",
+    "CheckCash",
+    "CheckCreate",
+    "EscrowCancel",
+    "EscrowCreate",
+    "EscrowFinish",
+    "PaymentChannelClaim",
+    "PaymentChannelCreate",
+    "PaymentChannelFund",
+    "Clawback",
+    "MPTokenAuthorize",
+    "MPTokenIssuanceCreate",
+    "MPTokenIssuanceDestroy",
+    "MPTokenIssuanceSet",
+    "TrustSet",
+    "CredentialAccept",
+    "CredentialCreate",
+    "CredentialDelete",
+    "AccountSet",
+    "SetRegularKey",
+    "SponsorshipTransfer",
+}
+
 # Engine results signalling a rippled internal error. Checked on BOTH submit
 # and validated WS: tef* never validates (submit-side catches it); but
 # tecINVARIANT_FAILED claims a fee and DOES validate, so the validated side
@@ -38,6 +75,8 @@ _RIPPLED_INTERNAL_ERRORS = (
 # - TrustSet: self-trust is temDST_IS_SRC; no tec is reachable with funded accounts.
 # - TicketCreate: bad count is temINVALID_COUNT; reserve tecs need an exhausted account.
 # - NFTokenCancelOffer: canceling an unknown offer id is a tesSUCCESS no-op.
+# - SponsorMalformation: every vector is a preflight tem* that never enters a ledger,
+#   so the validated failure bucket can't fill (submit-time seen + dims cover it).
 _NO_FAILURE_TYPES = {
     "SignerListSet",
     "MPTokenIssuanceCreate",
@@ -46,6 +85,7 @@ _NO_FAILURE_TYPES = {
     "TrustSet",
     "TicketCreate",
     "NFTokenCancelOffer",
+    "SponsorMalformation",
 }
 
 # Types that effectively never succeed in this test environment:
@@ -54,7 +94,8 @@ _NO_FAILURE_TYPES = {
 #   so it finds the AMM gone (tecAMM_NOT_FOUND) or non-empty (tecAMM_NOT_EMPTY).
 # - PaymentDomainXC: cross-currency domain payment needs resting domain
 #   liquidity the workload doesn't guarantee; usually tecPATH_DRY. Drop if hit.
-_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC"}
+# - SponsorMalformation: all vectors are preflight tem*, so no tesSUCCESS ever lands.
+_NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC", "SponsorMalformation"}
 
 # tx types that must touch a specific ledger entry on tesSUCCESS.
 # Value: allowed node ops followed by the expected LedgerEntryType.
@@ -79,6 +120,7 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "PaymentChannelCreate": ("Created", "PayChannel"),
     "TicketCreate": ("Created", "Ticket"),
     "CredentialCreate": ("Created", "Credential"),
+    "DepositPreauth": ("Created", "DepositPreauth"),
     "CredentialAccept": ("Modified", "Credential"),
     "CredentialDelete": ("Deleted", "Credential"),
     "MPTokenIssuanceCreate": ("Created", "MPTokenIssuance"),
@@ -93,6 +135,8 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "LoanBrokerDelete": ("Deleted", "LoanBroker"),
     "LoanSet": ("Created", "Loan"),
     "LoanDelete": ("Deleted", "Loan"),
+    # Create/refill Modifies or Creates; TF_DELETE_OBJECT Deletes.
+    "SponsorshipSet": ("Created", "Modified", "Deleted", "Sponsorship"),
 }
 
 # XRPL fields → normalized event keys; only object identifiers, for tracking.
@@ -207,6 +251,31 @@ def register_assertions() -> None:
         "Sometimes",
         must_hit=True,
     )
+    _emit_catalog_entry("workload::always : no_sponsored_queue", "always", "Always", must_hit=True)
+    # Ticket modifier (workload.modifiers): a validated tx carried a TicketSequence.
+    _emit_catalog_entry(
+        "workload::sometimes : ticket_used", "sometimes", "Sometimes", must_hit=True
+    )
+    # Modifier composition (workload.modifiers): >=2 compatible modifiers stacked
+    # on one tx. Fired from the submit path (assert_modifier_combo).
+    for combo_key in ("modifiers_ticket_sponsor", "modifiers_ticket_delegate"):
+        _emit_catalog_entry(
+            f"workload::sometimes : {combo_key}", "sometimes", "Sometimes", must_hit=True
+        )
+    for key in (
+        "sponsor_fee_prefunded_used",
+        "sponsor_fee_cosigned_used",
+        "sponsor_reserve_budget_exhausted",
+        "sponsor_reserve_succeeded",
+        "sponsor_reserve_failed",
+        "sponsor_reserve_exhausted",
+        "sponsor_disallowed_type_rejected",
+        "sponsor_no_permission_seen",
+        "sponsor_has_obligations_seen",
+        "sponsorship_audit_object_consistent",
+        "sponsorship_audit_account_consistent",
+    ):
+        _emit_catalog_entry(f"workload::sometimes : {key}", "sometimes", "Sometimes", must_hit=True)
     for setup_key in [
         "gateways",
         "trust_lines",
@@ -259,11 +328,152 @@ def assert_no_internal_error_submit(name: str, result: dict) -> None:
     )
 
 
+def _fire_sometimes(key: str, condition: bool, details: dict[str, str]) -> None:
+    """Shared plumbing for the sponsor-state reachability signals below --
+    ``sometimes`` only needs one True hit, so a False call is a harmless no-op."""
+    msg = f"workload::sometimes : {key}"
+    assert_raw(
+        condition=condition,
+        message=msg,
+        details=details,
+        loc_filename=_LOC_FILE,
+        loc_function="_fire_sometimes",
+        loc_class=_LOC_CLASS,
+        loc_begin_line=0,
+        loc_begin_column=_LOC_COL,
+        hit=True,
+        must_hit=True,
+        assert_type="sometimes",
+        display_type="Sometimes",
+        assert_id=msg,
+    )
+
+
+def _assert_sponsor_submit_signals(name: str, raw: dict, result: dict) -> None:
+    """Sponsor-state reachability + the TxQ invariant below, all read straight off
+    the submit response (no extra RPCs, no waiting on validation). ``ter*`` results
+    never enter a ledger, so terNO_SPONSORSHIP would never reach tx_result's
+    validated stream -- this is the only place that can catch it."""
+    engine_result = result.get("engine_result", "") or ""
+    if not engine_result:
+        return
+    tx_hash = result.get("tx_json", {}).get("hash", "") or result.get("hash", "")
+    details = {"engine_result": engine_result, "tx_type": name, "hash": tx_hash}
+
+    if raw.get("Sponsor"):
+        # rippled's TxQ only rejects FEE-sponsored txns (TxQ.cpp: sfSponsor &&
+        # isFeeSponsored); reserve-only sponsorship queues legitimately.
+        fee_sponsored = bool(int(raw.get("SponsorFlags", 0) or 0) & _SPF_SPONSOR_FEE)
+        assert_raw(
+            condition=not (fee_sponsored and engine_result == "terQUEUED"),
+            message="workload::always : no_sponsored_queue",
+            details=details,
+            loc_filename=_LOC_FILE,
+            loc_function="_assert_sponsor_submit_signals",
+            loc_class=_LOC_CLASS,
+            loc_begin_line=0,
+            loc_begin_column=_LOC_COL,
+            hit=True,
+            must_hit=True,
+            assert_type="always",
+            display_type="Always",
+            assert_id="workload::always : no_sponsored_queue",
+        )
+        _fire_sometimes(
+            "sponsor_reserve_budget_exhausted",
+            engine_result in ("terNO_SPONSORSHIP", "tecINSUFFICIENT_RESERVE"),
+            details,
+        )
+        # Reserve sponsor on a type outside rippled's allow-list -> preflight
+        # temINVALID_FLAG (the /sponsor/malformation disallowed_type vector).
+        reserve_sponsored = bool(int(raw.get("SponsorFlags", 0) or 0) & _SPF_SPONSOR_RESERVE)
+        if reserve_sponsored and raw.get("TransactionType") not in _RESERVE_SPONSOR_ALLOWED_TYPES:
+            _fire_sometimes(
+                "sponsor_disallowed_type_rejected", engine_result == "temINVALID_FLAG", details
+            )
+
+    _fire_sometimes(
+        "sponsor_no_permission_seen", engine_result == "tecNO_SPONSOR_PERMISSION", details
+    )
+    if name == "AccountDelete":
+        _fire_sometimes(
+            "sponsor_has_obligations_seen", engine_result == "tecHAS_OBLIGATIONS", details
+        )
+
+
+def _assert_sponsor_fee_usage(name: str, tx_json: dict, engine_result: str, tx_hash: str) -> None:
+    """Distinguishes the two ways a fee-sponsored tx reaches tesSUCCESS: a prefunded
+    Sponsorship budget (no counter-signature) vs. a co-signed one. Needs the
+    validated tx, unlike the submit-time checks above -- SponsorSignature is present
+    on the wire either way, but "did it actually land" is only certain post-validation."""
+    if engine_result != "tesSUCCESS":
+        return
+    sponsor_flags = int(tx_json.get("SponsorFlags", 0) or 0)
+    if not tx_json.get("Sponsor") or not (sponsor_flags & _SPF_SPONSOR_FEE):
+        return
+    cosigned = bool(tx_json.get("SponsorSignature"))
+    details = {"tx_type": name, "hash": tx_hash}
+    _fire_sometimes("sponsor_fee_cosigned_used", cosigned, details)
+    _fire_sometimes("sponsor_fee_prefunded_used", not cosigned, details)
+
+
+def _assert_sponsor_reserve_usage(
+    name: str, tx_json: dict, engine_result: str, tx_hash: str
+) -> None:
+    """Reserve-sponsor outcome dims off the validated tx (a tec claims a fee and
+    validates, so it reaches here; tem/ter/tef never do). Mirrors the fee dims but
+    routes both success and failure -- these cross-type buckets replace the deleted
+    per-type Sponsored* success/failure buckets and their flakiness."""
+    sponsor_flags = int(tx_json.get("SponsorFlags", 0) or 0)
+    if not tx_json.get("Sponsor") or not (sponsor_flags & _SPF_SPONSOR_RESERVE):
+        return
+    details = {"tx_type": name, "hash": tx_hash, "engine_result": engine_result}
+    _fire_sometimes("sponsor_reserve_succeeded", engine_result == "tesSUCCESS", details)
+    _fire_sometimes("sponsor_reserve_failed", engine_result != "tesSUCCESS", details)
+    _fire_sometimes(
+        "sponsor_reserve_exhausted", engine_result == "tecINSUFFICIENT_RESERVE", details
+    )
+
+
+def assert_sponsorship_audit(kind: str, consistent: bool) -> None:
+    """Soft cross-check (transactions/sponsorship.py's SponsorshipAudit) between
+    tracked sponsor state and the validated ledger. Deliberately a ``sometimes``,
+    not an ``always``: tracked state legitimately drifts (the caller prunes on a
+    genuine miss), so only a systematic break -- this bucket never satisfying --
+    is actually worth triaging."""
+    _fire_sometimes(f"sponsorship_audit_{kind}_consistent", consistent, {"kind": kind})
+
+
+def assert_ticket_used(tx_type: str, tx_hash: str) -> None:
+    """A validated tx carrying TicketSequence consumed a ticket (workload.modifiers)."""
+    _fire_sometimes("ticket_used", True, {"tx_type": tx_type, "hash": tx_hash})
+
+
+# Valid stackable combos (Phase 1: delegate+sponsor is incompatible, so never stacks).
+_MODIFIER_COMBOS: dict[str, frozenset[str]] = {
+    "modifiers_ticket_sponsor": frozenset({"ticket", "sponsor"}),
+    "modifiers_ticket_delegate": frozenset({"ticket", "delegate"}),
+}
+
+
+def assert_modifier_combo(name: str, applied: list[str]) -> None:
+    """Fire the per-combo sometimes dim when >=2 modifiers decorated one tx.
+    Called from the submit path off apply_modifiers' applied-tags set -- the
+    observable margin confirming compatible modifiers actually stack."""
+    if len(applied) < 2:
+        return
+    tags = set(applied)
+    for key, combo in _MODIFIER_COMBOS.items():
+        if combo <= tags:
+            _fire_sometimes(key, True, {"tx_type": name, "modifiers": "+".join(sorted(tags))})
+
+
 def tx_submitted(
     name: str, txn: Transaction | dict | None = None, result: dict | None = None
 ) -> None:
     """Passing the /submit response triggers the submit-time tef* check."""
     details: dict[str, str] = {"tx_type": name}
+    raw: dict = {}
     if txn is not None:
         try:
             # Accept an xrpl-py model or an already-serialized dict (raw-submit
@@ -302,6 +512,7 @@ def tx_submitted(
     )
     if result is not None:
         assert_no_internal_error_submit(name, result)
+        _assert_sponsor_submit_signals(name, raw, result)
 
 
 def tx_result(name: str, result: dict) -> None:
@@ -484,3 +695,5 @@ def tx_result(name: str, result: dict) -> None:
             display_type="Always",
             assert_id="workload::always : conf_mpt_version_monotonic",
         )
+    _assert_sponsor_fee_usage(name, tx_json, engine_result, details.get("hash", ""))
+    _assert_sponsor_reserve_usage(name, tx_json, engine_result, details.get("hash", ""))

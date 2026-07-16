@@ -34,13 +34,14 @@ from workload.models import (
     NFTOffer,
     PaymentChannel,
     PermissionedDomain,
+    Sponsorship,
     TrustLine,
     UserAccount,
     Vault,
 )
+from workload.modifiers import check_modifier_coverage
 from workload.probe import probe_network
 from workload.transactions import REGISTRY
-from workload.transactions.tickets import check_ticket_coverage
 
 
 class Workload:
@@ -64,6 +65,9 @@ class Workload:
         self.checks: list[Check] = []
         self.payment_channels: list[PaymentChannel] = []
         self.offers: list[dict] = []
+        self.sponsorships: list[Sponsorship] = []
+        self.sponsored_accounts: dict[str, str] = {}  # sponsee addr -> sponsor addr
+        self.sponsored_objects: dict[str, tuple[str, str]] = {}  # object_id -> (owner, sponsor)
         # Setup addresses (gateways, vault creators, etc.) — never delete; populated by run_setup().
         self.protected_accounts: set[str] = set()
         self.deleted_vault_ids: list[str] = []
@@ -107,14 +111,14 @@ class Workload:
         # Wire delegation state so submit_tx can transparently delegate.
         from workload.submit import configure as configure_submit
 
-        configure_submit(self.delegates, self.accounts)
+        configure_submit(self.delegates, self.accounts, self.sponsorships)
 
         logger.info("Antithesis SDK handler: %s", type(_HANDLER).__name__)
         reachable("workload::started", {})
         always(True, "workload::sdk_works", {"message": "SDK canary assertion"})
 
         register_assertions()
-        check_ticket_coverage()
+        check_modifier_coverage()
 
         logger.info("Workload initialized after %ss", int(time.time() - self.start_time))
 
@@ -191,18 +195,39 @@ def create_app(workload: Workload) -> FastAPI:
         ws_task = asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
         await asyncio.sleep(1)  # let WS listener connect before setup submits
 
+        # Confidential crypto skipped for an mpt-crypto version mismatch (build stayed
+        # green, confidential valid paths are dark). The unreachable surfaces it as an
+        # explicit report signal so a dark confidential surface isn't mistaken for a bug.
+        from workload.confidential_crypto import mpt_crypto_version_mismatch
+
+        mismatch = mpt_crypto_version_mismatch()
+        if mismatch:
+            unreachable("workload::confidential_crypto_version_mismatch", {"versions": mismatch})
+
         try:
             result = await run_setup(workload)
             reachable("workload::setup_complete_with_state", result)
+            # Modifiers decorate driver submits only; enable now that setup is done.
+            from workload.submit import enable_modifiers
+
+            enable_modifiers()
+            # Signal setup_complete ONLY on success. Calling it after a failed setup
+            # tells Antithesis "faults may begin" and drives the whole run on broken
+            # state (every driver cascades); leaving it unsignaled keeps the run in the
+            # setup phase so setup_failed is the single clear signal.
+            lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
+            ready["value"] = True
         except Exception as e:
             logger.error(f"setup failed: {type(e).__name__}: {e}")
             unreachable(
                 "workload::setup_failed",
                 {"error": f"{type(e).__name__}: {e}"},
             )
+            # Antithesis ends a run immediately on a non-zero container exit before
+            # setup_complete. Exiting here aborts a broken setup fast instead of idling
+            # the full duration; unreachable() above is dispatched synchronously first.
+            os._exit(1)
 
-        lifecycle.setup_complete(details={"message": "Setup complete, faults may begin"})
-        ready["value"] = True
         yield
 
         ws_task.cancel()
@@ -222,6 +247,22 @@ def create_app(workload: Workload) -> FastAPI:
 
     for name, path, handler_fn, args_fn, _ in REGISTRY:
         app.get(path)(_make_endpoint(path, name, handler_fn, args_fn))
+
+    # SponsorshipAudit is a read-only ledger cross-check, not a transaction --
+    # no engine_result, so it doesn't fit REGISTRY's seen/success/failure shape
+    # (register_assertions() would starve waiting for a hit that never comes).
+    # Wired directly with the same _make_endpoint plumbing (XRPLException/
+    # timeout handling) instead.
+    from workload.transactions.sponsorship import sponsorship_audit_random
+
+    app.get("/sponsorship/audit/random")(
+        _make_endpoint(
+            "/sponsorship/audit/random",
+            "SponsorshipAudit",
+            sponsorship_audit_random,
+            lambda w: (w.sponsorships, w.sponsored_accounts, w.client),
+        )
+    )
 
     return app
 

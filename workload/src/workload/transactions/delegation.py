@@ -16,7 +16,34 @@ from workload.models import UserAccount
 from workload.randoms import choice, randint, sample
 from workload.submit import submit_tx
 
-DELEGABLE_TX_TYPES = [t for t in TransactionType if t not in NON_DELEGABLE_TRANSACTIONS]
+# xrpl-py's NON_DELEGABLE_TRANSACTIONS is stale vs rippled develop's transactions.macro:
+# it omits SponsorshipTransfer and the whole Vault (XLS-65) + Loan/LoanBroker families,
+# which develop marks Delegation::NotDelegable. A DelegateSet authorizing any of these
+# draws temMALFORMED, so exclude them until xrpl-py catches up. (SponsorshipSet, the
+# other sponsor tx, stays Delegable.)
+_RIPPLED_NON_DELEGABLE_VALUES = {
+    "SponsorshipTransfer",
+    "VaultCreate",
+    "VaultDeposit",
+    "VaultWithdraw",
+    "VaultSet",
+    "VaultDelete",
+    "VaultClawback",
+    "LoanSet",
+    "LoanDelete",
+    "LoanManage",
+    "LoanPay",
+    "LoanBrokerSet",
+    "LoanBrokerDelete",
+    "LoanBrokerCoverDeposit",
+    "LoanBrokerCoverWithdraw",
+    "LoanBrokerCoverClawback",
+}
+DELEGABLE_TX_TYPES = [
+    t
+    for t in TransactionType
+    if t not in NON_DELEGABLE_TRANSACTIONS and t.value not in _RIPPLED_NON_DELEGABLE_VALUES
+]
 
 
 async def delegate_set(accounts: dict[str, UserAccount], client: AsyncJsonRpcClient) -> None:
@@ -132,14 +159,10 @@ def maybe_delegate(
     delegates: list,
     accounts: dict[str, UserAccount],
 ) -> tuple[str | None, Wallet | None]:
-    """Pick a delegate for tx_type on behalf of src_address, or (None, None)."""
-    from workload.randoms import random as _random
-
-    if tx_type in _NON_DELEGABLE_NAMES:
-        return None, None
+    """Pick a delegate authorized for tx_type on behalf of src_address, or
+    (None, None). Fire probability + non-delegable filtering are owned by the
+    delegate Modifier (modifiers.py); this is a pure candidate picker."""
     if not delegates:
-        return None, None
-    if _random() >= 0.10:
         return None, None
 
     candidates = [

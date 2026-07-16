@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Predict per-combo modifier hits per run from live weights + cross-resource
+# setup counts. NOT a CI gate -- a tuning aid for docs/transaction-modifiers.md.
+# Run: scripts/modifier-coverage-model  (or with a volume: MODEL_VOLUME=20000 ...)
+set -e
+
+cd "$(dirname "$0")/../workload"
+
+uv run python -c "
+import os
+
+from workload.modifiers import MODIFIERS, _SPONSOR_SUPPORTED
+from workload.transactions import REGISTRY
+from workload import setup
+
+# ── Live inputs (single source of truth) ─────────────────────────────
+W = {m.name: m.weight for m in MODIFIERS}
+E = len(REGISTRY)                                   # tx-type endpoints, ~uniform driver mix
+N = 100                                             # accounts (genesis/accounts.json)
+R = len([i for i in setup._CROSS_RESOURCE_RICH_RANGE])
+PERMS = len(setup._cross_resource_delegate_perms()) # delegable types granted to rich accts
+S = len(_SPONSOR_SUPPORTED)                          # sponsor-decorated (object-creating) types
+
+# ── Assumptions (stated) ─────────────────────────────────────────────
+VOL = [int(os.environ.get('MODEL_VOLUME', 0))] if os.environ.get('MODEL_VOLUME') else [15000, 17500]
+A_T = 0.85          # ticket availability on rich accts (seeded 60 + driver refills, minus churn)
+F_TICKET_GEN = 0.5  # frac of general-population submits from a ticket-holder (drivers mint broadly)
+D_EFF = 0.5         # frac of granted perms a rich acct actually submits (creators early,
+                    # object-dependent types activate as it accumulates objects)
+
+def predict(V):
+    per_type = V / E                 # submits of a given tx type
+    p_rich = 1.0 / N                 # P(a rich acct is the uniform source of one such submit)
+    # ticket+sponsor: sponsor decorates via co-sign for ANY account, so the general
+    # ticket-holder population dominates; rich accts add a guaranteed floor.
+    ts_gen = V * (S / E) * F_TICKET_GEN * W['ticket'] * W['sponsor']
+    ts_rich = R * S * per_type * p_rich * (A_T * W['ticket']) * W['sponsor']
+    # ticket+delegate: BOTH resources key on the submitting acct, so only the seeded
+    # rich pool reliably supplies it (driver delegations add a small bonus).
+    td_rich = R * (PERMS * D_EFF) * per_type * p_rich * (A_T * W['ticket']) * W['delegate']
+    td_gen = V * (1.0 / E) * 0.30 * F_TICKET_GEN * W['ticket'] * W['delegate']  # ~Payment-ish bonus
+    return ts_gen + ts_rich, td_rich + td_gen
+
+print('Modifier composition coverage model')
+print(f'  weights: ticket={W[\"ticket\"]} delegate={W[\"delegate\"]} sponsor={W[\"sponsor\"]}')
+print(f'  endpoints E={E}  accounts N={N}  rich R={R}  perms/rich={PERMS}  sponsor-types S={S}')
+print(f'  assumptions: a_t={A_T} f_ticket_gen={F_TICKET_GEN} d_eff={D_EFF}')
+print()
+print(f'  {\"volume\":>8}  {\"ticket+sponsor\":>16}  {\"ticket+delegate\":>16}')
+ok = True
+for V in VOL:
+    ts, td = predict(V)
+    print(f'  {V:>8}  {ts:>16.1f}  {td:>16.1f}')
+    ok = ok and ts >= 10 and td >= 10
+print()
+print('  target >= ~10 hits/combo/run:', 'CLEARS' if ok else 'BELOW MARGIN')
+"

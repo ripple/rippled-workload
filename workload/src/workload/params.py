@@ -1,5 +1,8 @@
 """Centralized random parameter generators; call at point of use, never cache."""
 
+from xrpl.models.transactions import SponsorshipTransferFlag
+
+from workload import confidential_crypto as _cc
 from workload.randoms import choice, randint, random
 
 
@@ -364,11 +367,9 @@ def did_hex_field() -> str:
 
 
 # ── Confidential MPT (XLS-0096) ──────────────────────────────────────
-# Faulty bases carry blobs of the exact rippled wire length; the confidential-mpt
-# branch models validate the SAME lengths, so one set serves both construction and
-# preflight. Wrong length → tem* in preflight (only feeds `seen`, never failure).
-from workload import confidential_crypto as _cc  # noqa: E402
-
+# Faulty bases carry blobs of the exact rippled wire length; the xrpl-py models
+# validate the SAME lengths, so one set serves both construction and preflight.
+# Wrong length → tem* in preflight (only feeds `seen`, never failure).
 # On-ledger (rippled) hex lengths — 2x the byte size.
 _CIPHERTEXT_HEX_LEN = _cc.CIPHERTEXT_SIZE * 2  # 132 — ElGamal c1||c2 (66 bytes)
 _COMMITMENT_HEX_LEN = _cc.COMMITMENT_SIZE * 2  # 66 — Pedersen commitment (33 bytes)
@@ -461,3 +462,76 @@ def confidential_fee() -> str:
 
 def confidential_invalid_flags() -> int:
     return choice([0x80000000, 0xFF000000, 0x40000000, randint(1, 0xFFFFFFFF)])
+
+
+# ── Sponsorship (XLS-68) ────────────────────────────────────────────
+# xrpl-py ships SponsorFlags as a raw int (no enum) — mirror rippled's bits here.
+SPF_SPONSOR_FEE = 0x00000001
+SPF_SPONSOR_RESERVE = 0x00000002
+
+TF_SPONSORSHIP_END = int(SponsorshipTransferFlag.TF_SPONSORSHIP_END)
+TF_SPONSORSHIP_CREATE = int(SponsorshipTransferFlag.TF_SPONSORSHIP_CREATE)
+TF_SPONSORSHIP_REASSIGN = int(SponsorshipTransferFlag.TF_SPONSORSHIP_REASSIGN)
+
+
+def sponsored_account_amount() -> str:
+    """Below the base reserve -- the sponsor covers it, not the sender (the feature's point)."""
+    return str(randint(1, 5_000_000))
+
+
+def sponsorship_fee_amount() -> str:
+    """XRP drops funding the Sponsorship's fee bucket (0.1-50 XRP)."""
+    return str(randint(100_000, 50_000_000))
+
+
+def sponsorship_max_fee() -> str | None:
+    """Per-tx fee cap; None lets FeeAmount alone bound spend."""
+    if random() < 0.3:
+        return None
+    return str(randint(10, 1000))
+
+
+def sponsorship_reserve_count() -> int:
+    """RemainingOwnerCount: how many object reserves the sponsor still covers."""
+    return randint(0, 20)
+
+
+def sponsor_flags() -> int:
+    """Weighted toward fee-only sponsorship, the common case; some cover both."""
+    r = random()
+    if r < 0.5:
+        return SPF_SPONSOR_FEE
+    if r < 0.8:
+        return SPF_SPONSOR_FEE | SPF_SPONSOR_RESERVE
+    return SPF_SPONSOR_RESERVE
+
+
+def sponsor_reserve_flags() -> int:
+    """SponsorshipTransfer Create/Reassign require spfSponsorReserve (rippled
+    preflight temINVALID_FLAG otherwise); fee bit is an optional add-on."""
+    return SPF_SPONSOR_RESERVE | (SPF_SPONSOR_FEE if random() < 0.3 else 0)
+
+
+# SponsorshipSet transaction flags (tx.Flags) — distinct bit space from the
+# Sponsorship ledger object's own lsfSponsorshipRequireSignFor* flags.
+TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_FEE = 0x00010000
+TF_SPONSORSHIP_CLEAR_REQUIRE_SIGN_FOR_FEE = 0x00020000
+TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_RESERVE = 0x00040000
+TF_SPONSORSHIP_CLEAR_REQUIRE_SIGN_FOR_RESERVE = 0x00080000
+TF_SPONSORSHIP_DELETE_OBJECT = 0x00100000
+
+
+def sponsorship_set_flags() -> int:
+    """Random require-sign set/clear combo, one choice per axis so the two
+    flags on the same axis never collide (rippled temINVALID_FLAG)."""
+    fee_axis = choice(
+        [0, TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_FEE, TF_SPONSORSHIP_CLEAR_REQUIRE_SIGN_FOR_FEE]
+    )
+    reserve_axis = choice(
+        [
+            0,
+            TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_RESERVE,
+            TF_SPONSORSHIP_CLEAR_REQUIRE_SIGN_FOR_RESERVE,
+        ]
+    )
+    return fee_axis | reserve_axis

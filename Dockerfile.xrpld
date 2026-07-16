@@ -5,7 +5,7 @@
 # and targets that old glibc, so the resulting binary is portable: it runs on a
 # clean ubuntu runtime with nothing extra installed. We mirror rippled CI's
 # conan setup (global.conf + profiles + xrplf remote + the `ci` profile) so our
-# package-ids match the prebuilt cache on conan.ripplex.io and we get cache hits.
+# package-ids match the prebuilt cache on conan.xrplf.org and we get cache hits.
 ARG CODENAME=noble
 ARG NIX_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:latest-amd64
 FROM ${NIX_IMAGE} AS build
@@ -72,7 +72,7 @@ RUN <<EOF
     set -ex
     cat conan/global.conf >> "$(conan config home)/global.conf"
     conan config install conan/profiles/ --target-folder "$(conan config home)/profiles/"
-    conan remote add --index 0 --force xrplf https://conan.ripplex.io
+    conan remote add --index 0 --force xrplf https://conan.xrplf.org/repository/conan/
 EOF
 
 # Install dependencies with the `ci` profile so package-ids match the prebuilt
@@ -107,7 +107,7 @@ RUN patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath /opt/x
 # Export the just-cloned rippled source as `xrpl/develop` into the local conan
 # cache so the fuzzer builds libxrpl from the SAME develop it was checked out at.
 # Without this, the fuzzer's `xrpl/develop` requirement resolves to a separately
-# published package on conan.ripplex.io that can lag develop (e.g. missing
+# published package on conan.xrplf.org that can lag develop (e.g. missing
 # newly-relocated headers) — xrpld would be latest develop but the fuzzer's
 # libxrpl stale. `--version develop` overrides the recipe versionString
 # (e.g. 3.2.0-rc3) to match the fuzzer's `xrpl/develop` pin.

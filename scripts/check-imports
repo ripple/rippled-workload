@@ -17,6 +17,7 @@ from workload.transactions.delegation import delegate_set
 from workload.transactions.escrow import escrow_create, escrow_finish, escrow_cancel
 from workload.transactions.payment_channels import channel_create, channel_fund, channel_claim
 from workload.transactions.set_regular_key import set_regular_key
+from workload.transactions.deposit_preauth import deposit_preauth
 from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.did import did_set, did_delete
 from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
@@ -25,6 +26,8 @@ from workload.transactions.offers import offer_create, offer_cancel
 from workload.transactions.permissioned_dex import offer_create_domain, offer_create_hybrid, payment_domain, payment_domain_xc
 from workload.transactions.mpt_dex import offer_create_mpt, payment_mpt
 from workload.transactions.confidential_mpt import conf_mpt_merge_inbox, conf_mpt_convert, conf_mpt_send, conf_mpt_convert_back, conf_mpt_clawback
+from workload.transactions.sponsorship import sponsorship_set, sponsorship_set_delete, sponsorship_transfer, sponsorship_transfer_account, payment_sponsored_account, sponsorship_audit_random
+from workload.transactions.sponsor_malformation import sponsor_malformation
 from workload.transactions.lending import (
     loan_broker_set, loan_broker_delete,
     loan_broker_cover_deposit, loan_broker_cover_withdraw,
@@ -33,11 +36,12 @@ from workload.transactions.lending import (
 from workload.assertions import tx_submitted, tx_result, register_assertions
 from workload.probe import probe_network
 from workload.submit import submit_tx
+from workload.modifiers import apply_modifiers, check_modifier_coverage
 from workload.fuzz import submit_fuzzed, fuzz_mutate
 from workload.sequence import SequenceTracker
 from workload.ws_listener import start_ws_listener
 from workload.setup import run_setup
 from workload.params import should_send_faulty, fake_account, fake_id
-from workload.models import UserAccount, Credential, Vault, PermissionedDomain, MPTokenIssuance, LoanBroker, Loan, Delegate, DID, ConfidentialHolder, ConfidentialMPTIssuance
+from workload.models import UserAccount, Credential, Vault, PermissionedDomain, MPTokenIssuance, LoanBroker, Loan, Delegate, DID, ConfidentialHolder, ConfidentialMPTIssuance, Sponsorship
 print('All imports OK')
 "
