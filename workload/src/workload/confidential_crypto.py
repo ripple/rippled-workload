@@ -8,8 +8,10 @@ image it's absent -> ``CRYPTO_AVAILABLE`` False and only faulty paths run.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 from xrpl.clients import JsonRpcClient
@@ -30,6 +32,21 @@ except ImportError:
     _conf = None
 
 CRYPTO_AVAILABLE: bool = bool(_conf.MPT_CRYPTO_AVAILABLE) if _conf is not None else False
+
+# setup-confidential-crypto.sh drops this marker (xrpl-py vs rippled mpt-crypto
+# versions) when it skips the crypto build on a version mismatch, so the workload
+# can distinguish "confidential off because versions diverged" from other absence.
+_VERSION_MISMATCH_MARKER = Path(sys.prefix) / ".mpt_crypto_version_mismatch"
+
+
+def mpt_crypto_version_mismatch() -> str | None:
+    """The divergent version string if the crypto build was skipped for a version
+    mismatch, else None."""
+    try:
+        return _VERSION_MISMATCH_MARKER.read_text().strip()
+    except OSError:
+        return None
+
 
 # Shared because secp256k1 allocation is expensive; None when native lib absent.
 _crypto = _conf.MPTCrypto() if CRYPTO_AVAILABLE else None

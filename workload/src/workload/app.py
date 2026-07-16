@@ -195,6 +195,15 @@ def create_app(workload: Workload) -> FastAPI:
         ws_task = asyncio.create_task(start_ws_listener(workload, workload.xrpld_ws))
         await asyncio.sleep(1)  # let WS listener connect before setup submits
 
+        # Confidential crypto skipped for an mpt-crypto version mismatch (build stayed
+        # green, confidential valid paths are dark). Surface it in the report; the
+        # start_experiment workflow also Slack-pings it.
+        from workload.confidential_crypto import mpt_crypto_version_mismatch
+
+        mismatch = mpt_crypto_version_mismatch()
+        if mismatch:
+            unreachable("workload::confidential_crypto_version_mismatch", {"versions": mismatch})
+
         try:
             result = await run_setup(workload)
             reachable("workload::setup_complete_with_state", result)
