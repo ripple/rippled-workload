@@ -46,6 +46,15 @@ def new_account_funding_amount() -> str:
     return str(randint(11_000_000, 30_000_000))
 
 
+def fund_new_burst_count() -> int:
+    """Accounts to create per PaymentFundNew call, each from a DISTINCT source (same
+    source would reuse one Sequence and collide). A burst lands in one open ledger, so
+    the state SHAMap gains ~2N nodes at once (N created + N modified by fee debit) —
+    concentrated growth widens the SHAMapMissingNode acquisition window more than the
+    same creations spread thin. Capped at len(accounts) by the caller."""
+    return randint(3, 10)
+
+
 # ── Trust Lines & IOUs ────────────────────────────────────────────────
 CURRENCY_CODES = ["USD", "EUR", "GBP", "JPY", "BTC", "ETH", "XAU", "CNY"]
 
