@@ -29,6 +29,7 @@ from workload.models import (
     LoanBroker,
     MPTokenIssuance,
     NFTOffer,
+    Oracle,
     PaymentChannel,
     PermissionedDomain,
     Sponsorship,
@@ -87,6 +88,7 @@ from workload.transactions.nft import (
     nftoken_modify,
 )
 from workload.transactions.offers import offer_cancel, offer_create
+from workload.transactions.oracle import oracle_delete, oracle_set
 from workload.transactions.payment_channels import (
     channel_claim,
     channel_create,
@@ -421,6 +423,29 @@ def _on_credential_accept(w: Workload, tx: dict, meta: dict) -> None:
         if c.issuer == issuer and c.subject == subject and c.credential_type == cred_type:
             c.accepted = True
             break
+
+
+def _on_oracle_set(w: Workload, tx: dict, meta: dict) -> None:
+    # CreatedNode only on first set; updates (ModifiedNode) leave the tracked
+    # provider/asset_class/document_id unchanged, so there's nothing to record.
+    if not _extract_created_id(meta, "Oracle"):
+        return
+    w.oracles.append(
+        Oracle(
+            account=tx["Account"],
+            document_id=tx.get("OracleDocumentID", 0),
+            provider=tx.get("Provider", ""),
+            asset_class=tx.get("AssetClass", ""),
+        )
+    )
+
+
+def _on_oracle_delete(w: Workload, tx: dict, meta: dict) -> None:
+    if not _extract_deleted_id(meta, "Oracle"):
+        return
+    account = tx["Account"]
+    doc_id = tx.get("OracleDocumentID", 0)
+    w.oracles[:] = [o for o in w.oracles if not (o.account == account and o.document_id == doc_id)]
 
 
 def _on_ticket_create(w: Workload, tx: dict, meta: dict) -> None:
@@ -1101,6 +1126,20 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         credential_delete,
         lambda w: (w.accounts, w.credentials, w.client),
         _on_credential_delete,
+    ),
+    (
+        "OracleSet",
+        "/oracle/set/random",
+        oracle_set,
+        lambda w: (w.accounts, w.oracles, w.client),
+        _on_oracle_set,
+    ),
+    (
+        "OracleDelete",
+        "/oracle/delete/random",
+        oracle_delete,
+        lambda w: (w.accounts, w.oracles, w.client),
+        _on_oracle_delete,
     ),
     (
         "VaultCreate",

@@ -123,6 +123,8 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "DepositPreauth": ("Created", "DepositPreauth"),
     "CredentialAccept": ("Modified", "Credential"),
     "CredentialDelete": ("Deleted", "Credential"),
+    "OracleSet": ("Created", "Modified", "Oracle"),
+    "OracleDelete": ("Deleted", "Oracle"),
     "MPTokenIssuanceCreate": ("Created", "MPTokenIssuance"),
     "MPTokenIssuanceDestroy": ("Deleted", "MPTokenIssuance"),
     "NFTokenMint": ("Created", "Modified", "NFTokenPage"),

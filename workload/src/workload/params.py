@@ -464,6 +464,64 @@ def confidential_invalid_flags() -> int:
     return choice([0x80000000, 0xFF000000, 0x40000000, randint(1, 0xFFFFFFFF)])
 
 
+# ── Price Oracle (XLS-47) ────────────────────────────────────────────
+# provider/asset_class are hex-encoded on the wire (xrpl-py validates via
+# bytes.fromhex on the serialized string). xrpl-py caps the *hex string* length
+# at 256 (provider) / 16 (asset_class), stricter than rippled's byte caps, so
+# generate within the xrpl-py bound to keep valid bases constructible.
+
+
+def oracle_document_id() -> int:
+    """UInt32 identifier, unique per owner account (wide range → rare collision)."""
+    return randint(0, 2**32 - 1)
+
+
+def oracle_provider() -> str:
+    length = randint(1, 32)
+    return bytes(randint(0, 255) for _ in range(length)).hex()
+
+
+def oracle_asset_class() -> str:
+    """≤8 bytes → ≤16 hex chars (xrpl-py's MAX_ORACLE_SYMBOL_CLASS bound)."""
+    length = randint(1, 8)
+    return bytes(randint(0, 255) for _ in range(length)).hex()
+
+
+def oracle_asset_price() -> int:
+    return randint(1, 10**15)
+
+
+def oracle_scale() -> int:
+    """0-20 (rippled kMaxPriceScale); above → temMALFORMED."""
+    return randint(0, 20)
+
+
+def oracle_price_data_count() -> int:
+    """1-5: each pair stays within one owner reserve (>5 needs two)."""
+    return randint(1, 5)
+
+
+def oracle_base_asset() -> str:
+    return currency_code()
+
+
+def oracle_quote_asset() -> str:
+    return currency_code()
+
+
+def oracle_last_update_time() -> int:
+    """Unix time; rippled requires it within ±300s of the ledger close time."""
+    import time
+
+    return int(time.time())
+
+
+def oracle_stale_update_time() -> int:
+    """Just past the ripple epoch: clears xrpl-py/rippled's epoch floor but is
+    centuries before the ledger close → tecINVALID_UPDATE_TIME."""
+    return RIPPLE_EPOCH_OFFSET + 1
+
+
 # ── Sponsorship (XLS-68) ────────────────────────────────────────────
 # xrpl-py ships SponsorFlags as a raw int (no enum) — mirror rippled's bits here.
 SPF_SPONSOR_FEE = 0x00000001
