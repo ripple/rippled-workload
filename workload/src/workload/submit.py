@@ -17,6 +17,13 @@ from workload.assertions import assert_modifier_combo, tx_submitted, tx_submitti
 
 log = logging.getLogger(__name__)
 
+
+class BlobUnchanged(ValueError):
+    """A raw-band ``blob_mutate`` produced byte-identical output — submitting would send a
+    valid, correctly-signed transaction mislabeled as fuzz. Caught by submit_fuzzed as a
+    ValueError → ``fuzz_skipped``."""
+
+
 # ── Delegation/sponsorship state (set once via configure()) ──────────
 _delegates: list = []
 _accounts: dict = {}
@@ -112,7 +119,10 @@ async def submit_raw(
         tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
         tx_blob = encode(tx_dict)
     if blob_mutate is not None:
-        tx_blob = blob_mutate(bytes.fromhex(tx_blob)).hex().upper()
+        mutated = blob_mutate(bytes.fromhex(tx_blob)).hex().upper()
+        if mutated == tx_blob.upper():
+            raise BlobUnchanged(name)
+        tx_blob = mutated
     tx_submitting(name, tx_dict)
     response = await client.request(SubmitOnly(tx_blob=tx_blob))
     result: dict = response.result
