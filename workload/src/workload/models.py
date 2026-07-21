@@ -207,6 +207,17 @@ class PaymentChannel:
 
 
 @dataclass
+class Oracle:
+    """Price Oracle ledger entry (XLS-47), keyed by (account, document_id).
+    provider/asset_class are immutable after create, so updates keep them."""
+
+    account: str
+    document_id: int
+    provider: str
+    asset_class: str
+
+
+@dataclass
 class Sponsorship:
     """Prefunded Sponsorship ledger entry (XLS-68), keyed by (sponsor, sponsee)."""
 

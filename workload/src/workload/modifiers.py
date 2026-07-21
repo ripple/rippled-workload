@@ -143,6 +143,9 @@ _SPONSOR_EXCLUDED: dict[str, str] = dict.fromkeys(
     "not a reserve-sponsorable object-creator this modifier decorates",
 )
 _SPONSOR_EXCLUDED["SponsorMalformation"] = _RAW_ONLY_REASON
+_ORACLE_NOT_SPONSORABLE = "Oracle is not in rippled's isReserveSponsorAllowed allow-list"
+_SPONSOR_EXCLUDED["OracleSet"] = _ORACLE_NOT_SPONSORABLE
+_SPONSOR_EXCLUDED["OracleDelete"] = _ORACLE_NOT_SPONSORABLE
 
 
 def _cosign_sponsor(sponsor_wallet: Wallet) -> Callable[[Any], Any]:

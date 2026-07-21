@@ -39,6 +39,8 @@ try:
         '/vault/clawback/random',
         '/domain/set/random',
         '/domain/delete/random',
+        '/oracle/set/random',
+        '/oracle/delete/random',
         '/offer/create/domain/random',
         '/offer/create/hybrid/random',
         '/payment/domain/random',

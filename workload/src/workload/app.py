@@ -32,6 +32,7 @@ from workload.models import (
     LoanBroker,
     MPTokenIssuance,
     NFTOffer,
+    Oracle,
     PaymentChannel,
     PermissionedDomain,
     Sponsorship,
@@ -53,6 +54,7 @@ class Workload:
         self.nft_offers: list[NFTOffer] = []
         self.trust_lines: list[TrustLine] = []
         self.credentials: list[Credential] = []
+        self.oracles: list[Oracle] = []
         self.vaults: list[Vault] = []
         self.domains: list[PermissionedDomain] = []
         self.mpt_issuances: list[MPTokenIssuance] = []
