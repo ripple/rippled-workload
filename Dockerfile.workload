@@ -16,11 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Confidential MPT (XLS-0096) crypto: the proof code (xrpl.ext.confidential) is
-# excluded from xrpl-py's core wheel, so build it into the venv. The script pins
-# mpt-crypto from the branch and fails on divergence from rippled's conan pin.
+# excluded from xrpl-py's core wheel, so build it into the venv. The build is gated
+# on the xrpl-py binding version matching RIPPLED_MPT_CRYPTO_VERSION — the mpt-crypto
+# pin of the ACTUAL xrpld the run uses, resolved by CI (the xrpld repo may be private).
+# Empty (e.g. a standalone build) -> crypto skipped, not a build failure.
 ARG XRPL_PY_REF=confidential-mpt
-ARG XRPLD_COMMIT=develop
-RUN PYTHON=/opt/venv/bin/python bash scripts/setup-confidential-crypto.sh "$XRPL_PY_REF" "$XRPLD_COMMIT"
+ARG RIPPLED_MPT_CRYPTO_VERSION=
+RUN PYTHON=/opt/venv/bin/python bash scripts/setup-confidential-crypto.sh \
+    "$XRPL_PY_REF" "$RIPPLED_MPT_CRYPTO_VERSION"
 
 COPY test_composer/all_transactions /opt/antithesis/test/v1/all_transactions
 
