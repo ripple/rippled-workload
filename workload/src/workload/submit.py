@@ -1,6 +1,7 @@
 """Fire-and-forget transaction submission; ws_listener.py handles validated results."""
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
@@ -15,6 +16,13 @@ from workload import logging
 from workload.assertions import assert_modifier_combo, tx_submitted, tx_submitting
 
 log = logging.getLogger(__name__)
+
+
+class BlobUnchanged(ValueError):
+    """A raw-band ``blob_mutate`` produced byte-identical output — submitting would send a
+    valid, correctly-signed transaction mislabeled as fuzz. Caught by submit_fuzzed as a
+    ValueError → ``fuzz_skipped``."""
+
 
 # ── Delegation/sponsorship state (set once via configure()) ──────────
 _delegates: list = []
@@ -85,6 +93,8 @@ async def submit_raw(
     client: AsyncJsonRpcClient,
     wallet: Wallet,
     mutate: Callable[[dict], None] | None = None,
+    encode_ctx: AbstractContextManager[None] | None = None,
+    blob_mutate: Callable[[bytes], bytes] | None = None,
 ) -> dict:
     """Raw ``_faulty`` submit path: autofill a valid ``base``, ``mutate(dict)`` it
     into a malformation xrpl-py rejects at construction, then sign+submit raw so
@@ -93,6 +103,10 @@ async def submit_raw(
     Contract: ``mutate`` MUST keep the dict encodable — submit_raw has no encode
     guard (only submit_fuzzed catches XRPLBinaryCodecException / ValueError).
     Delegation is intentionally NOT applied here so a flagged result maps to one account.
+    ``encode_ctx`` must stay live across sign+encode (the raw band mutates codec
+    definitions for that window; see rawfuzz.py).
+    ``blob_mutate`` corrupts the serialized blob after signing — the signature no longer
+    covers it, so it targets rippled's deserializer, which runs before signature checks.
     """
     autofilled = await autofill(base, client)
     tx_dict = autofilled.to_xrpl()
@@ -100,10 +114,17 @@ async def submit_raw(
     if mutate is not None:
         mutate(tx_dict)
     tx_dict["SigningPubKey"] = wallet.public_key
-    serialized = encode_for_signing(tx_dict)
-    tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
+    with encode_ctx if encode_ctx is not None else nullcontext():
+        serialized = encode_for_signing(tx_dict)
+        tx_dict["TxnSignature"] = keypairs.sign(bytes.fromhex(serialized), wallet.private_key)
+        tx_blob = encode(tx_dict)
+    if blob_mutate is not None:
+        mutated = blob_mutate(bytes.fromhex(tx_blob)).hex().upper()
+        if mutated == tx_blob.upper():
+            raise BlobUnchanged(name)
+        tx_blob = mutated
     tx_submitting(name, tx_dict)
-    response = await client.request(SubmitOnly(tx_blob=encode(tx_dict)))
+    response = await client.request(SubmitOnly(tx_blob=tx_blob))
     result: dict = response.result
     tx_submitted(name, tx_dict, result)
     return result

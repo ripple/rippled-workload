@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(dirname "$0")/../workload"
+
+echo "Checking assembler parse/reassemble round-trip..."
+uv run python -c "
+from xrpl.core.binarycodec import encode
+
+from workload import assembler
+
+ADDR = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
+KEY = '02' + '00' * 32
+SIG = 'AB' * 35
+HASH = 'CD' * 32
+IOU = {'currency': 'USD', 'issuer': ADDR, 'value': '10'}
+
+
+def _payment(amount):
+    return {
+        'TransactionType': 'Payment',
+        'Account': ADDR,
+        'Destination': ADDR,
+        'Amount': amount,
+        'Fee': '10',
+        'Sequence': 1,
+        'Flags': 0,
+        'SigningPubKey': KEY,
+        'TxnSignature': SIG,
+    }
+
+
+SAMPLES = {
+    # scalar + AccountID VL + XRP amount + Blob VL fields
+    'payment_xrp': _payment('1000000'),
+    # IOU amount objects, PathSet, and an STArray of STObjects (Memos)
+    'payment_iou_paths_memos': {
+        **_payment(IOU),
+        'SendMax': IOU,
+        'Paths': [[{'account': ADDR}], [{'currency': 'USD', 'issuer': ADDR}]],
+        'Memos': [{'Memo': {'MemoData': '48656C6C6F', 'MemoType': '74657374'}}],
+    },
+    # STArray whose elements carry full nested transactions
+    'batch': {
+        'TransactionType': 'Batch',
+        'Account': ADDR,
+        'Flags': 1,
+        'Sequence': 2,
+        'Fee': '20',
+        'SigningPubKey': KEY,
+        'RawTransactions': [
+            {'RawTransaction': _payment('1')},
+            {'RawTransaction': _payment('2')},
+        ],
+    },
+    # STArray of STObjects with a nested inner field
+    'signer_list_set': {
+        'TransactionType': 'SignerListSet',
+        'Account': ADDR,
+        'SignerQuorum': 1,
+        'Fee': '10',
+        'Sequence': 3,
+        'SigningPubKey': KEY,
+        'SignerEntries': [{'SignerEntry': {'Account': ADDR, 'SignerWeight': 1}}],
+    },
+    # Hash256 + oversized Blob (URI)
+    'nftoken_mint': {
+        'TransactionType': 'NFTokenMint',
+        'Account': ADDR,
+        'NFTokenTaxon': 0,
+        'URI': '68747470733A2F2F6578616D706C652E636F6D2F' * 3,
+        'Flags': 8,
+        'Fee': '10',
+        'Sequence': 4,
+        'SigningPubKey': KEY,
+        'PreviousTxnID': HASH,
+    },
+}
+
+failed = []
+for name, tx in SAMPLES.items():
+    blob = bytes.fromhex(encode(tx))
+    fields = assembler.parse(blob)
+    if not fields or assembler.reassemble(fields) != blob:
+        failed.append(name)
+
+if failed:
+    print('  round-trip MISMATCH:', ', '.join(failed))
+    raise SystemExit(1)
+print(f'assembler round-trip OK on {len(SAMPLES)} samples')
+"

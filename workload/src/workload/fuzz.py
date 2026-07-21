@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+
+import httpx
 from antithesis.lifecycle import send_event
 from xrpl.asyncio.clients import AsyncJsonRpcClient
+from xrpl.clients import XRPLRequestFailureException
 from xrpl.core.binarycodec.definitions.definitions import load_definitions
 from xrpl.core.binarycodec.exceptions import XRPLBinaryCodecException
 from xrpl.models.transactions.transaction import Transaction
 from xrpl.wallet import Wallet
 
-from workload import params
+from workload import params, rawfuzz
 from workload.randoms import choice, randint, random
 from workload.submit import submit_raw
 
@@ -217,18 +222,50 @@ async def submit_fuzzed(
 ) -> dict | None:
     """Fuzz a valid ``base`` and submit raw. Never raises (faulty paths must not):
     an unserializable shape emits ``workload::fuzz_skipped`` and returns None.
+
+    A ``RAW_CHANCE`` fraction escalates to the raw band when it covers ``name``.
     """
     ops: list[str] = []
+    dict_mutate: Callable[[dict], None] | None
+    encode_ctx: AbstractContextManager[None] | None
+    blob_mutate: Callable[[bytes], bytes] | None
 
-    def _mutate(d: dict) -> None:
-        ops.extend(fuzz_mutate(d))
+    escalation = rawfuzz.escalate(name, ops) if random() < rawfuzz.RAW_CHANCE else None
+    if escalation is not None:
+        dict_mutate = escalation.dict_mutate
+        encode_ctx = escalation.encode_ctx
+        blob_mutate = escalation.blob_mutate
+    else:
+        encode_ctx = None
+        blob_mutate = None
+
+        def _codec_legal(d: dict) -> None:
+            ops.extend(fuzz_mutate(d))
+
+        dict_mutate = _codec_legal
 
     try:
-        result = await submit_raw(name, base, client, wallet, _mutate)
+        result = await submit_raw(
+            name, base, client, wallet, dict_mutate, encode_ctx=encode_ctx, blob_mutate=blob_mutate
+        )
     except (XRPLBinaryCodecException, ValueError, TypeError, KeyError, OverflowError) as e:
         send_event(
             "workload::fuzz_skipped",
             {"tx_type": name, "ops": "; ".join(ops), "error": type(e).__name__},
+        )
+        return None
+    except httpx.TimeoutException as e:
+        # Node hung on the blob past xrpl-py's 10s ceiling — a DoS smell, not a build failure.
+        send_event(
+            "workload::fuzz_timeout",
+            {"tx_type": name, "ops": "; ".join(ops), "error": type(e).__name__},
+        )
+        return None
+    except XRPLRequestFailureException:
+        # Non-JSON response: the node choked rather than cleanly rejecting — crash-adjacent.
+        send_event(
+            "workload::fuzz_undecodable_response",
+            {"tx_type": name, "ops": "; ".join(ops)},
         )
         return None
     tx_hash = result.get("tx_json", {}).get("hash", "") or result.get("hash", "")
