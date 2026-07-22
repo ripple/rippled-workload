@@ -146,8 +146,13 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "LoanBrokerDelete": ("Deleted", "LoanBroker"),
     "LoanSet": ("Created", "Loan"),
     "LoanDelete": ("Deleted", "Loan"),
-    # Create/refill Modifies or Creates; TF_DELETE_OBJECT Deletes.
-    "SponsorshipSet": ("Created", "Modified", "Deleted", "Sponsorship"),
+    # SponsorshipSet is intentionally absent: rippled keys the Sponsorship by
+    # account+sponsee with no ID field in the tx, so create and update are
+    # indistinguishable from the body, and an idempotent update (refill with
+    # unchanged values) drops the byte-identical modify from metadata, leaving no
+    # Sponsorship node -- a legitimate tesSUCCESS the invariant can't tell from a
+    # regression. The _IDEMPOTENT_UPDATE_MARKER field trick (see below) needs a
+    # per-update field, which this type lacks, so the row is dropped entirely.
 }
 
 # Create-or-modify types whose UPDATE path can be a legitimate tesSUCCESS no-op:
