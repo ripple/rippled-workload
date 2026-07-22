@@ -14,8 +14,13 @@ OP_SERVER_INFO = "server_info"
 # Ripple-epoch (2000-01-01 UTC) seconds offset from Unix epoch.
 RIPPLE_EPOCH_OFFSET = 946684800
 
-# Max acceptable |network close_time - sidecar wall clock|.
-MAX_TIME_SKEW_SECS = 60
+# Max acceptable |network close_time - sidecar wall clock|. Deliberately loose: under
+# fault injection the network's consensus close_time legitimately trails the container
+# wall clock -- slow rounds, post-stall backlog catch-up, and Antithesis's own time
+# faults all shift it by seconds to a few minutes (max_stall budget ~5 min). This
+# assert only catches a pathological clock: a close_time off by hours/days/a year, the
+# unambiguous "something is badly wrong with time" signal. Reasonable drift is expected.
+MAX_TIME_SKEW_SECS = 3600
 
 
 def complete_ledgers_floor(cl: str | None) -> int | None:
