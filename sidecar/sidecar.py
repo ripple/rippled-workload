@@ -112,14 +112,12 @@ if __name__ == "__main__":
     # Tallys for state between passes
     last_index_per_validator = {}  # validator: (index, update_num_of_last_change)
     stall_episode = {}  # validator: bool -- currently inside a (soft) stall episode
-    last_good_skew = {}  # validator: update_num of last pass with acceptable close_time skew
     last_total_coins = {}  # validator: (index, total_coins) at the highest index seen
     update_num = 0
 
     for v in servers:
         last_index_per_validator[v] = (0, 0)
         stall_episode[v] = False
-        last_good_skew[v] = 0
         last_total_coins[v] = None
 
     stop_num = args.stop  # 0 to run forever
@@ -135,6 +133,9 @@ if __name__ == "__main__":
         # Unrecovered stalls: frozen past --max-stall. This is the real failure condition.
         num_unrecovered = 0
         unrecovered_validators = []
+        # Validators that closed a new ledger this pass -- the only ones with a fresh
+        # close_time to judge against wall clock.
+        advanced_validators: set[str] = set()
 
         # Make each validator call on a separate thread
         threads = {v: LedgerClosedThread(v) for v in servers}
@@ -167,6 +168,7 @@ if __name__ == "__main__":
 
             if last_idx != details["index"]:
                 # Index advanced -> the validator is making progress.
+                advanced_validators.add(v)
                 if stall_episode[v]:
                     # It was frozen and has now recovered. A recovered halt is expected
                     # under fault injection and must NOT fail any assertion.
@@ -196,9 +198,7 @@ if __name__ == "__main__":
                     # Soft stall: telemetry only. Expected while faults are active.
                     stall_episode[v] = True
                     print(
-                        f"STALLED VALIDATOR: {v} "
-                        f"Index: {details['index']} "
-                        f"Checks missed: {missed}"
+                        f"STALLED VALIDATOR: {v} Index: {details['index']} Checks missed: {missed}"
                     )
                     lifecycle.send_event(
                         "validator_stall",
@@ -251,36 +251,29 @@ if __name__ == "__main__":
                 num_unrecovered < len(servers), "ALL validators are never stalled", to_log
             )
 
+            # A ledger's close_time carries a fresh, consensus-set value only when the
+            # ledger closes. Judge each close_time once, when its ledger appears: a
+            # freshly closed ledger must be stamped within skew of wall clock, faults or
+            # not -- a manipulated close_time (malicious validator) is caught immediately.
+            # A halt closes no new ledger, so it re-presents an already-judged close_time
+            # that drifts from wall clock purely because time passes; skip it (the stall
+            # checks cover halts) instead of re-judging it, which is what made this fire
+            # on fault-induced outages.
             now_unix = int(time.time())
             for v, thr in threads.items():
-                r = thr._return
-                if r.get("status") != "success":
+                if v not in advanced_validators:
                     continue
+                r = thr._return
                 ct = r.get("ledger", {}).get("close_time")
                 if ct is None:
                     continue
                 ct_unix = int(ct) + RIPPLE_EPOCH_OFFSET
                 skew = abs(ct_unix - now_unix)
-                if skew <= MAX_TIME_SKEW_SECS:
-                    last_good_skew[v] = update_num
-                else:
-                    lifecycle.send_event(
-                        "validator_time_skew",
-                        {"validator": v, "close_time": ct, "skew_secs": skew},
-                    )
-                # close_time freezes whenever ledgers stop closing, so skew is just a
-                # symptom of a halt. Like the stall check, only fail if it persists past
-                # the recovery budget -- a halt that recovers brings close_time back too.
-                skew_intervals = update_num - last_good_skew[v]
-                evt = {
-                    "validator": v,
-                    "close_time": ct,
-                    "skew_secs": skew,
-                    "skew_intervals": skew_intervals,
-                    "budget": MAX_STALL_INTERVALS,
-                }
+                evt = {"validator": v, "close_time": ct, "skew_secs": skew}
+                if skew > MAX_TIME_SKEW_SECS:
+                    lifecycle.send_event("validator_time_skew", evt)
                 assertions.always(
-                    skew_intervals <= MAX_STALL_INTERVALS,
+                    skew <= MAX_TIME_SKEW_SECS,
                     "Validator close_time tracks wall clock",
                     evt,
                 )
