@@ -1,5 +1,7 @@
 """Payment transaction generators."""
 
+from asyncio import gather
+
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models import IssuedCurrencyAmount as IOUAmount
 from xrpl.models.amounts import MPTAmount
@@ -64,6 +66,41 @@ async def _payment_random_valid(
         return
     txn, wallet = built
     await submit_tx("Payment", txn, client, wallet)
+
+
+async def payment_fund_new(
+    accounts: dict[str, UserAccount],
+    client: AsyncJsonRpcClient,
+) -> None:
+    """State-tree bloat driver (synthetic name PaymentFundNew, on-ledger Payment):
+    fund a burst of brand-new accounts every call so each ledger grows the state SHAMap
+    with fresh AccountRoots. This widens the window in which a diverging/lagging validator
+    holds an incompletely-acquired state tree — the condition under which
+    RCLConsensus::timerEntry throws SHAMapMissingNode and aborts the process.
+
+    Distinct sources per burst: same source would autofill one Sequence for all and
+    collide (tefPAST_SEQ), creating nothing. Fired concurrently so the burst lands in
+    one open ledger for maximal per-ledger state growth.
+    Valid-only: an under-funded fund-new creates nothing, defeating the purpose."""
+    if not accounts:
+        return
+    n = min(params.fund_new_burst_count(), len(accounts))
+    srcs = sample(list(accounts), n)
+    await gather(
+        *(
+            submit_tx(
+                "PaymentFundNew",
+                Payment(
+                    account=accounts[addr].address,
+                    amount=params.new_account_funding_amount(),
+                    destination=params.fake_account(),
+                ),
+                client,
+                accounts[addr].wallet,
+            )
+            for addr in srcs
+        )
+    )
 
 
 def _iou_amount(trust_lines: list[TrustLine]) -> IOUAmount:

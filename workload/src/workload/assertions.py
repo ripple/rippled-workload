@@ -77,6 +77,8 @@ _RIPPLED_INTERNAL_ERRORS = (
 # - NFTokenCancelOffer: canceling an unknown offer id is a tesSUCCESS no-op.
 # - SponsorMalformation: every vector is a preflight tem* that never enters a ledger,
 #   so the validated failure bucket can't fill (submit-time seen + dims cover it).
+# - PaymentFundNew: routed here only when a Payment CREATES an AccountRoot (tesSUCCESS);
+#   a failed fund-new creates nothing, so no tec ever lands in this bucket.
 _NO_FAILURE_TYPES = {
     "SignerListSet",
     "MPTokenIssuanceCreate",
@@ -86,6 +88,7 @@ _NO_FAILURE_TYPES = {
     "TicketCreate",
     "NFTokenCancelOffer",
     "SponsorMalformation",
+    "PaymentFundNew",
 }
 
 # Types that effectively never succeed in this test environment:

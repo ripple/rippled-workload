@@ -37,6 +37,24 @@ def payment_amount() -> str:
     return str(randint(1_000, 10_000_000))
 
 
+def new_account_funding_amount() -> str:
+    """Strictly above this network's 10 XRP ReserveBase (genesis_ledger.json) so every
+    fund-new delivers enough to CREATE the AccountRoot — an under-delivery is
+    tecNO_DST_INSUF_XRP that creates nothing and defeats the state-bloat purpose. A
+    fresh bare AccountRoot owns no objects, so only ReserveBase applies (not the 2 XRP
+    ReserveIncrement). 11-30 XRP a pop lets a 100k-XRP account fund thousands before draining."""
+    return str(randint(11_000_000, 30_000_000))
+
+
+def fund_new_burst_count() -> int:
+    """Accounts to create per PaymentFundNew call, each from a DISTINCT source (same
+    source would reuse one Sequence and collide). A burst lands in one open ledger, so
+    the state SHAMap gains ~2N nodes at once (N created + N modified by fee debit) —
+    concentrated growth widens the SHAMapMissingNode acquisition window more than the
+    same creations spread thin. Capped at len(accounts) by the caller."""
+    return randint(3, 10)
+
+
 # ── Trust Lines & IOUs ────────────────────────────────────────────────
 CURRENCY_CODES = ["USD", "EUR", "GBP", "JPY", "BTC", "ETH", "XAU", "CNY"]
 

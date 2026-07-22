@@ -47,6 +47,7 @@ try:
         '/payment/domain/xc/random',
         '/offer/create/mpt/random',
         '/payment/mpt/random',
+        '/payment/fund_new/random',
         '/delegate/set/random',
         '/deposit_preauth/random',
         '/did/set/random',
