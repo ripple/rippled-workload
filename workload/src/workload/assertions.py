@@ -77,6 +77,12 @@ _RIPPLED_INTERNAL_ERRORS = (
 # - NFTokenCancelOffer: canceling an unknown offer id is a tesSUCCESS no-op.
 # - SponsorMalformation: every vector is a preflight tem* that never enters a ledger,
 #   so the validated failure bucket can't fill (submit-time seen + dims cover it).
+# - OfferCancel: same -- canceling a missing/foreign OfferSequence is a tesSUCCESS
+#   no-op; the only other results are temBAD_SEQUENCE (tem, no validate) and an
+#   LCOV-excluded tefINTERNAL. No tec is reachable (OfferCancel.cpp).
+# - Batch: the outer container returns no tec at all -- structural violations are
+#   preflight tem (no validate) and inner-tx failures revert per batch mode while
+#   the outer stays tesSUCCESS (Batch.cpp has zero tec codes).
 _NO_FAILURE_TYPES = {
     "SignerListSet",
     "MPTokenIssuanceCreate",
@@ -86,6 +92,8 @@ _NO_FAILURE_TYPES = {
     "TicketCreate",
     "NFTokenCancelOffer",
     "SponsorMalformation",
+    "OfferCancel",
+    "Batch",
 }
 
 # Types that effectively never succeed in this test environment:
@@ -111,6 +119,7 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     # Verified against rippled transactors: each touches its entry on every
     # tesSUCCESS. Create-or-update txns list both ops (new → Created, existing →
     # Modified); NFTokenMint places into a new page (Created) or existing (Modified).
+    # Exception: types in _IDEMPOTENT_UPDATE_MARKER can no-op on an unchanged update.
     "EscrowCreate": ("Created", "Escrow"),
     "EscrowFinish": ("Deleted", "Escrow"),
     "EscrowCancel": ("Deleted", "Escrow"),
@@ -139,6 +148,16 @@ _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
     "LoanDelete": ("Deleted", "Loan"),
     # Create/refill Modifies or Creates; TF_DELETE_OBJECT Deletes.
     "SponsorshipSet": ("Created", "Modified", "Deleted", "Sponsorship"),
+}
+
+# Create-or-modify types whose UPDATE path can be a legitimate tesSUCCESS no-op:
+# re-submitting unchanged data makes rippled drop the byte-identical modify from
+# metadata (ApplyStateTable.cpp: identical ModifiedNode is skipped), so no entry
+# node appears. Keyed by the tx field marking an update -- absent means a create,
+# which always inserts the entry. The meta invariant is enforced on creates only;
+# an update no-op carries no sound signal (indistinguishable from a regression).
+_IDEMPOTENT_UPDATE_MARKER: dict[str, str] = {
+    "PermissionedDomainSet": "DomainID",
 }
 
 # XRPL fields → normalized event keys; only object identifiers, for tracking.
@@ -708,8 +727,11 @@ def tx_result(name: str, result: dict) -> None:
     # On tesSUCCESS, verify the expected ledger entry operations. Skip inner-batch
     # txns: effects consolidate into the outer Batch's meta, so their own may be empty.
     exp = _META_EXPECTATIONS.get(name)
+    marker = _IDEMPOTENT_UPDATE_MARKER.get(name)
+    is_noop_update = marker is not None and marker in tx_json
     if (
         exp
+        and not is_noop_update
         and engine_result == "tesSUCCESS"
         and not (int(tx_json.get("Flags", 0)) & _TF_INNER_BATCH_TXN)
     ):
