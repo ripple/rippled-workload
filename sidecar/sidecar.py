@@ -9,12 +9,23 @@ from antithesis import assertions, lifecycle
 
 # Opcodes
 OP_LEDGER = "ledger"
+OP_SERVER_INFO = "server_info"
 
 # Ripple-epoch (2000-01-01 UTC) seconds offset from Unix epoch.
 RIPPLE_EPOCH_OFFSET = 946684800
 
 # Max acceptable |network close_time - sidecar wall clock|.
 MAX_TIME_SKEW_SECS = 60
+
+
+def complete_ledgers_floor(cl: str | None) -> int | None:
+    """Lower bound of a complete_ledgers range like '256-512' or '256-400,410-512'."""
+    if not cl or cl in ("empty", "unknown"):
+        return None
+    try:
+        return int(cl.split(",")[0].split("-")[0])
+    except (ValueError, AttributeError):
+        return None
 
 
 def to_url(ip: str) -> str:
@@ -30,6 +41,7 @@ class LedgerClosedThread(Thread):
     def __init__(self, validator: str) -> None:
         super().__init__(None, None, validator, None, None)
         self._return = None
+        self._complete_ledgers = None
         self.validator = validator
 
     def run(self) -> None:
@@ -50,6 +62,19 @@ class LedgerClosedThread(Thread):
             result = {"exception": str(err), "status": "exception"}
 
         self._return = result
+        self._complete_ledgers = self._fetch_complete_ledgers()
+
+    def _fetch_complete_ledgers(self) -> str | None:
+        """Read the node's retained-ledger range to observe online_delete pruning."""
+        req = request.Request(
+            to_url(self.validator),
+            data=json.dumps({"method": OP_SERVER_INFO, "params": [{}]}).encode(),
+        )
+        try:
+            data = json.loads(request.urlopen(req, timeout=2).read())
+            return data["result"]["info"].get("complete_ledgers")
+        except Exception:
+            return None
 
 
 #
@@ -113,12 +138,16 @@ if __name__ == "__main__":
     last_index_per_validator = {}  # validator: (index, update_num_of_last_change)
     stall_episode = {}  # validator: bool -- currently inside a (soft) stall episode
     last_total_coins = {}  # validator: (index, total_coins) at the highest index seen
+    baseline_floor = {}  # validator: first complete_ledgers lower bound seen
+    max_floor = {}  # validator: highest lower bound seen (rotation-event dedup)
     update_num = 0
 
     for v in servers:
         last_index_per_validator[v] = (0, 0)
         stall_episode[v] = False
         last_total_coins[v] = None
+        baseline_floor[v] = None
+        max_floor[v] = None
 
     stop_num = args.stop  # 0 to run forever
 
@@ -242,6 +271,35 @@ if __name__ == "__main__":
             "max_stall_intervals": MAX_STALL_INTERVALS,
         }
         lifecycle.send_event("val_health", to_log)
+
+        # online_delete: a full-history node keeps genesis forever, so its
+        # complete_ledgers lower bound never rises. Any rise above the first value seen
+        # proves NuDB rotation ran and pruned -- reachable at rotation 1 (~ledger 258),
+        # no threshold. sometimes(), not always(): a short run may never rotate; only a
+        # whole (long) run that never observes it means the config broke.
+        rotated_any = False
+        rot_evt: dict = {}
+        for v in servers:
+            floor = complete_ledgers_floor(threads[v]._complete_ledgers)
+            if floor is None:
+                continue
+            if baseline_floor[v] is None:
+                baseline_floor[v] = floor
+                max_floor[v] = floor
+            elif floor > max_floor[v]:
+                lifecycle.send_event(
+                    "online_delete_rotation",
+                    {"validator": v, "ledger_floor": floor, "baseline_floor": baseline_floor[v]},
+                )
+                max_floor[v] = floor
+            if floor > baseline_floor[v]:
+                rotated_any = True
+                rot_evt = {
+                    "validator": v,
+                    "ledger_floor": floor,
+                    "baseline_floor": baseline_floor[v],
+                }
+        assertions.sometimes(rotated_any, "online_delete rotation observed", rot_evt)
 
         if num_reporting > 0:
             # A fault-induced halt that recovers within the budget never trips these.

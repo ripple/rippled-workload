@@ -26,9 +26,17 @@ protocol = ws
 [node_db]
 type = NuDB
 path = /var/lib/xrpld/db/nudb
+% if online_delete:
+online_delete = ${online_delete}
+advisory_delete = 0
+% endif
 
 [ledger_history]
+% if online_delete:
+${online_delete}
+% else:
 full
+% endif
 
 [database_path]
 /var/lib/xrpld/db
