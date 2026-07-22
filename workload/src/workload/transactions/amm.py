@@ -643,8 +643,10 @@ def _amm_withdraw_base(
     if not accounts or not amms:
         return None
     amm = choice(amms)
-    src = choice(list(accounts.values()))
-    if len(amm.assets) < 2:
+    # Withdraw needs the account to hold this AMM's LP tokens; only the creator
+    # reliably does. A random account holds none -> the withdraw can't succeed.
+    src = accounts.get(amm.account)
+    if src is None or len(amm.assets) < 2:
         return None
     asset1, asset2 = amm.assets[0], amm.assets[1]
     mode = choice(
