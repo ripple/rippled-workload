@@ -7,6 +7,7 @@
 #network_file = ""
 
 #[node_config]
+#online_delete = 256  # 0 disables NuDB rotation on validators
 #[node_config.ports]
 #rpc_admin_local = 5005
 #peer = 2459

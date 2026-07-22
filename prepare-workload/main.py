@@ -71,6 +71,7 @@ def write_fuzzer_config(settings, num_validators, validator_public_keys, isolate
         "validator_public_keys": "\n".join(validator_public_keys),
         "validation_seed": isolated_validator_keys["master_seed"],
         "voting": settings.node_config.voting,
+        "online_delete": settings.node_config.online_delete,
     }
 
     template = Template(filename=str(isolated_validator_config_template))
@@ -104,6 +105,7 @@ def write_config(node_data, settings):
         "node_config_template": s.node_config_template,
         "validator_public_keys": "\n".join(s.validator_public_keys),
         "ips_fixed": "\n".join(ips_fixed),
+        "online_delete": node.online_delete,
         **node_data,
     }
     if is_validator:

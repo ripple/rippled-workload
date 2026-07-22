@@ -94,6 +94,10 @@ def get_settings(**overrides):
         },
         # Specific node instance configs
         "node_config": {
+            # Ledgers a fault-exposed validator keeps online before NuDB rotation
+            # (SHAMapStore). 0 disables. 256 is rippled's hard networked minimum and
+            # the only small legal value; ledger_history is pinned to match.
+            "online_delete": 256,
             "ports": {
                 "rpc_admin_local": 5005,
                 "peer": 2459,
