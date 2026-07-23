@@ -147,3 +147,9 @@ Caveat: `sometimes(success)` + `conf_mpt_version_monotonic` only fire against an
 
 ### Randomness & specs
 All randomness via `workload.randoms` (`AntithesisRandom`); generators in `params.py`, never hardcode. Tx docs: `xrpl.org/docs/references/protocol/transactions/types/<name>`; specs: `github.com/XRPLF/XRPL-Standards` `XLS-NNNN-<name>/`.
+
+## Crash diagnostics (xrpld image)
+
+`xrpld` is an unstripped Debug build with full DWARF (`/symbols/xrpld`). Debug a crash in an MVD session: rewind to the crash moment and attach gdb to the live replayed process (`thread apply all bt`), or `gcore` it. No on-disk core is needed: the replay is the source of truth, Antithesis captures cores externally, and in-guest `core_pattern` isn't reachable.
+
+Gotcha: `gdb-add-index` (`Dockerfile.xrpld`, runtime stage) embeds a `.gdb_index` into the binaries at build time. Without it gdb rebuilds its symbol table by scanning ~600 MB of DWARF at every startup (minutes), overrunning the MVD command window; with it gdb loads in seconds. `binutils` provides the `objcopy` it uses.

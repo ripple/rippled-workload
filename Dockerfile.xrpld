@@ -175,7 +175,21 @@ RUN mkdir -p /symbols && \
     ln -s /opt/fuzzer/bin/rippled-fuzzer /symbols/rippled-fuzzer
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb iproute2 && rm -rf /var/lib/apt/lists/*
+# gdb opens a core / attaches to a live process to produce a symbolized backtrace
+# in MVD; binutils supplies objcopy (used by gdb-add-index below) plus objdump/
+# readelf as gdb companions. The xrpld binary ships full DWARF + symtab (unstripped
+# Debug build), so no separate symbol package is needed.
+RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb binutils iproute2 && rm -rf /var/lib/apt/lists/*
+
+# Embed a .gdb_index in the binaries (gdb-add-index ships with gdb; it uses objcopy
+# from binutils). Without it, gdb rebuilds its symbol table by scanning ~600 MB of
+# DWARF at startup -- significant CPU and memory that, on a resource-constrained MVD
+# VM, can overrun the debug-session command window; the index lets gdb jump straight
+# to the units it needs. One-time build cost (the scan happens here); the /symbols/*
+# links resolve to these same files.
+RUN set -ex; \
+    gdb-add-index /opt/xrpld/bin/xrpld; \
+    gdb-add-index /opt/fuzzer/bin/rippled-fuzzer
 
 # Create fuzzer config directory and xrpld directories
 RUN mkdir -p /etc/fuzzer /var/lib/xrpld/db /var/log/xrpld
