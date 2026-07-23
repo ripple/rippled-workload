@@ -3,11 +3,6 @@
     container_name: ${container_name}
     hostname: ${hostname}
     init: true
-    # Enable core dumps for the fuzzer + its isolated xrpld (matches service.yml.mako).
-    ulimits:
-      core:
-        soft: -1
-        hard: -1
     entrypoint: ["/bin/bash", "/opt/fuzzer/fuzzer-entrypoint.sh"]
     environment:
       - NUM_REAL_PEERS=${num_real_peers}

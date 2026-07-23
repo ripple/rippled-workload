@@ -156,35 +156,11 @@ EOF
 RUN curl -fsSL https://antithesis.com/assets/instrumentation/libvoidstar.so \
     -o /root/libvoidstar.so
 
-# Build the LD_PRELOAD crash handler against the boost headers already resolved
-# in the conan cache by the xrpld install above. Header-only (addr2line backend →
-# only boost headers + -ldl needed, no boost libs). Static libstdc++/libgcc to
-# match rippled (-static-libstdc++) so the preload doesn't drag a second dynamic
-# C++ runtime into the process.
-COPY crash-handler/crash_handler.cpp /root/crash-handler/crash_handler.cpp
-RUN <<EOF
-    set -ex
-    CONAN_HOME=$(conan config home)
-    BOOST_VER_HPP=$(find "${CONAN_HOME}" -path '*/boost/version.hpp' | head -1)
-    BOOST_INC=$(dirname "$(dirname "${BOOST_VER_HPP}")")
-    [ -d "${BOOST_INC}/boost" ]
-    mkdir -p /opt/crash
-    clang++ -std=c++20 -O2 -g -fPIC -shared \
-        -I"${BOOST_INC}" \
-        -DBOOST_STACKTRACE_USE_ADDR2LINE \
-        -DBOOST_STACKTRACE_ADDR2LINE_LOCATION=/usr/bin/addr2line \
-        -static-libstdc++ -static-libgcc \
-        -o /opt/crash/crash_handler.so \
-        /root/crash-handler/crash_handler.cpp \
-        -ldl
-EOF
-
 # Runtime stage
 FROM ubuntu:${CODENAME}
 
 COPY --from=build /opt/xrpld /opt/xrpld
 COPY --from=build /opt/fuzzer /opt/fuzzer
-COPY --from=build /opt/crash /opt/crash
 COPY --from=build /root/libvoidstar.so /usr/lib/libvoidstar.so
 COPY --from=build /root/xrpld.txt /opt/xrpld/bin/xrpld.git-commit.txt
 
@@ -199,24 +175,24 @@ RUN mkdir -p /symbols && \
     ln -s /opt/fuzzer/bin/rippled-fuzzer /symbols/rippled-fuzzer
 
 ENV DEBIAN_FRONTEND=noninteractive
-# gdb + binutils (addr2line/objdump/nm/readelf) + elfutils (eu-stack) + file let
-# us open a core or symbolize a crash *inside* the container. The xrpld binary
-# ships full DWARF + symtab (unstripped Debug build), so no separate symbol
-# package is needed — these are just the tools to read it.
-RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb binutils elfutils file iproute2 && rm -rf /var/lib/apt/lists/*
+# gdb opens a core / attaches to a live process to produce a symbolized backtrace
+# in MVD; binutils supplies objcopy (used by gdb-add-index below) plus objdump/
+# readelf as gdb companions. The xrpld binary ships full DWARF + symtab (unstripped
+# Debug build), so no separate symbol package is needed.
+RUN set -ex; apt-get update && apt-get install --yes curl jq procps gdb binutils iproute2 && rm -rf /var/lib/apt/lists/*
 
-# Create fuzzer config directory and xrpld directories (cores/ receives core
-# dumps when a crash occurs; core dumps are enabled via the compose `ulimits`).
-RUN mkdir -p /etc/fuzzer /var/lib/xrpld/db /var/log/xrpld /var/log/xrpld/cores
+# Embed a .gdb_index in the binaries (gdb-add-index ships with gdb; it uses objcopy
+# from binutils). Without it, gdb rebuilds its symbol table by scanning ~600 MB of
+# DWARF at startup -- significant CPU and memory that, on a resource-constrained MVD
+# VM, can overrun the debug-session command window; the index lets gdb jump straight
+# to the units it needs. One-time build cost (the scan happens here); the /symbols/*
+# links resolve to these same files.
+RUN set -ex; \
+    gdb-add-index /opt/xrpld/bin/xrpld; \
+    gdb-add-index /opt/fuzzer/bin/rippled-fuzzer
 
-# Install the crash handler process-wide via ld.so.preload (not an LD_PRELOAD env
-# in an entrypoint): it loads into every dynamically-linked process in this image
-# regardless of how the service starts. Validators and the tracking-node peer run
-# `/opt/xrpld/bin/xrpld` directly with a bare `command:` and never execute
-# fuzzer-entrypoint.sh, so an entrypoint-only preload would miss them. ld.so.preload
-# also composes with any LD_PRELOAD the platform injects (e.g. libvoidstar) rather
-# than being clobbered by a runtime env setting.
-RUN echo /opt/crash/crash_handler.so > /etc/ld.so.preload
+# Create fuzzer config directory and xrpld directories
+RUN mkdir -p /etc/fuzzer /var/lib/xrpld/db /var/log/xrpld
 
 # Copy entrypoint script
 COPY fuzzer-entrypoint.sh /opt/fuzzer/fuzzer-entrypoint.sh
