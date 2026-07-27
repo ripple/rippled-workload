@@ -124,6 +124,10 @@ class MPTokenIssuance:
     can_transfer: bool = False
     require_auth: bool = False
     locked: bool = False
+    # XLS-0094: create-time MutableFlags bitmask (tmfMPT*, opt-in model); 0 = fully
+    # immutable issuance. A set bit declares that a flag/field may later be
+    # enabled/mutated via MPTokenIssuanceSet.
+    mutable_flags: int = 0
     holders: set[str] = field(default_factory=set)
 
 

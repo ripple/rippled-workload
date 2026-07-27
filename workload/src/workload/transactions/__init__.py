@@ -77,8 +77,14 @@ from workload.transactions.lending import (
     loan_pay,
     loan_set,
 )
-from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
+from workload.transactions.mpt import (
+    mpt_authorize,
+    mpt_create,
+    mpt_destroy,
+    mpt_issuance_set,
+)
 from workload.transactions.mpt_dex import offer_create_mpt, payment_mpt
+from workload.transactions.mpt_dynamic import mpt_issuance_set_dynamic
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -287,6 +293,9 @@ def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
             require_auth=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH)),
             # lock state set later by setup, not at create
             locked=False,
+            # XLS-0094: create-time MutableFlags (tmfMPT*, opt-in). 0 ⇒ fully
+            # immutable; a set bit declares a flag/field may later be enabled/mutated.
+            mutable_flags=int(tx.get("MutableFlags", 0) or 0),
         )
         w.mpt_issuances.append(issuance)
 
@@ -1095,6 +1104,17 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         "MPTokenIssuanceSet",
         "/mpt/set/random",
         mpt_issuance_set,
+        lambda w: (w.accounts, w.mpt_issuances, w.client),
+        None,
+    ),
+    # DynamicMPTSet (XLS-0094): synthetic name; on-ledger type stays
+    # MPTokenIssuanceSet (mutation carries MutableFlags set-enable bits,
+    # MPTokenMetadata, or TransferFee). ws_listener fires tx_result for this
+    # bucket; no separate updater.
+    (
+        "DynamicMPTSet",
+        "/mpt/set/dynamic/random",
+        mpt_issuance_set_dynamic,
         lambda w: (w.accounts, w.mpt_issuances, w.client),
         None,
     ),

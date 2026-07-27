@@ -136,6 +136,17 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
     elif tx_type == "SponsorshipTransfer" and not tx.get("ObjectID"):
         tx_result("SponsorshipTransferAccount", result)
 
+    # Dynamic MPT (XLS-0094): a mutating MPTokenIssuanceSet carries MutableFlags
+    # set-enable bits, MPTokenMetadata, or TransferFee (rippled's `isMutate`),
+    # distinct from the lock/unlock Flags path and confidential key registration —
+    # route it to DynamicMPTSet.
+    if tx_type == "MPTokenIssuanceSet" and (
+        tx.get("MutableFlags") is not None
+        or tx.get("MPTokenMetadata") is not None
+        or tx.get("TransferFee") is not None
+    ):
+        tx_result("DynamicMPTSet", result)
+
     if engine_result == "tesSUCCESS":
         if tx_type in _RESERVE_SPONSOR_TX_TYPES:
             _on_reserve_sponsored_create(workload, tx, meta)
