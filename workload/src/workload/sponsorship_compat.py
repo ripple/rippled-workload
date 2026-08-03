@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import xrpl.models.transactions as _models
 from xrpl.core.binarycodec.definitions import definitions as _defs
 from xrpl.core.binarycodec.definitions.field_header import FieldHeader
 from xrpl.core.binarycodec.definitions.field_info import FieldInfo
@@ -71,3 +72,11 @@ class SponsorshipSet(_UpstreamSponsorshipSet):
     remaining_owner_count_delta: Optional[int] = None  # noqa: UP045
     """Owner-reserve count added to the Sponsorship (delta; non-zero,
     positive on create; negative clamps at zero on update)."""
+
+
+# autofill/sign round-trip every tx through Transaction.from_dict, which
+# resolves the class by live getattr on this module namespace — without this
+# rebind it lands on the upstream class and rejects the delta kwargs
+# ("fee_amount_delta not a valid parameter", the exact failure of run
+# 3a5d2846..): a plain subclass is invisible to that lookup.
+_models.SponsorshipSet = SponsorshipSet
