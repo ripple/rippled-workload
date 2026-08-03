@@ -45,7 +45,6 @@ from xrpl.models.transactions import (
     NFTokenMintFlag,
     Payment,
     PermissionedDomainSet,
-    SponsorshipSet,
     TicketCreate,
     Transaction,
     TrustSet,
@@ -63,6 +62,7 @@ from workload import params
 from workload.assertions import assert_no_internal_error_submit
 from workload.models import ConfidentialHolder, ConfidentialMPTIssuance, UserAccount
 from workload.sequence import SequenceTracker
+from workload.sponsorship_compat import SponsorshipSet
 from workload.submit import submit_tx
 
 # ── Constants ───────────────────────────────────────────────────────────
@@ -710,8 +710,8 @@ async def _setup_sponsorships(
             flags |= _TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_FEE
         if req_reserve:
             flags |= _TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_RESERVE
-        fee_amount = params.sponsorship_fee_amount() if mode in ("fee", "both") else None
-        remaining_owner_count = (
+        fee_delta = params.sponsorship_fee_amount() if mode in ("fee", "both") else None
+        count_delta = (
             max(5, params.sponsorship_reserve_count()) if mode in ("reserve", "both") else None
         )
         txns.append(
@@ -720,9 +720,9 @@ async def _setup_sponsorships(
                 SponsorshipSet(
                     account=sponsor.address,
                     sponsee=sponsee.address,
-                    fee_amount=fee_amount,
-                    max_fee=params.sponsorship_max_fee() if fee_amount else None,
-                    remaining_owner_count=remaining_owner_count,
+                    fee_amount_delta=fee_delta,
+                    max_fee=params.sponsorship_max_fee() if fee_delta else None,
+                    remaining_owner_count_delta=count_delta,
                     flags=flags,
                 ),
                 sponsor.wallet,
@@ -843,9 +843,9 @@ async def _setup_cross_resource(
                     SponsorshipSet(
                         account=funded.address,
                         sponsee=r.address,
-                        fee_amount=params.sponsorship_fee_amount(),
+                        fee_amount_delta=params.sponsorship_fee_amount(),
                         max_fee=params.sponsorship_max_fee(),
-                        remaining_owner_count=max(5, params.sponsorship_reserve_count()),
+                        remaining_owner_count_delta=max(5, params.sponsorship_reserve_count()),
                     ),
                     funded.wallet,
                 )
@@ -856,8 +856,8 @@ async def _setup_cross_resource(
         else None
     )
     if exhausted is not None:
-        # Omitting remaining_owner_count -> RemainingOwnerCount 0: a valid fee-only
-        # Sponsorship that a reserve-flag tx drains to tecINSUFFICIENT_RESERVE.
+        # Omitting remaining_owner_count_delta -> RemainingOwnerCount 0: a valid
+        # fee-only Sponsorship that a reserve-flag tx drains to tecINSUFFICIENT_RESERVE.
         for r in rich[:_CROSS_RESOURCE_EXHAUSTED_COUNT]:
             sponsor_txns.append(
                 (
@@ -865,7 +865,7 @@ async def _setup_cross_resource(
                     SponsorshipSet(
                         account=exhausted.address,
                         sponsee=r.address,
-                        fee_amount=params.sponsorship_fee_amount(),
+                        fee_amount_delta=params.sponsorship_fee_amount(),
                     ),
                     exhausted.wallet,
                 )
