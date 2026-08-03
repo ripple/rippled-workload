@@ -30,7 +30,6 @@ from xrpl.models.requests.ledger_entry import Sponsorship as LedgerEntrySponsors
 from xrpl.models.transactions import (
     Payment,
     PaymentFlag,
-    SponsorshipSet,
     SponsorshipSetFlag,
     SponsorshipTransfer,
 )
@@ -49,7 +48,8 @@ from workload.models import (
     TrustLine,
     UserAccount,
 )
-from workload.randoms import choice, random, sample
+from workload.randoms import choice, randint, random, sample
+from workload.sponsorship_compat import SponsorshipSet
 from workload.submit import submit_raw, submit_tx
 
 # Populated by _payment_sponsored_account_valid, consumed by the "Payment" real-type
@@ -269,9 +269,9 @@ def _sponsorship_set_base(
     txn = SponsorshipSet(
         account=sponsor.address,
         sponsee=sponsee_addr,
-        fee_amount=params.sponsorship_fee_amount(),
+        fee_amount_delta=params.sponsorship_fee_amount(),
         max_fee=params.sponsorship_max_fee(),
-        remaining_owner_count=params.sponsorship_reserve_count(),
+        remaining_owner_count_delta=params.sponsorship_reserve_count(),
         flags=params.sponsorship_set_flags(),
     )
     return txn, sponsor.wallet
@@ -303,6 +303,8 @@ async def _sponsorship_set_faulty(
             "delete_with_fields",
             "delete_nonexistent",
             "nonexistent_sponsee",
+            "zero_delta",
+            "negative_count_delta",
         ]
     )
 
@@ -360,6 +362,34 @@ async def _sponsorship_set_faulty(
         await submit_tx("SponsorshipSet", txn, client, accounts[sponsor_addr].wallet)
         return
 
+    if mutation == "zero_delta":
+        # A present-but-zero delta: FeeAmountDelta -> temBAD_AMOUNT,
+        # RemainingOwnerCountDelta -> temINVALID.
+        sponsor_addr, sponsee_addr = sample(list(accounts), 2)
+        zero_fee = random() < 0.5
+        txn = SponsorshipSet(
+            account=sponsor_addr,
+            sponsee=sponsee_addr,
+            fee_amount_delta="0" if zero_fee else None,
+            remaining_owner_count_delta=None if zero_fee else 0,
+        )
+        await submit_tx("SponsorshipSet", txn, client, accounts[sponsor_addr].wallet)
+        return
+
+    if mutation == "negative_count_delta":
+        # Negative delta on a fresh pair takes the create path, where deltas
+        # must be positive -> tecNO_PERMISSION; on the rare tracked pair it
+        # legitimately clamps at zero instead. (A negative FeeAmountDelta is
+        # out of reach: xrpl-py's codec can't encode negative XRP amounts.)
+        sponsor_addr, sponsee_addr = sample(list(accounts), 2)
+        txn = SponsorshipSet(
+            account=sponsor_addr,
+            sponsee=sponsee_addr,
+            remaining_owner_count_delta=-randint(1, 20),
+        )
+        await submit_tx("SponsorshipSet", txn, client, accounts[sponsor_addr].wallet)
+        return
+
     # nonexistent_sponsee: syntactically valid AccountID, absent from the
     # ledger -> tecNO_DST (rippled's actual code; the draft spec says
     # terNO_ACCOUNT, see Sponsor_test.cpp).
@@ -367,7 +397,7 @@ async def _sponsorship_set_faulty(
     txn = SponsorshipSet(
         account=sponsor.address,
         sponsee=params.fake_account(),
-        fee_amount=params.sponsorship_fee_amount(),
+        fee_amount_delta=params.sponsorship_fee_amount(),
     )
     await submit_tx("SponsorshipSet", txn, client, sponsor.wallet)
 
@@ -456,7 +486,7 @@ async def _sponsorship_set_delete_faulty(
         if mutation == "delete_with_extra_flag":
             d["Flags"] = d.get("Flags", 0) | params.TF_SPONSORSHIP_SET_REQUIRE_SIGN_FOR_FEE
         else:  # delete_with_fields
-            d["FeeAmount"] = params.sponsorship_fee_amount()
+            d["FeeAmountDelta"] = params.sponsorship_fee_amount()
 
     await submit_raw("SponsorshipSetDelete", base, client, wallet, _mutate)
 

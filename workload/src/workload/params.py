@@ -538,7 +538,8 @@ def sponsored_account_amount() -> str:
 
 
 def sponsorship_fee_amount() -> str:
-    """XRP drops funding the Sponsorship's fee bucket (0.1-50 XRP)."""
+    """XRP drops added to the Sponsorship's fee bucket (0.1-50 XRP); a delta
+    since 3.3.0-rc5, and rippled rejects a present-but-zero delta."""
     return str(randint(100_000, 50_000_000))
 
 
@@ -550,8 +551,10 @@ def sponsorship_max_fee() -> str | None:
 
 
 def sponsorship_reserve_count() -> int:
-    """RemainingOwnerCount: how many object reserves the sponsor still covers."""
-    return randint(0, 20)
+    """Object reserves added to the Sponsorship's budget. A delta since
+    3.3.0-rc5: zero is temINVALID when present, so start at 1 (the curated
+    zero_delta vector covers zero deliberately)."""
+    return randint(1, 20)
 
 
 def sponsor_flags() -> int:
