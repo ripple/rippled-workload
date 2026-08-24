@@ -37,7 +37,7 @@ from xrpl.models.transactions import (
     MPTokenAuthorize,
     MPTokenIssuanceCreate,
     MPTokenIssuanceCreateFlag,
-    MPTokenIssuanceCreateMutableFlag,
+    MPTokenIssuanceImmutableFlag,
     MPTokenIssuanceSet,
     MPTokenIssuanceSetFlag,
     NFTokenCreateOffer,
@@ -100,24 +100,25 @@ _GATEWAYS = [
 _HOLDER_RANGE = range(62, 72)  # accounts[62..71]
 _VAULT_RANGE = range(10, 17)  # accounts[10..16]
 
-# Dynamic MPT (XLS-0094): opt-in mutable cohort created with create-time
-# MutableFlags declaring every capability as enable-able + metadata/fee mutable,
-# on indices unused elsewhere.
+# Dynamic MPT (XLS-0094): mutable cohort created with NO ImmutableFlags, so it
+# stays fully mutable (every capability enable-able + metadata/fee mutable), on
+# indices unused elsewhere.
 _DYNAMIC_MPT_RANGE = range(53, 56)  # accounts[53..55]
-# Immutable cohort: created with NO MutableFlags, so every later flag-enable /
-# metadata / transfer-fee mutation must fail with tecNO_PERMISSION.
+# Immutable cohort: created with every ImmutableFlags bit set, so every later
+# flag-enable / metadata / transfer-fee mutation must fail with tecNO_PERMISSION.
 _IMMUTABLE_MPT_RANGE = range(56, 59)  # accounts[56..58]
-# Opt-in create-time MutableFlags for the mutable cohort: declare every
-# capability enable-able + metadata/transfer-fee mutable.
-_DYNAMIC_MUTABLE_FLAGS = (
-    MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_ENABLE_CAN_LOCK
-    | MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_ENABLE_REQUIRE_AUTH
-    | MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_ENABLE_CAN_ESCROW
-    | MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_ENABLE_CAN_TRADE
-    | MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_ENABLE_CAN_TRANSFER
-    | MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_ENABLE_CAN_CLAWBACK
-    | MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_MUTATE_METADATA
-    | MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_MUTATE_TRANSFER_FEE
+# Opt-out create-time ImmutableFlags for the immutable cohort: freeze every
+# capability + metadata + transfer-fee so no later mutation can stick.
+_DYNAMIC_IMMUTABLE_FLAGS = (
+    MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_LOCK
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_REQUIRE_AUTH
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_ESCROW
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_TRADE
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_TRANSFER
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_CLAWBACK
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_HOLD_CONFIDENTIAL_BALANCE
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_METADATA
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_TRANSFER_FEE
 )
 
 # Confidential MPT (XLS-0096): issuers + holders on indices unused elsewhere.
@@ -1117,13 +1118,12 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 4b. Dynamic MPT (XLS-0094) cohorts ──────────────────────────
-    # XLS-0094 is opt-in: an issuance is immutable unless a create-time
-    # MutableFlags (tmfMPT*) bit declares a capability/field as mutable. The
-    # mutable cohort (53-55) declares every CAN_ENABLE_* bit plus
-    # CAN_MUTATE_METADATA/CAN_MUTATE_TRANSFER_FEE, so every later flag-enable /
-    # metadata / TransferFee mutation passes preclaim; base CanTransfer lets
-    # fee>0 mutations stick and CanLock keeps the regular lock/unlock Set path
-    # reachable on this cohort. The immutable cohort (56-58) sends NO MutableFlags
+    # XLS-0094 is opt-out: an issuance is fully mutable unless a create-time
+    # ImmutableFlags (tifMPT*) bit permanently freezes a capability/field. The
+    # mutable cohort (53-55) sends NO ImmutableFlags, so every later flag-enable /
+    # metadata / TransferFee mutation passes preclaim; base CanTransfer lets fee>0
+    # mutations stick and CanLock keeps the regular lock/unlock Set path reachable
+    # on this cohort. The immutable cohort (56-58) freezes every ImmutableFlags bit
     # so every mutation reliably draws tecNO_PERMISSION.
     summary["dynamic_mpt_issuances"] = await _run_phase(
         workload,
@@ -1134,7 +1134,6 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 MPTokenIssuanceCreate(
                     account=accs[i].address,
                     flags=_LOCK | _XFER,
-                    mutable_flags=_DYNAMIC_MUTABLE_FLAGS,
                 ),
                 accs[i].wallet,
             )
@@ -1153,6 +1152,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                 MPTokenIssuanceCreate(
                     account=accs[i].address,
                     flags=_LOCK | _XFER,
+                    immutable_flags=_DYNAMIC_IMMUTABLE_FLAGS,
                 ),
                 accs[i].wallet,
             )
@@ -1161,6 +1161,16 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         ],
         _mpt_issuance_exists,
     )
+
+    # Mark the DynamicMPT setup cohorts so the DynamicMPTSet handlers only mutate
+    # these issuances, never the regular MPT cohorts [0..5] (whose flag/metadata
+    # state other MPT DEX/AMM + XLS-82 fault gates depend on).
+    _dynamic_addrs = {
+        accs[i].address for i in (*_DYNAMIC_MPT_RANGE, *_IMMUTABLE_MPT_RANGE) if i < len(accs)
+    }
+    for mpt in workload.mpt_issuances:
+        if mpt.issuer in _dynamic_addrs:
+            mpt.dynamic = True
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
     mpt_auth_txns = []

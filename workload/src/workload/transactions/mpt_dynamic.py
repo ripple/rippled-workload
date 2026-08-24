@@ -1,21 +1,20 @@
 """Dynamic MPT (XLS-0094): DynamicMPTSet submitted as MPTokenIssuanceSet.
 
-The model is opt-in: an issuance is immutable unless a create-time MutableFlags
-(tmfMPT*) bit declares a capability/field as mutable. A mutating
-MPTokenIssuanceSet then either enables a capability via a MutableFlags set-enable
-bit (each requires the matching CAN_ENABLE_* declared at create), rewrites
-MPTokenMetadata (requires CAN_MUTATE_METADATA), or sets TransferFee (requires
-CAN_MUTATE_TRANSFER_FEE and an already-enabled CanTransfer). All three ride the
-typed xrpl-py fields; only the oversize-metadata malformation needs submit_raw.
+Under DynamicMPT an issuance is mutable by default; a create-time ImmutableFlags
+(tifMPT*) bit permanently freezes a capability/field. A mutating
+MPTokenIssuanceSet then either enables a capability via a set-enable bit in the
+Flags field (MPTokenIssuanceSetFlag.TF_MPT_SET_*), rewrites MPTokenMetadata, or
+sets TransferFee (fee>0 needs CanTransfer already enabled at issuance). All three
+ride the typed xrpl-py fields; only the oversize-metadata malformation needs
+submit_raw.
 """
 
 from __future__ import annotations
 
 from xrpl.asyncio.clients import AsyncJsonRpcClient
 from xrpl.models.transactions import (
-    MPTokenIssuanceCreateMutableFlag,
     MPTokenIssuanceSet,
-    MPTokenIssuanceSetMutableFlag,
+    MPTokenIssuanceSetFlag,
 )
 from xrpl.wallet import Wallet
 
@@ -25,36 +24,34 @@ from workload.models import MPTokenIssuance, UserAccount
 from workload.randoms import choice
 from workload.submit import submit_raw, submit_tx
 
-# tmfMPTSet* set-enable bits: which capability a mutation turns on. Each requires
-# the matching TMF_MPT_CAN_ENABLE_* declared in the create-time MutableFlags.
+# TF_MPT_SET_* set-enable bits carried in the Flags field; each turns on the
+# matching lsfMPTCan* capability on the issuance (a one-way latch).
 _SET_ENABLE_FLAGS = [
-    MPTokenIssuanceSetMutableFlag.TMF_MPT_SET_CAN_LOCK,
-    MPTokenIssuanceSetMutableFlag.TMF_MPT_SET_REQUIRE_AUTH,
-    MPTokenIssuanceSetMutableFlag.TMF_MPT_SET_CAN_ESCROW,
-    MPTokenIssuanceSetMutableFlag.TMF_MPT_SET_CAN_TRADE,
-    MPTokenIssuanceSetMutableFlag.TMF_MPT_SET_CAN_TRANSFER,
-    MPTokenIssuanceSetMutableFlag.TMF_MPT_SET_CAN_CLAWBACK,
+    MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_LOCK,
+    MPTokenIssuanceSetFlag.TF_MPT_SET_REQUIRE_AUTH,
+    MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_ESCROW,
+    MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRADE,
+    MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRANSFER,
+    MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_CLAWBACK,
 ]
-
-# create-time MutableFlags bits that must be present to mutate metadata / fee.
-_TMF_CAN_MUTATE_METADATA = int(MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_MUTATE_METADATA)
-_TMF_CAN_MUTATE_TRANSFER_FEE = int(MPTokenIssuanceCreateMutableFlag.TMF_MPT_CAN_MUTATE_TRANSFER_FEE)
 
 
 def _mutable_issuances(
     accounts: dict[str, UserAccount],
     mpt_issuances: list[MPTokenIssuance],
 ) -> list[MPTokenIssuance]:
-    """Issuances we issue that opted into mutation (non-zero create-time MutableFlags)."""
-    return [m for m in mpt_issuances if m.mutable_flags and m.issuer in accounts]
+    """Dynamic-cohort issuances we issue that stayed fully mutable (no ImmutableFlags)."""
+    return [
+        m for m in mpt_issuances if m.dynamic and not m.immutable_flags and m.issuer in accounts
+    ]
 
 
 def _immutable_issuances(
     accounts: dict[str, UserAccount],
     mpt_issuances: list[MPTokenIssuance],
 ) -> list[MPTokenIssuance]:
-    """Issuances we issue that opted out (zero create-time MutableFlags): every mutation fails."""
-    return [m for m in mpt_issuances if not m.mutable_flags and m.issuer in accounts]
+    """Dynamic-cohort issuances frozen at create (ImmutableFlags set): every mutation fails."""
+    return [m for m in mpt_issuances if m.dynamic and m.immutable_flags and m.issuer in accounts]
 
 
 async def mpt_issuance_set_dynamic(
@@ -80,7 +77,7 @@ def _mpt_issuance_set_dynamic_base(
     txn = MPTokenIssuanceSet(
         account=issuer.address,
         mptoken_issuance_id=mpt.mpt_issuance_id,
-        mutable_flags=choice(_SET_ENABLE_FLAGS),
+        flags=choice(_SET_ENABLE_FLAGS),
     )
     return txn, issuer.wallet
 
@@ -97,17 +94,14 @@ async def _mpt_issuance_set_dynamic_valid(
     issuer = accounts[mpt.issuer]
 
     mutation = choice(["flag_enable", "metadata", "transfer_fee"])
-    if mutation == "metadata" and (mpt.mutable_flags & _TMF_CAN_MUTATE_METADATA):
+    if mutation == "metadata":
+        # MPTokenMetadata is mutable by default (not frozen via ImmutableFlags).
         txn = MPTokenIssuanceSet(
             account=issuer.address,
             mptoken_issuance_id=mpt.mpt_issuance_id,
             mptoken_metadata=params.mpt_metadata(),
         )
-    elif (
-        mutation == "transfer_fee"
-        and (mpt.mutable_flags & _TMF_CAN_MUTATE_TRANSFER_FEE)
-        and mpt.can_transfer
-    ):
+    elif mutation == "transfer_fee" and mpt.can_transfer:
         # fee>0 needs CanTransfer already enabled at issuance (preclaim rule).
         txn = MPTokenIssuanceSet(
             account=issuer.address,
@@ -119,7 +113,7 @@ async def _mpt_issuance_set_dynamic_valid(
         txn = MPTokenIssuanceSet(
             account=issuer.address,
             mptoken_issuance_id=mpt.mpt_issuance_id,
-            mutable_flags=choice(_SET_ENABLE_FLAGS),
+            flags=choice(_SET_ENABLE_FLAGS),
         )
     await submit_tx("DynamicMPTSet", txn, client, issuer.wallet)
 
@@ -149,7 +143,7 @@ async def _mpt_issuance_set_dynamic_faulty(
         txn = MPTokenIssuanceSet(
             account=src.address,
             mptoken_issuance_id=params.fake_mpt_id(),
-            mutable_flags=choice(_SET_ENABLE_FLAGS),
+            flags=choice(_SET_ENABLE_FLAGS),
         )
         await submit_tx("DynamicMPTSet", txn, client, src.wallet)
         return
@@ -167,13 +161,13 @@ async def _mpt_issuance_set_dynamic_faulty(
         txn = MPTokenIssuanceSet(
             account=src.address,
             mptoken_issuance_id=mpt.mpt_issuance_id,
-            mutable_flags=choice(_SET_ENABLE_FLAGS),
+            flags=choice(_SET_ENABLE_FLAGS),
         )
         await submit_tx("DynamicMPTSet", txn, client, src.wallet)
         return
 
     if mutation == "immutable_mutation":
-        # Mutate an issuance that opted out at create -> tecNO_PERMISSION.
+        # Mutate a field/flag frozen at create via ImmutableFlags -> tecNO_PERMISSION.
         immutable = _immutable_issuances(accounts, mpt_issuances)
         if not immutable:
             return
@@ -189,7 +183,7 @@ async def _mpt_issuance_set_dynamic_faulty(
             else MPTokenIssuanceSet(
                 account=issuer.address,
                 mptoken_issuance_id=mpt.mpt_issuance_id,
-                mutable_flags=choice(_SET_ENABLE_FLAGS),
+                flags=choice(_SET_ENABLE_FLAGS),
             )
         )
         await submit_tx("DynamicMPTSet", txn, client, issuer.wallet)
@@ -198,7 +192,7 @@ async def _mpt_issuance_set_dynamic_faulty(
     # oversize_metadata: MPTokenMetadata > 1024 bytes -> temMALFORMED (xrpl-py
     # rejects the length at construction, so inject it raw).
     def _mutate_oversize(d: dict) -> None:
-        d.pop("MutableFlags", None)
+        d.pop("Flags", None)
         d["MPTokenMetadata"] = "AB" * 1025
 
     await submit_raw("DynamicMPTSet", base, client, wallet, _mutate_oversize)
