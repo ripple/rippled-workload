@@ -7,26 +7,33 @@ made deterministic via a Chooser that returns configured mutations/flags/indices
 
 import asyncio
 
-from xrpl.models.transactions import MPTokenIssuanceCreateMutableFlag as CM
+from xrpl.models.transactions import (
+    MPTokenIssuanceCreate,
+    MPTokenIssuanceCreateFlag,
+)
+from xrpl.models.transactions import MPTokenIssuanceImmutableFlag as IM
 from xrpl.wallet import Wallet
 
-from workload import params
+from workload import params, setup
 from workload.models import MPTokenIssuance, UserAccount
 from workload.transactions import mpt_dynamic as mpt
 
-# Mutable cohort: opted into every capability enable + metadata/transfer-fee mutation.
-_MUTABLE_FLAGS = int(
-    CM.TMF_MPT_CAN_ENABLE_CAN_LOCK
-    | CM.TMF_MPT_CAN_ENABLE_REQUIRE_AUTH
-    | CM.TMF_MPT_CAN_ENABLE_CAN_ESCROW
-    | CM.TMF_MPT_CAN_ENABLE_CAN_TRADE
-    | CM.TMF_MPT_CAN_ENABLE_CAN_TRANSFER
-    | CM.TMF_MPT_CAN_ENABLE_CAN_CLAWBACK
-    | CM.TMF_MPT_CAN_MUTATE_METADATA
-    | CM.TMF_MPT_CAN_MUTATE_TRANSFER_FEE
+# Immutable cohort bitmask (XLS-0094 opt-out): freeze every capability +
+# metadata/transfer-fee so no later mutation can stick. Mirrors
+# setup._DYNAMIC_IMMUTABLE_FLAGS.
+_IMMUTABLE_FLAGS = int(
+    IM.TIF_MPT_CAN_LOCK
+    | IM.TIF_MPT_REQUIRE_AUTH
+    | IM.TIF_MPT_CAN_ESCROW
+    | IM.TIF_MPT_CAN_TRADE
+    | IM.TIF_MPT_CAN_TRANSFER
+    | IM.TIF_MPT_CAN_CLAWBACK
+    | IM.TIF_MPT_CAN_HOLD_CONFIDENTIAL_BALANCE
+    | IM.TIF_MPT_METADATA
+    | IM.TIF_MPT_TRANSFER_FEE
 )
-MUT_ID = "A0" * 24  # opted-in mutable issuance (mutable_flags != 0)
-IMM_ID = "B1" * 24  # opted-out immutable issuance (mutable_flags == 0)
+MUT_ID = "A0" * 24  # dynamic + fully mutable issuance (immutable_flags == 0)
+IMM_ID = "B1" * 24  # dynamic + frozen issuance (immutable_flags != 0)
 
 _MUTATIONS = {
     "flag_enable", "metadata", "transfer_fee",
@@ -84,10 +91,16 @@ def _issuances(accounts):
         MPTokenIssuance(
             issuer=addrs[0],
             mpt_issuance_id=MUT_ID,
-            mutable_flags=_MUTABLE_FLAGS,
+            dynamic=True,
+            immutable_flags=0,
             can_transfer=True,
         ),
-        MPTokenIssuance(issuer=addrs[0], mpt_issuance_id=IMM_ID),
+        MPTokenIssuance(
+            issuer=addrs[0],
+            mpt_issuance_id=IMM_ID,
+            dynamic=True,
+            immutable_flags=_IMMUTABLE_FLAGS,
+        ),
     ]
 
 
@@ -100,15 +113,20 @@ def _install(monkeypatch, rec, *, mutation=None, index=0, flag=0x08, faulty=Fals
 
 
 # ── Filters ──────────────────────────────────────────────────────────
-def test_mutable_issuances_excludes_immutable_and_unowned():
+def test_mutable_issuances_excludes_immutable_unowned_and_nondynamic():
     accts = _accounts()
     isss = _issuances(accts)
+    addrs = list(accts)
     foreign = MPTokenIssuance(
         issuer="rForeignIssuerNotInAccounts9999",
         mpt_issuance_id="C2" * 24,
-        mutable_flags=_MUTABLE_FLAGS,
+        dynamic=True,
     )
-    dyn = mpt._mutable_issuances(accts, [*isss, foreign])
+    # Regular MPT cohort (dynamic=False): fully mutable under the new model but
+    # must be excluded so the handler never disturbs the DEX/AMM + XLS-82
+    # cohorts [0..5].
+    regular = MPTokenIssuance(issuer=addrs[0], mpt_issuance_id="D3" * 24, dynamic=False)
+    dyn = mpt._mutable_issuances(accts, [*isss, foreign, regular])
     assert [m.mpt_issuance_id for m in dyn] == [MUT_ID]
 
 
@@ -127,7 +145,7 @@ def test_base_builds_set_enable_from_issuer(monkeypatch):
     txn, wallet = built
     d = txn.to_xrpl()
     assert d["MPTokenIssuanceID"] == MUT_ID
-    assert d["MutableFlags"] in mpt._SET_ENABLE_FLAGS
+    assert d["Flags"] in mpt._SET_ENABLE_FLAGS
     assert d["Account"] == wallet.address
 
 
@@ -139,7 +157,7 @@ def test_valid_flag_enable_submits_typed(monkeypatch):
     assert len(rec.txs) == 1 and rec.txs[0][0] == "DynamicMPTSet"
     assert not rec.raws and not rec.fuzzes
     d = rec.txs[0][1].to_xrpl()
-    assert d["MutableFlags"] in mpt._SET_ENABLE_FLAGS
+    assert d["Flags"] in mpt._SET_ENABLE_FLAGS
 
 
 def test_valid_metadata_submits_typed(monkeypatch):
@@ -148,7 +166,7 @@ def test_valid_metadata_submits_typed(monkeypatch):
     _run(mpt.mpt_issuance_set_dynamic(accts, _issuances(accts), None))
     assert len(rec.txs) == 1 and not rec.raws
     d = rec.txs[0][1].to_xrpl()
-    assert d["MPTokenMetadata"] and "MutableFlags" not in d
+    assert d["MPTokenMetadata"] and "Flags" not in d
 
 
 def test_valid_transfer_fee_submits_typed(monkeypatch):
@@ -157,7 +175,7 @@ def test_valid_transfer_fee_submits_typed(monkeypatch):
     _run(mpt.mpt_issuance_set_dynamic(accts, _issuances(accts), None))
     assert len(rec.txs) == 1 and not rec.raws
     d = rec.txs[0][1].to_xrpl()
-    assert int(d["TransferFee"]) > 0 and "MutableFlags" not in d
+    assert int(d["TransferFee"]) > 0 and "Flags" not in d
 
 
 # ── Faulty paths ─────────────────────────────────────────────────────
@@ -203,7 +221,7 @@ def test_faulty_oversize_metadata_exceeds_limit(monkeypatch):
     _run(mpt.mpt_issuance_set_dynamic(accts, _issuances(accts), None))
     assert len(rec.raws) == 1
     _, d = rec.raws[0]
-    assert "MutableFlags" not in d and len(d["MPTokenMetadata"]) > 2048
+    assert "Flags" not in d and len(d["MPTokenMetadata"]) > 2048
 
 
 # ── Dispatcher routing ───────────────────────────────────────────────
@@ -224,3 +242,26 @@ def test_no_dynamic_issuances_is_noop(monkeypatch):
     _install(monkeypatch, rec, mutation="flag_enable")
     _run(mpt.mpt_issuance_set_dynamic({}, [], None))
     assert not rec.txs and not rec.raws and not rec.fuzzes
+
+
+# ── Setup cohort construction (XLS-0094 opt-out) ─────────────────────
+def test_setup_cohorts_construct_expected_immutable_flags():
+    """Mutable cohort (53-55) sends NO ImmutableFlags; immutable cohort (56-58)
+    freezes every capability + metadata + transfer-fee bit."""
+    addr = Wallet.create().address
+    lock_xfer = (
+        MPTokenIssuanceCreateFlag.TF_MPT_CAN_LOCK | MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER
+    )
+    mutable = MPTokenIssuanceCreate(account=addr, flags=lock_xfer).to_xrpl()
+    immutable = MPTokenIssuanceCreate(
+        account=addr, flags=lock_xfer, immutable_flags=setup._DYNAMIC_IMMUTABLE_FLAGS
+    ).to_xrpl()
+
+    # Mutable cohort stays fully mutable: no create-time freeze.
+    assert "ImmutableFlags" not in mutable
+
+    # Immutable cohort freezes the full bitmask, and every TIF_* bit is set.
+    assert int(immutable["ImmutableFlags"]) == int(setup._DYNAMIC_IMMUTABLE_FLAGS)
+    assert int(setup._DYNAMIC_IMMUTABLE_FLAGS) == _IMMUTABLE_FLAGS
+    for bit in IM:
+        assert int(setup._DYNAMIC_IMMUTABLE_FLAGS) & int(bit), f"{bit.name} not frozen"
