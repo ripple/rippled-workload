@@ -1,2 +1,8 @@
 .git/
 **/.venv/
+# Dev-only unit tests. Must not enter the Antithesis instrumentation catalog
+# (/opt/antithesis/catalog): a second coverage catalog activates the SDK's
+# multi-catalog grading path, which find_spec()s the workload's bare module
+# names and crashes on `transactions.*` at startup.
+workload/tests/
+**/__pycache__/

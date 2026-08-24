@@ -7,6 +7,13 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /opt/antithesis/catalog/workload
 COPY workload /opt/antithesis/catalog/workload
 
+# Dev-only unit tests must not enter the Antithesis instrumentation catalog.
+# A second coverage catalog (e.g. tests/test_*.py) activates the SDK's
+# multi-catalog grading path, which find_spec()s the workload's bare module
+# names and crashes at startup on `transactions.*`. Defense-in-depth alongside
+# the root .dockerignore, in case the build context/ignore rules differ in CI.
+RUN rm -rf tests __pycache__
+
 # TODO: Update when buildkit available
 # RUN --mount=from=ghcr.io/astral-sh/uv,source=/uv,target=/bin/uv \
 #     uv sync
