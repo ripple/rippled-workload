@@ -124,6 +124,14 @@ class MPTokenIssuance:
     can_transfer: bool = False
     require_auth: bool = False
     locked: bool = False
+    # XLS-0094: create-time ImmutableFlags bitmask (tifMPT*, opt-out model); 0 =
+    # fully mutable issuance. A set bit permanently freezes that flag/field so a
+    # later MPTokenIssuanceSet mutation of it fails tecNO_PERMISSION.
+    immutable_flags: int = 0
+    # True for issuances minted by the DynamicMPT setup cohorts (accounts
+    # [53..58]); DynamicMPTSet handlers only touch these, never the regular
+    # MPT cohorts.
+    dynamic: bool = False
     holders: set[str] = field(default_factory=set)
 
 

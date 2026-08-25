@@ -108,7 +108,15 @@ _NO_SUCCESS_TYPES = {"AccountDelete", "AMMDelete", "PaymentDomainXC", "SponsorMa
 # tx types that must touch a specific ledger entry on tesSUCCESS.
 # Value: allowed node ops followed by the expected LedgerEntryType.
 _META_EXPECTATIONS: dict[str, tuple[str, ...]] = {
-    "DIDSet": ("Created", "Modified", "DID"),
+    # DIDSet is intentionally absent (like SponsorshipSet below): no per-tx field
+    # distinguishes a create from an update (both are a bare DIDSet keyed by
+    # Account), and an idempotent update -- re-applying unchanged URI/Data/
+    # DIDDocument -- is a legitimate tesSUCCESS that rippled drops from metadata
+    # (DID.cpp calls view().update() unconditionally, then ApplyStateTable skips
+    # the byte-identical ModifiedNode), leaving no DID node the invariant can tell
+    # from a regression. The _IDEMPOTENT_UPDATE_MARKER field trick needs an
+    # update-only field, which this type lacks, so the row is dropped. DIDDelete
+    # stays: it always Deletes the DID and has no no-op path.
     "DIDDelete": ("Deleted", "DID"),
     # Convert Creates the holder MPToken on first use, else Modifies; others Modify.
     "ConfidentialMPTConvert": ("Created", "Modified", "MPToken"),

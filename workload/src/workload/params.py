@@ -175,6 +175,11 @@ def mpt_metadata() -> str:
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
+def mpt_transfer_fee() -> int:
+    """1/10th basis points (1-50000 = 0.001-50%); kMaxTransferFee per spec."""
+    return randint(1, 50000)
+
+
 # ── AMM ─────────────────────────────────────────────────────────────
 def amm_trading_fee() -> int:
     """1/100,000th (0-1000 = 0-1%)."""
@@ -287,6 +292,12 @@ def escrow_finish_after() -> int:
 
 def escrow_cancel_after(finish_after: int) -> int:
     return finish_after + randint(3, 600)
+
+
+def escrow_short_cancel_after() -> int:
+    """A near-term CancelAfter (now + 5-20s) for cancel-designated escrows, so the
+    cancel window matures within a run instead of drifting past its end."""
+    return _ripple_now() + randint(5, 20)
 
 
 def escrow_condition_pair() -> tuple[str, str]:

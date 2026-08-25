@@ -7,6 +7,13 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /opt/antithesis/catalog/workload
 COPY workload /opt/antithesis/catalog/workload
 
+# Dev-only unit tests must not enter the Antithesis instrumentation catalog.
+# A second coverage catalog (e.g. tests/test_*.py) activates the SDK's
+# multi-catalog grading path, which find_spec()s the workload's bare module
+# names and crashes at startup on `transactions.*`. Defense-in-depth alongside
+# the root .dockerignore, in case the build context/ignore rules differ in CI.
+RUN rm -rf tests __pycache__
+
 # TODO: Update when buildkit available
 # RUN --mount=from=ghcr.io/astral-sh/uv,source=/uv,target=/bin/uv \
 #     uv sync
@@ -20,7 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # on the xrpl-py binding version matching RIPPLED_MPT_CRYPTO_VERSION — the mpt-crypto
 # pin of the ACTUAL xrpld the run uses, resolved by CI (the xrpld repo may be private).
 # Empty (e.g. a standalone build) -> crypto skipped, not a build failure.
-ARG XRPL_PY_REF=confidential-mpt
+# Must match the xrpl-py branch pinned in workload/pyproject.toml
+# ([tool.uv.sources]) so the confidential-crypto bindings line up with the
+# installed core. Kept in sync manually: the crypto script clones this ref.
+ARG XRPL_PY_REF=pre-3.3-release-group
 ARG RIPPLED_MPT_CRYPTO_VERSION=
 RUN PYTHON=/opt/venv/bin/python bash scripts/setup-confidential-crypto.sh \
     "$XRPL_PY_REF" "$RIPPLED_MPT_CRYPTO_VERSION"

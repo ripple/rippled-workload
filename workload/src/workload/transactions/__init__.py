@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 import xrpl.models
 from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
-from xrpl.models.transactions import MPTokenIssuanceCreateFlag
+from xrpl.models.transactions import MPTokenIssuanceCreateFlag, MPTokenIssuanceSetFlag
 
 from workload import params
 from workload.models import (
@@ -77,8 +77,14 @@ from workload.transactions.lending import (
     loan_pay,
     loan_set,
 )
-from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
+from workload.transactions.mpt import (
+    mpt_authorize,
+    mpt_create,
+    mpt_destroy,
+    mpt_issuance_set,
+)
 from workload.transactions.mpt_dex import offer_create_mpt, payment_mpt
+from workload.transactions.mpt_dynamic import mpt_issuance_set_dynamic
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -287,6 +293,10 @@ def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
             require_auth=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH)),
             # lock state set later by setup, not at create
             locked=False,
+            # XLS-0094: create-time ImmutableFlags (tifMPT*, opt-out). 0 ⇒ fully
+            # mutable; a set bit permanently freezes that flag/field. The `dynamic`
+            # cohort marker is stamped by setup, not derivable from the tx.
+            immutable_flags=int(tx.get("ImmutableFlags", 0) or 0),
         )
         w.mpt_issuances.append(issuance)
 
@@ -304,6 +314,36 @@ def _on_mpt_authorize(w: Workload, tx: dict, meta: dict) -> None:
         if m.mpt_issuance_id == mpt_id:
             m.holders.add(held)
             return
+
+
+def _on_mpt_issuance_set(w: Workload, tx: dict, meta: dict) -> None:
+    # XLS-0094: a validated MPTokenIssuanceSet mutates the issuance in place. OR the
+    # capability set-enable bits (tfMPTSet*) into the tracked flags and apply
+    # lock/unlock, so a dynamic issuance whose CanTrade/CanTransfer/RequireAuth flips
+    # on-ledger doesn't stay mis-classified in the mpt_dex/AMM cohort pools (a tracked
+    # can_trade=False otherwise silently keeps a now-tradeable issuance in the
+    # no-trade fault pool). Keyed by the real type; the synthetic DynamicMPTSet
+    # bucket carries no separate updater (mirrors PaymentSponsoredAccount riding the
+    # real "Payment" row). The regular XLS-82 MPTokenIssuanceSet lock/unlock path
+    # shares this row.
+    mpt_id = tx.get("MPTokenIssuanceID")
+    if not mpt_id:
+        return
+    flags = int(tx.get("Flags", 0) or 0)
+    for m in w.mpt_issuances:
+        if m.mpt_issuance_id != mpt_id:
+            continue
+        if flags & int(MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRADE):
+            m.can_trade = True
+        if flags & int(MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRANSFER):
+            m.can_transfer = True
+        if flags & int(MPTokenIssuanceSetFlag.TF_MPT_SET_REQUIRE_AUTH):
+            m.require_auth = True
+        if flags & int(MPTokenIssuanceSetFlag.TF_MPT_LOCK):
+            m.locked = True
+        elif flags & int(MPTokenIssuanceSetFlag.TF_MPT_UNLOCK):
+            m.locked = False
+        return
 
 
 def _on_mpt_destroy(w: Workload, tx: dict, meta: dict) -> None:
@@ -1095,6 +1135,19 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         "MPTokenIssuanceSet",
         "/mpt/set/random",
         mpt_issuance_set,
+        lambda w: (w.accounts, w.mpt_issuances, w.client),
+        _on_mpt_issuance_set,
+    ),
+    # DynamicMPTSet (XLS-0094): synthetic name; on-ledger type stays
+    # MPTokenIssuanceSet (mutation carries capability set-enable bits in Flags,
+    # MPTokenMetadata, or TransferFee). ws_listener fires tx_result for this
+    # bucket; the on-ledger flag change is tracked by the real MPTokenIssuanceSet
+    # row's _on_mpt_issuance_set updater above (STATE_UPDATERS is keyed by real
+    # type), so this synthetic row keeps None.
+    (
+        "DynamicMPTSet",
+        "/mpt/set/dynamic/random",
+        mpt_issuance_set_dynamic,
         lambda w: (w.accounts, w.mpt_issuances, w.client),
         None,
     ),

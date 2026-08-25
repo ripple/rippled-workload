@@ -22,6 +22,10 @@ _TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 _TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
 _TF_SPONSORSHIP_DELETE_OBJECT = 0x00100000  # SponsorshipSetFlag.TF_DELETE_OBJECT
 _TF_SPONSOR_CREATED_ACCOUNT = 0x00080000  # PaymentFlag.TF_SPONSOR_CREATED_ACCOUNT
+# XLS-0094: capability set-enable bits in an MPTokenIssuanceSet's Flags
+# (tfMPTSetCanLock 0x04 .. tfMPTSetCanHoldConfidentialBalance 0x100); excludes
+# tfMPTLock 0x01 / tfMPTUnlock 0x02, which are the regular lock/unlock path.
+_MPT_SET_CAPABILITY_MASK = 0x1FC
 
 # Object-creating types the sponsor Modifier attaches reserve sponsors to; a
 # tesSUCCESS on one may carry a Sponsor on the created ledger entry, which
@@ -135,6 +139,18 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
         tx_result("SponsorshipSetDelete", result)
     elif tx_type == "SponsorshipTransfer" and not tx.get("ObjectID"):
         tx_result("SponsorshipTransferAccount", result)
+
+    # Dynamic MPT (XLS-0094): a mutating MPTokenIssuanceSet carries capability
+    # set-enable bits in Flags (tfMPTSet*, mask 0x1FC — distinct from lock/unlock
+    # 0x01/0x02), MPTokenMetadata, or TransferFee (rippled's `isMutate`), distinct
+    # from the lock/unlock Flags path and confidential key registration — route it
+    # to DynamicMPTSet.
+    if tx_type == "MPTokenIssuanceSet" and (
+        (int(tx.get("Flags", 0) or 0) & _MPT_SET_CAPABILITY_MASK)
+        or tx.get("MPTokenMetadata") is not None
+        or tx.get("TransferFee") is not None
+    ):
+        tx_result("DynamicMPTSet", result)
 
     if engine_result == "tesSUCCESS":
         if tx_type in _RESERVE_SPONSOR_TX_TYPES:
