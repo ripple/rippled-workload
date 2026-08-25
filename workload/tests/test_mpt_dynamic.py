@@ -12,6 +12,7 @@ from xrpl.models.transactions import (
     MPTokenIssuanceCreateFlag,
 )
 from xrpl.models.transactions import MPTokenIssuanceImmutableFlag as IM
+from xrpl.models.transactions import MPTokenIssuanceSetFlag as SF
 from xrpl.wallet import Wallet
 
 from workload import params, setup
@@ -152,12 +153,25 @@ def test_base_builds_set_enable_from_issuer(monkeypatch):
 # ── Valid paths ──────────────────────────────────────────────────────
 def test_valid_flag_enable_submits_typed(monkeypatch):
     accts, rec = _accounts(), Recorder()
-    _install(monkeypatch, rec, mutation="flag_enable")
+    _install(monkeypatch, rec, mutation="flag_enable", flag=int(SF.TF_MPT_SET_CAN_TRADE))
     _run(mpt.mpt_issuance_set_dynamic(accts, _issuances(accts), None))
     assert len(rec.txs) == 1 and rec.txs[0][0] == "DynamicMPTSet"
     assert not rec.raws and not rec.fuzzes
     d = rec.txs[0][1].to_xrpl()
-    assert d["Flags"] in mpt._SET_ENABLE_FLAGS
+    # Valid flag-enable draws from the REQUIRE_AUTH-free pool (holder-lockout guard).
+    assert d["Flags"] in mpt._VALID_SET_ENABLE_FLAGS
+
+
+def test_valid_pool_excludes_require_auth_but_base_keeps_it():
+    # C4: valid traffic must never latch REQUIRE_AUTH (one-way, locks holders out),
+    # but the destructive base builder / fuzz path still exercises it.
+    assert SF.TF_MPT_SET_REQUIRE_AUTH not in mpt._VALID_SET_ENABLE_FLAGS
+    assert SF.TF_MPT_SET_REQUIRE_AUTH in mpt._SET_ENABLE_FLAGS
+
+
+def test_set_enable_flags_include_confidential_balance():
+    # C5: the 7th set-enable bit matches xrpl-py's full MPTokenIssuanceSetFlag set.
+    assert SF.TF_MPT_SET_CAN_HOLD_CONFIDENTIAL_BALANCE in mpt._SET_ENABLE_FLAGS
 
 
 def test_valid_metadata_submits_typed(monkeypatch):

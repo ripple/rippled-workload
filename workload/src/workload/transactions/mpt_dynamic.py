@@ -25,7 +25,9 @@ from workload.randoms import choice
 from workload.submit import submit_raw, submit_tx
 
 # TF_MPT_SET_* set-enable bits carried in the Flags field; each turns on the
-# matching lsfMPTCan* capability on the issuance (a one-way latch).
+# matching lsfMPTCan* capability on the issuance (a one-way latch). All seven of
+# xrpl-py's set bits, including CAN_HOLD_CONFIDENTIAL_BALANCE so a mutable issuance
+# can turn confidential-capable mid-run.
 _SET_ENABLE_FLAGS = [
     MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_LOCK,
     MPTokenIssuanceSetFlag.TF_MPT_SET_REQUIRE_AUTH,
@@ -33,6 +35,16 @@ _SET_ENABLE_FLAGS = [
     MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRADE,
     MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRANSFER,
     MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_CLAWBACK,
+    MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_HOLD_CONFIDENTIAL_BALANCE,
+]
+
+# Valid-path enables exclude REQUIRE_AUTH: enabling it is a one-way latch (no clear
+# bit in the pinned xrpl-py) that permanently locks out the holders seeded for this
+# issuance in setup step 5, so over a long run it would slowly dark the cohort's
+# holder-facing traffic. RequireAuth-enable is still exercised destructively via
+# fuzz and the immutable-cohort faulty vector (frozen REQUIRE_AUTH -> tecNO_PERMISSION).
+_VALID_SET_ENABLE_FLAGS = [
+    f for f in _SET_ENABLE_FLAGS if f != MPTokenIssuanceSetFlag.TF_MPT_SET_REQUIRE_AUTH
 ]
 
 
@@ -93,7 +105,11 @@ async def _mpt_issuance_set_dynamic_valid(
     mpt = choice(dyn)
     issuer = accounts[mpt.issuer]
 
-    mutation = choice(["flag_enable", "metadata", "transfer_fee"])
+    # The six capability enables are one-way latches that saturate early in a run,
+    # after which flag_enable is a permanent no-op tesSUCCESS; weight the repeatable
+    # metadata/transfer_fee arms (which always land fresh on the mutable cohort)
+    # higher so valid traffic stays meaningful.
+    mutation = choice(["metadata"] * 3 + ["transfer_fee"] * 3 + ["flag_enable"])
     if mutation == "metadata":
         # MPTokenMetadata is mutable by default (not frozen via ImmutableFlags).
         txn = MPTokenIssuanceSet(
@@ -113,7 +129,7 @@ async def _mpt_issuance_set_dynamic_valid(
         txn = MPTokenIssuanceSet(
             account=issuer.address,
             mptoken_issuance_id=mpt.mpt_issuance_id,
-            flags=choice(_SET_ENABLE_FLAGS),
+            flags=choice(_VALID_SET_ENABLE_FLAGS),
         )
     await submit_tx("DynamicMPTSet", txn, client, issuer.wallet)
 
