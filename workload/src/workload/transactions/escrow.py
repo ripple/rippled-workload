@@ -42,7 +42,9 @@ def _escrow_create_base(
 
     amount = params.escrow_amount()
 
-    flavour = choice(["time_only", "condition_only", "time_and_condition"])
+    flavour = choice(
+        ["time_only", "condition_only", "time_and_condition", "cancel_designated"]
+    )
 
     condition = None
     fulfillment = None
@@ -54,6 +56,14 @@ def _escrow_create_base(
         cancel_after = params.escrow_cancel_after(finish_after)
     elif flavour == "condition_only":
         condition, fulfillment = params.escrow_condition_pair()
+    elif flavour == "cancel_designated":
+        # A conditional escrow with a near-term CancelAfter whose fulfillment is
+        # deliberately dropped (fulfillment=None below), so EscrowFinish can never
+        # finish it -- it survives to CancelAfter maturity for EscrowCancel to
+        # consume, keeping sometimes(success:EscrowCancel) reachable. fix1571
+        # forbids a CancelAfter-only escrow (temMALFORMED), so it carries Condition.
+        condition, _ = params.escrow_condition_pair()
+        cancel_after = params.escrow_short_cancel_after()
     else:  # time_and_condition
         finish_after = params.escrow_finish_after()
         cancel_after = params.escrow_cancel_after(finish_after)
@@ -182,7 +192,15 @@ def _escrow_finish_base(
     if not escrows or not accounts:
         return None
 
-    escrow = choice(escrows)
+    # Only escrows we can construct a finish for: a conditional escrow needs its
+    # fulfillment (xrpl-py rejects an EscrowFinish carrying a condition without one),
+    # so a conditional escrow whose fulfillment we don't retain (cancel-designated)
+    # can only ever be cancelled -- finishing it would waste attempts and race the
+    # cancellable pool to tecNO_TARGET. None finishable -> nothing to do this cycle.
+    finishable = [e for e in escrows if e.condition is None or e.fulfillment is not None]
+    if not finishable:
+        return None
+    escrow = choice(finishable)
     # Anyone can finish an escrow.
     src = choice(list(accounts.values()))
 

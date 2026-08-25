@@ -294,6 +294,12 @@ def escrow_cancel_after(finish_after: int) -> int:
     return finish_after + randint(3, 600)
 
 
+def escrow_short_cancel_after() -> int:
+    """A near-term CancelAfter (now + 5-20s) for cancel-designated escrows, so the
+    cancel window matures within a run instead of drifting past its end."""
+    return _ripple_now() + randint(5, 20)
+
+
 def escrow_condition_pair() -> tuple[str, str]:
     """PREIMAGE-SHA-256 (condition_hex, fulfillment_hex), both uppercased."""
     import hashlib
