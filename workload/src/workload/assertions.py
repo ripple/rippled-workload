@@ -219,11 +219,19 @@ def _redact_tx(raw: dict) -> dict:
 
 
 # Ledger entries whose balance movement matters for conservation/rounding analysis.
-_BALANCE_FIELDS = {
-    "AccountRoot": "Balance",
-    "RippleState": "Balance",
-    "MPToken": "MPTAmount",
-    "MPTokenIssuance": "OutstandingAmount",
+# Each entry type lists every field worth tracking (an entry -- e.g. a Vault -- can
+# move several). Vault/LoanBroker cover the lending totals: under LendingProtocolV1_1
+# (XLS-66, PR #582) AssetsTotal/DebtTotal move by principal only (no interest), LoanPay
+# routes interest through AssetsTotal, and LoanManage impair/default moves LossUnrealized
+# -- so capturing all three Vault fields plus DebtTotal lets a run observe the amended
+# accounting across LoanSet/LoanPay/LoanManage instead of it being invisible.
+_BALANCE_FIELDS: dict[str, tuple[str, ...]] = {
+    "AccountRoot": ("Balance",),
+    "RippleState": ("Balance",),
+    "MPToken": ("MPTAmount",),
+    "MPTokenIssuance": ("OutstandingAmount",),
+    "Vault": ("AssetsTotal", "AssetsAvailable", "LossUnrealized"),
+    "LoanBroker": ("DebtTotal",),
 }
 _MAX_BALANCE_CHANGES = 25
 
@@ -231,36 +239,60 @@ _MAX_BALANCE_CHANGES = 25
 def _balance_changes(meta: dict) -> tuple[list[dict[str, object]], bool]:
     """Per-entry balance before/after from meta AffectedNodes. Values stay faithful
     (XRP drops as strings; IOU/MPT as amount objects) so the reader does the math.
-    This is the on-ledger effect that conservation/rounding failures turn on."""
+    This is the on-ledger effect that conservation/rounding failures turn on. An entry
+    can move several tracked fields, so each changed field emits its own tagged row."""
     changes: list[dict[str, object]] = []
     for node in meta.get("AffectedNodes", []):
         for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
             n = node.get(kind)
             if not isinstance(n, dict):
                 continue
-            field = _BALANCE_FIELDS.get(n.get("LedgerEntryType", ""))
-            if field is None:
+            fields = _BALANCE_FIELDS.get(n.get("LedgerEntryType", ""))
+            if fields is None:
                 continue
             final = n.get("FinalFields") or n.get("NewFields") or {}
             prev = n.get("PreviousFields") or {}
-            if kind == "CreatedNode":
-                before, after = None, final.get(field)
-            elif kind == "DeletedNode":
-                before, after = final.get(field), None
-            else:
-                if field not in prev:
-                    continue  # this modification didn't touch the balance
-                before, after = prev.get(field), final.get(field)
-            changes.append(
-                {
-                    "entry": n.get("LedgerEntryType", ""),
-                    "id": n.get("LedgerIndex", ""),
-                    "account": final.get("Account", ""),
-                    "before": before,
-                    "after": after,
-                }
-            )
+            # Vault/LoanBroker key on Owner, not Account.
+            account = final.get("Account") or final.get("Owner", "")
+            for field in fields:
+                if kind == "CreatedNode":
+                    if field not in final:
+                        continue  # entry doesn't carry this field on create
+                    before, after = None, final.get(field)
+                elif kind == "DeletedNode":
+                    if field not in final:
+                        continue
+                    before, after = final.get(field), None
+                else:
+                    if field not in prev:
+                        continue  # this modification didn't touch the field
+                    before, after = prev.get(field), final.get(field)
+                changes.append(
+                    {
+                        "entry": n.get("LedgerEntryType", ""),
+                        "id": n.get("LedgerIndex", ""),
+                        "field": field,
+                        "account": account,
+                        "before": before,
+                        "after": after,
+                    }
+                )
     return changes[:_MAX_BALANCE_CHANGES], len(changes) > _MAX_BALANCE_CHANGES
+
+
+def _vault_le_version(meta: dict) -> str | None:
+    """Vault.LEVersion (XLS-65 3.1.2.2, LendingProtocolV1_1) decides which accounting a
+    Vault follows -- absent/0 legacy accrual-basis, 1 principal-only cash-basis -- and both
+    coexist after activation, so a balance_changes row is unattributable without it. It is
+    protocol-written and never a transaction field, so the meta node is the only source."""
+    for node in meta.get("AffectedNodes", []):
+        for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
+            n = node.get(kind)
+            if not isinstance(n, dict) or n.get("LedgerEntryType") != "Vault":
+                continue
+            fields = n.get("FinalFields") or n.get("NewFields") or {}
+            return str(fields.get("LEVersion", 0))
+    return None
 
 
 def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
@@ -644,6 +676,9 @@ def tx_result(name: str, result: dict) -> None:
         details["balance_changes"] = changes
         if truncated:
             details["balance_changes_truncated"] = True
+    le_version = _vault_le_version(meta)
+    if le_version is not None:
+        details["vault_le_version"] = le_version
     send_event(f"workload::result : {name}", details)
 
     assert_raw(
