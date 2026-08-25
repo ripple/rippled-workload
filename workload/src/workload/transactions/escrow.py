@@ -42,9 +42,7 @@ def _escrow_create_base(
 
     amount = params.escrow_amount()
 
-    flavour = choice(
-        ["time_only", "condition_only", "time_and_condition", "cancel_designated"]
-    )
+    flavour = choice(["time_only", "condition_only", "time_and_condition", "cancel_designated"])
 
     condition = None
     fulfillment = None
