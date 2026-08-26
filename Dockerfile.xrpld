@@ -120,10 +120,19 @@ WORKDIR ${FUZZER_SOURCE_DIR}
 # to package-ids already in the local conan cache → reused, not rebuilt.
 # `xrpl/develop` is built from the source exported above (`--build "xrpl/*"`) so
 # the fuzzer's libxrpl matches the cloned develop, not a stale published package.
+#
+# XRPLD_NO_PATCH_NIX_BINARY opts out of rippled's cmake/PatchNixBinary.cmake,
+# which resolves the loader via `${CMAKE_SOURCE_DIR}/bin/default-loader-path.sh`
+# — absent here, because conan's build folder only holds what the recipe's
+# exports_sources lists (no `bin/`), and the Nix toolchain makes the check fire
+# (COMMAND_ERROR_IS_FATAL, so configure aborts). Nothing is lost: this builds
+# libxrpl (xrpld=False), a static archive with no PT_INTERP, and the binaries we
+# ship are patchelf'd explicitly above and below. Scoped to this step so the
+# xrpld build itself keeps rippled CI's behavior.
 RUN <<EOF
     set -ex
     mkdir -p ${FUZZER_BUILD_DIR}
-    conan install ${FUZZER_SOURCE_DIR} \
+    XRPLD_NO_PATCH_NIX_BINARY=1 conan install ${FUZZER_SOURCE_DIR} \
         --output-folder ${FUZZER_BUILD_DIR} \
         --profile:all ci \
         --settings:all build_type=Debug \
