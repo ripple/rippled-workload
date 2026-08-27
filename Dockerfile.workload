@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # on the xrpl-py binding version matching RIPPLED_MPT_CRYPTO_VERSION — the mpt-crypto
 # pin of the ACTUAL xrpld the run uses, resolved by CI (the xrpld repo may be private).
 # Empty (e.g. a standalone build) -> crypto skipped, not a build failure.
-ARG XRPL_PY_REF=confidential-mpt
+ARG XRPL_PY_REF=pre-3.3-release-group
 ARG RIPPLED_MPT_CRYPTO_VERSION=
 RUN PYTHON=/opt/venv/bin/python bash scripts/setup-confidential-crypto.sh \
     "$XRPL_PY_REF" "$RIPPLED_MPT_CRYPTO_VERSION"
