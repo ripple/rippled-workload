@@ -65,6 +65,24 @@ RUN <<EOF
     rm -rf ${FUZZER_SOURCE_DIR}/.git
 EOF
 
+# rippled's snake_case namespace rename (XRPLF/rippled#7933) moved beast::IP ->
+# beast::ip and xrpl::BuildInfo -> xrpl::build_info; rippled-fuzzer is still
+# written against the old spelling and fails to compile against develop. Rewrite
+# the fuzzer's references only when the cloned xrpld actually carries the new
+# names, so pre-rename refs (e.g. xrpld-private staging/3.3.x-private) build
+# unchanged. Drop this once rippled-fuzzer tracks the rename upstream.
+RUN <<EOF
+    set -ex
+    if grep -rq "namespace beast::ip" ${SOURCE_DIR}/include/xrpl/beast/net/; then
+        grep -rl "beast::IP::" ${FUZZER_SOURCE_DIR} \
+            | xargs -r perl -i -pe 's/beast::IP::/beast::ip::/g'
+    fi
+    if grep -q "namespace xrpl::build_info" ${SOURCE_DIR}/include/xrpl/protocol/BuildInfo.h; then
+        grep -rl "BuildInfo::" ${FUZZER_SOURCE_DIR} \
+            | xargs -r perl -i -pe 's/\bBuildInfo::/build_info::/g'
+    fi
+EOF
+
 WORKDIR ${SOURCE_DIR}
 
 # Configure Conan (mirror rippled CI: global.conf + profiles + xrplf remote)
