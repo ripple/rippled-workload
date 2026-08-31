@@ -3,6 +3,7 @@
 from xrpl.models.transactions import SponsorshipTransferFlag
 
 from workload import confidential_crypto as _cc
+from workload import lending_v1_1_compat as _lv
 from workload.randoms import choice, randint, random
 
 
@@ -135,6 +136,63 @@ def vault_data() -> str:
 
 def vault_assets_maximum() -> str:
     return str(randint(100_000_000, 10_000_000_000))
+
+
+# ── Closed-ended Vaults (XLS-65, LendingProtocolV1_1) ────────────────
+def should_create_closed_ended_vault() -> bool:
+    """A minority, so open-ended vaults keep the phase-free deposit/withdraw
+    valid paths well stocked."""
+    return random() < 0.25
+
+
+def closed_ended_dates() -> tuple[int, int]:
+    """(SubscriptionDate, RedemptionDate) satisfying preflight's gap bound and
+    preclaim's non-expiry check. Two flavors: a long subscription window keeps
+    the vault depositable for the whole run, a short one walks it through
+    Subscription -> Investment -> Redemption so the phase gates get exercised."""
+    if random() < 0.3:
+        sub = _ripple_now() + randint(5, 30)
+        gap = randint(_lv.MIN_INVESTMENT_PERIOD, _lv.MIN_INVESTMENT_PERIOD + 120)
+    else:
+        sub = _ripple_now() + randint(600, 1800)
+        gap = randint(_lv.MIN_INVESTMENT_PERIOD, 3600)
+    return sub, sub + gap
+
+
+def closed_ended_short_gap() -> tuple[int, int]:
+    """Gap below kMinInvestmentPeriod → temMALFORMED."""
+    sub = _ripple_now() + randint(60, 600)
+    return sub, sub + randint(0, _lv.MIN_INVESTMENT_PERIOD - 1)
+
+
+def closed_ended_expired_dates() -> tuple[int, int]:
+    """Both dates already past → preclaim tecEXPIRED (a tec, so it validates
+    and feeds the failure bucket, unlike the tem malformations)."""
+    sub = _ripple_now() - randint(3600, 86_400)
+    return sub, sub + randint(_lv.MIN_INVESTMENT_PERIOD, 3600)
+
+
+def invalid_vault_kind() -> int:
+    """Outside rippled's VaultKind enum → temMALFORMED."""
+    return randint(2, 255)
+
+
+def should_attach_delete_memo() -> bool:
+    """VaultDelete's deletion reason is optional; leave it off often enough that
+    the field-absent path stays covered."""
+    return random() < 0.5
+
+
+def vault_delete_memo_data() -> str:
+    """1-256 bytes, the range VaultDelete preflight accepts."""
+    length = randint(1, 256)
+    return bytes(randint(0, 255) for _ in range(length)).hex()
+
+
+def oversized_vault_delete_memo_data() -> str:
+    """Over kMaxDataPayloadLength → temMALFORMED."""
+    length = randint(257, 512)
+    return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 # ── Permissioned Domains ─────────────────────────────────────────────

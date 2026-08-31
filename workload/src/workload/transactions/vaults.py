@@ -8,19 +8,57 @@ from xrpl.models.amounts import MPTAmount
 from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import (
     VaultClawback,
-    VaultCreate,
-    VaultDelete,
     VaultDeposit,
     VaultSet,
     VaultWithdraw,
 )
 from xrpl.wallet import Wallet
 
+from workload import lending_v1_1_compat as lv
 from workload import params
 from workload.fuzz import submit_fuzzed
+
+# VaultCreate and VaultDelete ride the compat shim until xrpl-py carries the
+# XLS-65 closed-ended fields and the V1.1 MemoData; see lending_v1_1_compat.
+from workload.lending_v1_1_compat import VaultCreate, VaultDelete
 from workload.models import MPTokenIssuance, TrustLine, UserAccount, Vault
 from workload.randoms import choice, randint, random
 from workload.submit import submit_tx
+
+# Ledger close time trails wall clock, so a vault whose phase would change
+# within this many seconds is treated as being in both phases.
+_PHASE_SKEW = 60
+# Phases in which rippled rejects the transaction (VaultDeposit tecEXPIRED,
+# VaultWithdraw tecTOO_SOON).
+_DEPOSIT_BLOCKED = frozenset({lv.VaultPhase.INVESTMENT, lv.VaultPhase.REDEMPTION})
+_WITHDRAW_BLOCKED = frozenset({lv.VaultPhase.INVESTMENT})
+
+
+def _phases_around(vault: Vault) -> set[lv.VaultPhase]:
+    now = params._ripple_now()
+    return {
+        lv.vault_phase(vault.vault_kind, vault.subscription_date, vault.redemption_date, t)
+        for t in (now - _PHASE_SKEW, now + _PHASE_SKEW)
+    }
+
+
+def _phase_permits(vault: Vault, blocked: frozenset[lv.VaultPhase]) -> bool:
+    return not (_phases_around(vault) & blocked)
+
+
+def _phase_blocks(vault: Vault, blocked: frozenset[lv.VaultPhase]) -> bool:
+    return _phases_around(vault) <= blocked
+
+
+def _pick_permitted_vault(vaults: list[Vault], blocked: frozenset[lv.VaultPhase]) -> Vault | None:
+    eligible = [v for v in vaults if _phase_permits(v, blocked)]
+    return choice(eligible) if eligible else None
+
+
+def _pick_blocked_vault(vaults: list[Vault], blocked: frozenset[lv.VaultPhase]) -> Vault | None:
+    eligible = [v for v in vaults if _phase_blocks(v, blocked)]
+    return choice(eligible) if eligible else None
+
 
 # ── Create ───────────────────────────────────────────────────────────
 
@@ -81,12 +119,24 @@ def _vault_create_base(
         return None
     src = accounts[choice(list(accounts))]
     asset = _random_asset(trust_lines, mpt_issuances)
-    txn = VaultCreate(
-        account=src.address,
-        asset=asset,
-        assets_maximum=params.vault_assets_maximum(),
-        data=params.vault_data(),
-    )
+    if lv.enabled() and params.should_create_closed_ended_vault():
+        sub, red = params.closed_ended_dates()
+        txn = VaultCreate(
+            account=src.address,
+            asset=asset,
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+            vault_kind=int(lv.VaultKind.CLOSED_ENDED),
+            subscription_date=sub,
+            redemption_date=red,
+        )
+    else:
+        txn = VaultCreate(
+            account=src.address,
+            asset=asset,
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+        )
     return txn, src.wallet
 
 
@@ -115,7 +165,12 @@ async def _vault_create_faulty(
         return
     src = choice(list(accounts.values()))
     asset = _random_asset(trust_lines, mpt_issuances)
-    mutation = choice(["fuzz", "zero_max", "oversized_data", "xrp_with_issuer"])
+    mutations = ["fuzz", "zero_max", "oversized_data", "xrp_with_issuer"]
+    if lv.enabled():
+        # temDISABLED without the amendment, so these only join once a validated
+        # Vault proved it active.
+        mutations += ["short_gap", "expired_dates", "invalid_kind"]
+    mutation = choice(mutations)
     if mutation == "fuzz":
         built = _vault_create_base(accounts, trust_lines, mpt_issuances)
         if built is None:
@@ -138,7 +193,7 @@ async def _vault_create_faulty(
             assets_maximum=params.vault_assets_maximum(),
             data=oversized,
         )
-    else:  # xrp_with_issuer
+    elif mutation == "xrp_with_issuer":
         bad_asset = IssuedCurrency(
             currency="XRP",
             issuer=choice(list(accounts.values())).address,
@@ -148,6 +203,39 @@ async def _vault_create_faulty(
             asset=bad_asset,
             assets_maximum=params.vault_assets_maximum(),
             data=params.vault_data(),
+        )
+    elif mutation == "short_gap":
+        sub, red = params.closed_ended_short_gap()
+        txn = VaultCreate(
+            account=src.address,
+            asset=asset,
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+            vault_kind=int(lv.VaultKind.CLOSED_ENDED),
+            subscription_date=sub,
+            redemption_date=red,
+        )
+    elif mutation == "expired_dates":
+        sub, red = params.closed_ended_expired_dates()
+        txn = VaultCreate(
+            account=src.address,
+            asset=asset,
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+            vault_kind=int(lv.VaultKind.CLOSED_ENDED),
+            subscription_date=sub,
+            redemption_date=red,
+        )
+    else:  # invalid_kind — dates stay well-formed so the kind is the only fault
+        sub, red = params.closed_ended_dates()
+        txn = VaultCreate(
+            account=src.address,
+            asset=asset,
+            assets_maximum=params.vault_assets_maximum(),
+            data=params.vault_data(),
+            vault_kind=params.invalid_vault_kind(),
+            subscription_date=sub,
+            redemption_date=red,
         )
     await submit_tx("VaultCreate", txn, client, src.wallet)
 
@@ -168,7 +256,9 @@ def _vault_deposit_base(
 ) -> tuple[VaultDeposit, Wallet] | None:
     if not vaults or not accounts:
         return None
-    vault = choice(vaults)
+    vault = _pick_permitted_vault(vaults, _DEPOSIT_BLOCKED)
+    if vault is None:
+        return None
     depositor = accounts[choice(list(accounts))]
     txn = VaultDeposit(
         account=depositor.address,
@@ -194,7 +284,10 @@ async def _vault_deposit_faulty(
     if not accounts:
         return
     depositor = choice(list(accounts.values()))
-    mutation = choice(["fuzz", "fake_vault", "zero_amount", "mismatched_asset"])
+    mutations = ["fuzz", "fake_vault", "zero_amount", "mismatched_asset"]
+    if lv.enabled():
+        mutations.append("closed_phase")
+    mutation = choice(mutations)
     if mutation == "fuzz":
         built = _vault_deposit_base(accounts, vaults)
         if built is None:
@@ -220,7 +313,7 @@ async def _vault_deposit_faulty(
             vault_id=vault.vault_id,
             amount="0",
         )
-    else:  # mismatched_asset
+    elif mutation == "mismatched_asset":
         if not vaults:
             return
         vault = choice(vaults)
@@ -232,6 +325,15 @@ async def _vault_deposit_faulty(
             account=depositor.address,
             vault_id=vault.vault_id,
             amount=amount,
+        )
+    else:  # closed_phase — subscription window shut, so tecEXPIRED
+        closed = _pick_blocked_vault(vaults, _DEPOSIT_BLOCKED)
+        if closed is None:
+            return
+        txn = VaultDeposit(
+            account=depositor.address,
+            vault_id=closed.vault_id,
+            amount=_amount_for_asset(closed.asset),
         )
     await submit_tx("VaultDeposit", txn, client, depositor.wallet)
 
@@ -265,8 +367,8 @@ def _vault_withdraw_base(
 ) -> tuple[VaultWithdraw, Wallet] | None:
     if not vaults:
         return None
-    vault = choice(vaults)
-    if vault.owner not in accounts:
+    vault = _pick_permitted_vault(vaults, _WITHDRAW_BLOCKED)
+    if vault is None or vault.owner not in accounts:
         return None
     owner = accounts[vault.owner]
     txn = VaultWithdraw(
@@ -293,7 +395,23 @@ async def _vault_withdraw_faulty(
     if not accounts or not vaults:
         return
     vault = choice(vaults)
-    mutation = choice(["fuzz", "fake_vault", "non_owner", "overdraw"])
+    mutations = ["fuzz", "fake_vault", "non_owner", "overdraw"]
+    if lv.enabled():
+        mutations.append("closed_phase")
+    mutation = choice(mutations)
+    if mutation == "closed_phase":
+        # Investment phase locks the vault, so a withdraw draws tecTOO_SOON.
+        locked = _pick_blocked_vault(vaults, _WITHDRAW_BLOCKED)
+        if locked is None or locked.owner not in accounts:
+            return
+        owner = accounts[locked.owner]
+        txn = VaultWithdraw(
+            account=owner.address,
+            vault_id=locked.vault_id,
+            amount=_amount_for_asset(locked.asset),
+        )
+        await submit_tx("VaultWithdraw", txn, client, owner.wallet)
+        return
     if mutation == "fuzz":
         built = _vault_withdraw_base(accounts, vaults)
         if built is None:
@@ -439,9 +557,17 @@ def _vault_delete_base(
     if vault.owner not in accounts:
         return None
     owner = accounts[vault.owner]
+    # MemoData is temDISABLED without the amendment, so it only joins once a
+    # validated Vault proved it active.
+    memo = (
+        params.vault_delete_memo_data()
+        if lv.enabled() and params.should_attach_delete_memo()
+        else None
+    )
     txn = VaultDelete(
         account=owner.address,
         vault_id=vault.vault_id,
+        memo_data=memo,
     )
     return txn, owner.wallet
 
@@ -462,13 +588,30 @@ async def _vault_delete_faulty(
     if not accounts or not vaults:
         return
     vault = choice(vaults)
-    mutation = choice(["fuzz", "fake_vault", "non_owner"])
+    mutations = ["fuzz", "fake_vault", "non_owner"]
+    if lv.enabled():
+        mutations += ["empty_memo", "oversized_memo"]
+    mutation = choice(mutations)
     if mutation == "fuzz":
         built = _vault_delete_base(accounts, vaults)
         if built is None:
             return
         base, wallet = built
         await submit_fuzzed("VaultDelete", base, client, wallet)
+        return
+    if mutation in ("empty_memo", "oversized_memo"):
+        # validDataLength rejects both an empty and an over-256-byte MemoData.
+        if vault.owner not in accounts:
+            return
+        owner = accounts[vault.owner]
+        txn = VaultDelete(
+            account=owner.address,
+            vault_id=vault.vault_id,
+            memo_data=(
+                "" if mutation == "empty_memo" else params.oversized_vault_delete_memo_data()
+            ),
+        )
+        await submit_tx("VaultDelete", txn, client, owner.wallet)
         return
     if mutation == "fake_vault":
         if vault.owner not in accounts:

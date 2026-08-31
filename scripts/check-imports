@@ -43,6 +43,7 @@ from workload.rawfuzz import escalate
 from workload.assembler import parse, reassemble
 from workload.sequence import SequenceTracker
 from workload.sponsorship_compat import SponsorshipSet
+from workload.lending_v1_1_compat import VaultCreate, VaultDelete, vault_phase, enabled
 from workload.ws_listener import start_ws_listener
 from workload.setup import run_setup
 from workload.params import should_send_faulty, fake_account, fake_id

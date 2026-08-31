@@ -14,7 +14,7 @@ from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
 from xrpl.models.transactions import MPTokenIssuanceCreateFlag
 
-from workload import params
+from workload import lending_v1_1_compat, params
 from workload.models import (
     AMM,
     DID,
@@ -194,11 +194,35 @@ def _parse_asset(
     return xrpl.models.XRP()
 
 
+def _created_vault_fields(meta: dict) -> dict:
+    for node in meta.get("AffectedNodes", []):
+        created = node.get("CreatedNode", {})
+        if created.get("LedgerEntryType") == "Vault":
+            fields = created.get("NewFields") or {}
+            return fields if isinstance(fields, dict) else {}
+    return {}
+
+
 def _on_vault_create(w: Workload, tx: dict, meta: dict) -> None:
     vault_id = _extract_created_id(meta, "Vault")
     if vault_id:
         asset = _parse_asset(tx.get("Asset", {}))
-        w.vaults.append(Vault(owner=tx["Account"], vault_id=vault_id, asset=asset))
+        # LEVersion / VaultKind / the phase dates are protocol-written, so the
+        # created node is the only source -- and LEVersion latches the amendment.
+        fields = _created_vault_fields(meta)
+        lending_v1_1_compat.note_vault_le_version(fields.get("LEVersion"))
+        sub = fields.get("SubscriptionDate")
+        red = fields.get("RedemptionDate")
+        w.vaults.append(
+            Vault(
+                owner=tx["Account"],
+                vault_id=vault_id,
+                asset=asset,
+                vault_kind=int(fields.get("VaultKind", 0) or 0),
+                subscription_date=int(sub) if sub is not None else None,
+                redemption_date=int(red) if red is not None else None,
+            )
+        )
 
 
 def _on_vault_delete(w: Workload, tx: dict, meta: dict) -> None:

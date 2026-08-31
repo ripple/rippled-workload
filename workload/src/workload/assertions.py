@@ -219,11 +219,19 @@ def _redact_tx(raw: dict) -> dict:
 
 
 # Ledger entries whose balance movement matters for conservation/rounding analysis.
-_BALANCE_FIELDS = {
-    "AccountRoot": "Balance",
-    "RippleState": "Balance",
-    "MPToken": "MPTAmount",
-    "MPTokenIssuance": "OutstandingAmount",
+# Each entry type lists every field worth tracking (an entry -- e.g. a Vault -- can
+# move several). Vault/LoanBroker cover the lending totals: under LendingProtocolV1_1
+# (XLS-66, PR #582) AssetsTotal/DebtTotal move by principal only (no interest), LoanPay
+# routes interest through AssetsTotal, and LoanManage impair/default moves LossUnrealized
+# -- so capturing all three Vault fields plus DebtTotal lets a run observe the amended
+# accounting across LoanSet/LoanPay/LoanManage instead of it being invisible.
+_BALANCE_FIELDS: dict[str, tuple[str, ...]] = {
+    "AccountRoot": ("Balance",),
+    "RippleState": ("Balance",),
+    "MPToken": ("MPTAmount",),
+    "MPTokenIssuance": ("OutstandingAmount",),
+    "Vault": ("AssetsTotal", "AssetsAvailable", "LossUnrealized"),
+    "LoanBroker": ("DebtTotal",),
 }
 _MAX_BALANCE_CHANGES = 25
 
@@ -231,36 +239,99 @@ _MAX_BALANCE_CHANGES = 25
 def _balance_changes(meta: dict) -> tuple[list[dict[str, object]], bool]:
     """Per-entry balance before/after from meta AffectedNodes. Values stay faithful
     (XRP drops as strings; IOU/MPT as amount objects) so the reader does the math.
-    This is the on-ledger effect that conservation/rounding failures turn on."""
+    This is the on-ledger effect that conservation/rounding failures turn on. An entry
+    can move several tracked fields, so each changed field emits its own tagged row."""
     changes: list[dict[str, object]] = []
     for node in meta.get("AffectedNodes", []):
         for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
             n = node.get(kind)
             if not isinstance(n, dict):
                 continue
-            field = _BALANCE_FIELDS.get(n.get("LedgerEntryType", ""))
-            if field is None:
+            fields = _BALANCE_FIELDS.get(n.get("LedgerEntryType", ""))
+            if fields is None:
                 continue
             final = n.get("FinalFields") or n.get("NewFields") or {}
             prev = n.get("PreviousFields") or {}
-            if kind == "CreatedNode":
-                before, after = None, final.get(field)
-            elif kind == "DeletedNode":
-                before, after = final.get(field), None
-            else:
-                if field not in prev:
-                    continue  # this modification didn't touch the balance
-                before, after = prev.get(field), final.get(field)
-            changes.append(
-                {
-                    "entry": n.get("LedgerEntryType", ""),
-                    "id": n.get("LedgerIndex", ""),
-                    "account": final.get("Account", ""),
-                    "before": before,
-                    "after": after,
-                }
-            )
+            # Vault/LoanBroker key on Owner, not Account.
+            account = final.get("Account") or final.get("Owner", "")
+            for field in fields:
+                if kind == "CreatedNode":
+                    if field not in final:
+                        continue  # entry doesn't carry this field on create
+                    before, after = None, final.get(field)
+                elif kind == "DeletedNode":
+                    if field not in final:
+                        continue
+                    before, after = final.get(field), None
+                else:
+                    if field not in prev:
+                        continue  # this modification didn't touch the field
+                    before, after = prev.get(field), final.get(field)
+                changes.append(
+                    {
+                        "entry": n.get("LedgerEntryType", ""),
+                        "id": n.get("LedgerIndex", ""),
+                        "field": field,
+                        "account": account,
+                        "before": before,
+                        "after": after,
+                    }
+                )
     return changes[:_MAX_BALANCE_CHANGES], len(changes) > _MAX_BALANCE_CHANGES
+
+
+def _vault_le_version(meta: dict) -> str | None:
+    """Vault.LEVersion (XLS-65 3.1.2.2, LendingProtocolV1_1) decides which accounting a
+    Vault follows -- absent/0 legacy accrual-basis, 1 principal-only cash-basis -- and both
+    coexist after activation, so a balance_changes row is unattributable without it. It is
+    protocol-written and never a transaction field, so the meta node is the only source."""
+    for node in meta.get("AffectedNodes", []):
+        for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
+            n = node.get(kind)
+            if not isinstance(n, dict) or n.get("LedgerEntryType") != "Vault":
+                continue
+            fields = n.get("FinalFields") or n.get("NewFields") or {}
+            return str(fields.get("LEVersion", 0))
+    return None
+
+
+def _created_vault_kind(meta: dict) -> str | None:
+    """VaultKind off a created Vault node. Absent means open-ended, so a None
+    here is a legacy vault and a "0" is an explicit open-ended V1.1 one."""
+    for node in meta.get("AffectedNodes", []):
+        created = node.get("CreatedNode")
+        if isinstance(created, dict) and created.get("LedgerEntryType") == "Vault":
+            fields = created.get("NewFields") or {}
+            kind = fields.get("VaultKind")
+            return None if kind is None else str(kind)
+    return None
+
+
+def _assert_vault_v1_1_signals(
+    name: str, tx_json: dict, meta: dict, engine_result: str, le_version: str | None, tx_hash: str
+) -> None:
+    """Reachability for the XLS-65 closed-ended paths. Every one of them is gated
+    on lending_v1_1_compat.enabled(), so without these buckets the whole feature
+    can go dark while VaultCreate's success/failure dims stay satisfied off the
+    open-ended vectors. must_hit=False throughout: they only fire against an
+    xrpld with LendingProtocolV1_1 active."""
+    details = {"tx_type": name, "engine_result": engine_result, "hash": tx_hash}
+    if le_version is not None and le_version not in ("0", ""):
+        _fire_sometimes("lending_v1_1_active", True, details, must_hit=False)
+    if name == "VaultCreate" and engine_result == "tesSUCCESS":
+        kind = _created_vault_kind(meta)
+        if kind is not None and kind != "0":
+            _fire_sometimes(
+                "vault_closed_ended_created", True, {**details, "vault_kind": kind}, must_hit=False
+            )
+    # The phase gates: Investment/Redemption shuts deposits, Investment locks
+    # withdraws. Both are tec, so they validate and reach this stream.
+    if name == "VaultDeposit" and engine_result == "tecEXPIRED":
+        _fire_sometimes("vault_deposit_phase_blocked", True, details, must_hit=False)
+    if name == "VaultWithdraw" and engine_result == "tecTOO_SOON":
+        _fire_sometimes("vault_withdraw_phase_blocked", True, details, must_hit=False)
+    if name == "VaultDelete" and engine_result == "tesSUCCESS" and tx_json.get("MemoData"):
+        _fire_sometimes("vault_delete_reason_used", True, details, must_hit=False)
 
 
 def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
@@ -366,6 +437,18 @@ def register_assertions() -> None:
         "sponsorship_audit_account_consistent",
     ):
         _emit_catalog_entry(f"workload::sometimes : {key}", "sometimes", "Sometimes", must_hit=True)
+    # XLS-65 closed-ended vaults. must_hit=False: these only fire against an xrpld
+    # with LendingProtocolV1_1 active, so a run without it must not starve.
+    for vault_key in (
+        "lending_v1_1_active",
+        "vault_closed_ended_created",
+        "vault_deposit_phase_blocked",
+        "vault_withdraw_phase_blocked",
+        "vault_delete_reason_used",
+    ):
+        _emit_catalog_entry(
+            f"workload::sometimes : {vault_key}", "sometimes", "Sometimes", must_hit=False
+        )
     for setup_key in [
         "gateways",
         "trust_lines",
@@ -418,9 +501,12 @@ def assert_no_internal_error_submit(name: str, result: dict) -> None:
     )
 
 
-def _fire_sometimes(key: str, condition: bool, details: dict[str, str]) -> None:
+def _fire_sometimes(
+    key: str, condition: bool, details: dict[str, str], must_hit: bool = True
+) -> None:
     """Shared plumbing for the sponsor-state reachability signals below --
-    ``sometimes`` only needs one True hit, so a False call is a harmless no-op."""
+    ``sometimes`` only needs one True hit, so a False call is a harmless no-op.
+    ``must_hit`` must match the key's register_assertions() catalog entry."""
     msg = f"workload::sometimes : {key}"
     assert_raw(
         condition=condition,
@@ -432,7 +518,7 @@ def _fire_sometimes(key: str, condition: bool, details: dict[str, str]) -> None:
         loc_begin_line=0,
         loc_begin_column=_LOC_COL,
         hit=True,
-        must_hit=True,
+        must_hit=must_hit,
         assert_type="sometimes",
         display_type="Sometimes",
         assert_id=msg,
@@ -644,7 +730,13 @@ def tx_result(name: str, result: dict) -> None:
         details["balance_changes"] = changes
         if truncated:
             details["balance_changes_truncated"] = True
+    le_version = _vault_le_version(meta)
+    if le_version is not None:
+        details["vault_le_version"] = le_version
     send_event(f"workload::result : {name}", details)
+    _assert_vault_v1_1_signals(
+        name, tx_json, meta, engine_result, le_version, str(details.get("hash", ""))
+    )
 
     assert_raw(
         condition=engine_result not in _RIPPLED_INTERNAL_ERRORS,

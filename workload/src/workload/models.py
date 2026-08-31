@@ -106,6 +106,12 @@ class Vault:
     asset: IssuedCurrency | MPTCurrency | xrpl.models.XRP | None = None
     balance: int = 0
     shareholders: set[str] = field(default_factory=set)
+    # XLS-65 closed-ended vaults; dates are ripple-epoch seconds and are None on
+    # open-ended vaults. Read from the created node so handlers can pick a vault
+    # whose current phase permits the transaction they are about to build.
+    vault_kind: int = 0
+    subscription_date: int | None = None
+    redemption_date: int | None = None
 
 
 @dataclass
