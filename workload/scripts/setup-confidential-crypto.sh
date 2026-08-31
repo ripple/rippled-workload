@@ -2,8 +2,8 @@
 # Build the XLS-0096 Confidential MPT crypto add-on into the workload venv.
 # xrpl-py excludes proof generation (xrpl/ext/confidential) from its core wheel, so
 # fetch it from the branch and compile its cffi extension in place. The pin the
-# bindings target must equal the mpt-crypto version rippled was built against — a
-# mismatch would have rippled reject every proof. That rippled version is passed in
+# bindings target must be crypto-compatible with the mpt-crypto version rippled was
+# built against — a mismatch would have rippled reject every proof. That rippled version is passed in
 # ($2), resolved by the caller from the ACTUAL xrpld repo+ref used for the run: the
 # xrpld repo may be private (raw.githubusercontent can't read it) and the ref is not
 # always develop, so we no longer fetch a hardcoded public conanfile here. On
@@ -42,14 +42,38 @@ if [ -z "$RIPPLED_VERSION" ]; then
     exit 0
 fi
 
-if [ "$version" != "$RIPPLED_VERSION" ]; then
+# Releases whose library source is byte-identical, so bindings built against one
+# emit proofs a rippled built against the other verifies. Only add a pair after
+# confirming `git diff <a> <b> -- include src` on XRPLF/mpt-crypto is empty:
+# 1.0.2..1.0.4 touches CMakeLists/BundleStatic/tests only (packaging + WASM CI),
+# whereas 1.0.5 adds a BSGS DLP solver and is NOT equivalent to either.
+_COMPATIBLE_CLASSES=("1.0.2 1.0.4")
+
+# Same crypto? Exact match, or both in one equivalence class above.
+crypto_compatible() {
+    [ "$1" = "$2" ] && return 0
+    local class
+    for class in "${_COMPATIBLE_CLASSES[@]}"; do
+        case " $class " in *" $1 "*)
+            case " $class " in *" $2 "*) return 0 ;; esac
+        ;; esac
+    done
+    return 1
+}
+
+if ! crypto_compatible "$version" "$RIPPLED_VERSION"; then
     echo "WARN: mpt-crypto divergence — xrpl-py($XRPL_PY_REF)=$version" \
          "rippled=$RIPPLED_VERSION. Skipping confidential crypto build;" \
          "confidential valid paths disabled (CRYPTO_AVAILABLE=False)." >&2
     marker "xrpl-py=$version rippled=$RIPPLED_VERSION"
     exit 0
 fi
-echo "mpt-crypto $version agreed (xrpl-py $XRPL_PY_REF == rippled $RIPPLED_VERSION)"
+if [ "$version" = "$RIPPLED_VERSION" ]; then
+    echo "mpt-crypto $version agreed (xrpl-py $XRPL_PY_REF == rippled $RIPPLED_VERSION)"
+else
+    echo "mpt-crypto $version (xrpl-py $XRPL_PY_REF) vs $RIPPLED_VERSION (rippled):" \
+         "same library source, proceeding."
+fi
 
 # ── Drop the ext source beside the installed core (xrpl.ext = PEP 420 namespace) ──
 site="$("$PYTHON" -c 'import xrpl, os; print(os.path.dirname(os.path.dirname(xrpl.__file__)))')"
