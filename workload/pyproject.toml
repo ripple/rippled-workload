@@ -35,8 +35,10 @@ warn_unused_ignores = true
 ignore_missing_imports = true
 
 # Confidential MPT (XLS-0096), sponsor (XLS-68), and the rest of the models come from
-# xrpl-py's pre-3.3-release-group branch (converges the pre-release WIP branches; not yet
-# released). Proof generation (xrpl/ext/confidential) is EXCLUDED from the core wheel this
-# installs and is built separately in the Antithesis image; see scripts/setup-confidential-crypto.sh.
+# xrpl-py's main branch, which now carries all 3.3.0 features (the earlier
+# pre-3.3-release-group pin predates that convergence). Proof generation
+# (xrpl/ext/confidential) is EXCLUDED from the core wheel this installs and is built
+# separately in the Antithesis image; see scripts/setup-confidential-crypto.sh — keep
+# Dockerfile.workload's XRPL_PY_REF on the same ref so models and proofs agree.
 [tool.uv.sources]
-xrpl-py = { git = "https://github.com/XRPLF/xrpl-py.git", branch = "pre-3.3-release-group" }
+xrpl-py = { git = "https://github.com/XRPLF/xrpl-py.git", branch = "main" }

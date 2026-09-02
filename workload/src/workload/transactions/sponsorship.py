@@ -30,6 +30,7 @@ from xrpl.models.requests.ledger_entry import Sponsorship as LedgerEntrySponsors
 from xrpl.models.transactions import (
     Payment,
     PaymentFlag,
+    SponsorshipSet,
     SponsorshipSetFlag,
     SponsorshipTransfer,
 )
@@ -49,7 +50,6 @@ from workload.models import (
     UserAccount,
 )
 from workload.randoms import choice, randint, random, sample
-from workload.sponsorship_compat import SponsorshipSet
 from workload.submit import submit_raw, submit_tx
 
 # Populated by _payment_sponsored_account_valid, consumed by the "Payment" real-type
@@ -323,6 +323,7 @@ async def _sponsorship_set_faulty(
         "sponsee_attempts_create",
         "conflicting_flags",
         "delete_with_fields",
+        "zero_delta",
     ):
         # xrpl-py's SponsorshipSet._get_errors rejects every one of these at
         # construction time, so only rippled's raw preflight can be exercised.
@@ -330,6 +331,7 @@ async def _sponsorship_set_faulty(
         if built is None:
             return
         base, wallet = built
+        zero_fee = random() < 0.5
 
         def _mutate(d: dict) -> None:
             if mutation == "self_sponsorship":
@@ -347,6 +349,16 @@ async def _sponsorship_set_faulty(
                 )
             elif mutation == "delete_with_fields":
                 d["Flags"] = d.get("Flags", 0) | params.TF_SPONSORSHIP_DELETE_OBJECT
+            elif mutation == "zero_delta":
+                # A present-but-zero delta, the only one present:
+                # FeeAmountDelta -> temBAD_AMOUNT, RemainingOwnerCountDelta
+                # -> temINVALID.
+                if zero_fee:
+                    d["FeeAmountDelta"] = "0"
+                    d.pop("RemainingOwnerCountDelta", None)
+                else:
+                    d["RemainingOwnerCountDelta"] = 0
+                    d.pop("FeeAmountDelta", None)
 
         await submit_raw("SponsorshipSet", base, client, wallet, _mutate)
         return
@@ -362,25 +374,10 @@ async def _sponsorship_set_faulty(
         await submit_tx("SponsorshipSet", txn, client, accounts[sponsor_addr].wallet)
         return
 
-    if mutation == "zero_delta":
-        # A present-but-zero delta: FeeAmountDelta -> temBAD_AMOUNT,
-        # RemainingOwnerCountDelta -> temINVALID.
-        sponsor_addr, sponsee_addr = sample(list(accounts), 2)
-        zero_fee = random() < 0.5
-        txn = SponsorshipSet(
-            account=sponsor_addr,
-            sponsee=sponsee_addr,
-            fee_amount_delta="0" if zero_fee else None,
-            remaining_owner_count_delta=None if zero_fee else 0,
-        )
-        await submit_tx("SponsorshipSet", txn, client, accounts[sponsor_addr].wallet)
-        return
-
     if mutation == "negative_count_delta":
         # Negative delta on a fresh pair takes the create path, where deltas
         # must be positive -> tecNO_PERMISSION; on the rare tracked pair it
-        # legitimately clamps at zero instead. (A negative FeeAmountDelta is
-        # out of reach: xrpl-py's codec can't encode negative XRP amounts.)
+        # legitimately clamps at zero instead.
         sponsor_addr, sponsee_addr = sample(list(accounts), 2)
         txn = SponsorshipSet(
             account=sponsor_addr,

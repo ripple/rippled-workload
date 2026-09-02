@@ -45,6 +45,7 @@ from xrpl.models.transactions import (
     NFTokenMintFlag,
     Payment,
     PermissionedDomainSet,
+    SponsorshipSet,
     TicketCreate,
     Transaction,
     TrustSet,
@@ -62,7 +63,6 @@ from workload import params
 from workload.assertions import assert_no_internal_error_submit
 from workload.models import ConfidentialHolder, ConfidentialMPTIssuance, UserAccount
 from workload.sequence import SequenceTracker
-from workload.sponsorship_compat import SponsorshipSet
 from workload.submit import submit_tx
 
 # ── Constants ───────────────────────────────────────────────────────────

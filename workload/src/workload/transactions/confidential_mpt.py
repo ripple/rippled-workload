@@ -26,6 +26,28 @@ from workload.submit import submit_raw, submit_tx
 _pending_send_amounts: dict[tuple[str, int, str], tuple[int, str]] = {}
 
 
+def _pick_holder_pool(
+    accounts: dict[str, UserAccount],
+    mpt_issuances: list[MPTokenIssuance],
+) -> tuple[list[UserAccount], str, str | None] | None:
+    """Pick an issuance plus the accounts eligible to carry it.
+
+    MergeInbox/Convert/ConvertBack/Send reject the issuer as Account (Send also as
+    Destination) at model construction, mirroring rippled's temMALFORMED preflight,
+    so the issuer is filtered out of the pool. Returns None when no eligible account
+    remains; the issuer address is None for a synthetic id.
+    """
+    if not accounts:
+        return None
+    if mpt_issuances:
+        mpt = choice(mpt_issuances)
+        pool = [a for a in accounts.values() if a.address != mpt.issuer]
+        if not pool:
+            return None
+        return pool, mpt.mpt_issuance_id, mpt.issuer
+    return list(accounts.values()), params.fake_mpt_id(), None
+
+
 # ── MergeInbox ────────────────────────────────────────────────────────
 
 
@@ -72,10 +94,11 @@ async def _merge_inbox_faulty(
     mpt_issuances: list[MPTokenIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not accounts:
+    picked = _pick_holder_pool(accounts, mpt_issuances)
+    if picked is None:
         return
-    src = choice(list(accounts.values()))
-    real_id = choice(mpt_issuances).mpt_issuance_id if mpt_issuances else params.fake_mpt_id()
+    pool, real_id, _ = picked
+    src = choice(pool)
 
     mutation = choice(["fake_mpt_id", "non_holder", "invalid_flags", "non_owner", "fuzz"])
 
@@ -175,10 +198,11 @@ async def _convert_faulty(
     mpt_issuances: list[MPTokenIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not accounts:
+    picked = _pick_holder_pool(accounts, mpt_issuances)
+    if picked is None:
         return
-    src = choice(list(accounts.values()))
-    real_id = choice(mpt_issuances).mpt_issuance_id if mpt_issuances else params.fake_mpt_id()
+    pool, real_id, _ = picked
+    src = choice(pool)
 
     mutation = choice(
         [
@@ -356,12 +380,14 @@ async def _send_faulty(
     mpt_issuances: list[MPTokenIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if len(accounts) < 2:
+    picked = _pick_holder_pool(accounts, mpt_issuances)
+    if picked is None:
         return
-    acct_list = list(accounts.values())
-    src = choice(acct_list)
-    dst = choice([a for a in acct_list if a.address != src.address])
-    real_id = choice(mpt_issuances).mpt_issuance_id if mpt_issuances else params.fake_mpt_id()
+    pool, real_id, issuer_addr = picked
+    if len(pool) < 2:
+        return
+    src = choice(pool)
+    dst = choice([a for a in pool if a.address != src.address])
 
     mutation = choice(
         [
@@ -423,23 +449,16 @@ async def _send_faulty(
 
         mutate = _set_self
     elif mutation == "send_to_issuer":
-        # destination == issuer -> temMALFORMED. Model rejects account==destination at
-        # construction, so if src is the issuer, build distinct and rewrite Destination.
-        if not mpt_issuances:
+        # destination == issuer -> temMALFORMED. The model rejects an issuer Destination
+        # at construction, so build with a holder dest and rewrite it in the dict.
+        if issuer_addr is None:
             return
-        mpt = choice(mpt_issuances)
-        issuer = accounts.get(mpt.issuer)
-        if not issuer:
-            return
-        if issuer.address == src.address:
-            issuer_addr = issuer.address
+        dest_issuer = issuer_addr
 
-            def _set_issuer(d: dict) -> None:
-                d["Destination"] = issuer_addr
+        def _set_issuer(d: dict) -> None:
+            d["Destination"] = dest_issuer
 
-            mutate = _set_issuer
-        else:
-            base = _send_base(src.address, issuer.address, mpt.mpt_issuance_id)
+        mutate = _set_issuer
     elif mutation == "fake_mpt_id":
         # -> preclaim tecOBJECT_NOT_FOUND (validating-tec feeder).
         base = _send_base(src.address, dst.address, params.fake_mpt_id())
@@ -452,7 +471,7 @@ async def _send_faulty(
 
         mutate = _set_flags
     else:  # non_owner -> tefBAD_AUTH.
-        impostor = choice([a for a in acct_list if a.address != src.address])
+        impostor = choice([a for a in accounts.values() if a.address != src.address])
         wallet = impostor.wallet
 
     await submit_raw("ConfidentialMPTSend", base, client, wallet, mutate)
@@ -531,10 +550,11 @@ async def _convert_back_faulty(
     mpt_issuances: list[MPTokenIssuance],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not accounts:
+    picked = _pick_holder_pool(accounts, mpt_issuances)
+    if picked is None:
         return
-    src = choice(list(accounts.values()))
-    real_id = choice(mpt_issuances).mpt_issuance_id if mpt_issuances else params.fake_mpt_id()
+    pool, real_id, _ = picked
+    src = choice(pool)
 
     mutation = choice(
         [
@@ -697,17 +717,18 @@ async def _clawback_faulty(
     if len(accounts) < 2:
         return
     acct_list = list(accounts.values())
-    src = choice(acct_list)
-    holder = choice([a for a in acct_list if a.address != src.address])
-    real_id = choice(mpt_issuances).mpt_issuance_id if mpt_issuances else params.fake_mpt_id()
-
-    # Reaching preclaim needs a real issuance signed by its issuer (preflight: account==issuer).
-    # None when unavailable (then only seen-bucket vectors are possible).
-    real_issuer_mpt = None
-    for mpt in mpt_issuances:
-        if mpt.issuer in accounts and any(a.address != mpt.issuer for a in acct_list):
-            real_issuer_mpt = mpt
-            break
+    # Clawback is issuer-only: the model requires Account == the id's issuer (mirroring
+    # rippled's preflight), so every vector builds from a tracked issuer and mutates
+    # the dict from there. Return early when no tracked issuer holds an issuance.
+    issuer_mpts = [m for m in mpt_issuances if m.issuer in accounts]
+    if not issuer_mpts:
+        return
+    mpt = choice(issuer_mpts)
+    issuer = accounts[mpt.issuer]
+    targets = [a for a in acct_list if a.address != issuer.address]
+    if not targets:
+        return
+    holder = choice(targets)
 
     mutation = choice(
         [
@@ -722,24 +743,19 @@ async def _clawback_faulty(
         ]
     )
 
+    base = _clawback_base(issuer.address, holder.address, mpt.mpt_issuance_id)
+
     if mutation == "fuzz":
-        base = _clawback_base(src.address, holder.address, real_id)
-        await submit_fuzzed("ConfidentialMPTClawback", base, client, src.wallet)
+        await submit_fuzzed("ConfidentialMPTClawback", base, client, issuer.wallet)
         return
 
-    base = _clawback_base(src.address, holder.address, real_id)
-    wallet = src.wallet
+    wallet = issuer.wallet
     mutate: Callable[[dict], None] | None = None
 
     if mutation == "garbage_proof":
-        # Bogus proof signed by the REAL issuer -> preclaim tecBAD_PROOF/tecOBJECT_NOT_FOUND/
-        # tecINSUFFICIENT_FUNDS; the reliable validating-tec failure feeder. No real issuer ->
-        # falls through to a self-signed seen-only temMALFORMED.
-        if real_issuer_mpt is not None:
-            issuer = accounts[real_issuer_mpt.issuer]
-            target = choice([a for a in acct_list if a.address != issuer.address])
-            base = _clawback_base(issuer.address, target.address, real_issuer_mpt.mpt_issuance_id)
-            wallet = issuer.wallet
+        # Bogus proof signed by the real issuer -> preclaim tecBAD_PROOF/tecOBJECT_NOT_FOUND/
+        # tecINSUFFICIENT_FUNDS; the reliable validating-tec failure feeder.
+        pass
     elif mutation == "wrong_length_proof":
         # -> temMALFORMED.
         bad = params.confidential_wrong_length_hex(params._CLAWBACK_PROOF_HEX_LEN)
@@ -749,30 +765,34 @@ async def _clawback_faulty(
 
         mutate = _set_proof
     elif mutation == "non_issuer":
-        # Non-issuer clawback -> temMALFORMED. Target holder must differ from impostor
-        # (model rejects account==holder at construction).
-        if mpt_issuances:
-            mpt = choice(mpt_issuances)
-            non_issuers = [a for a in acct_list if a.address != mpt.issuer]
-            if non_issuers:
-                impostor = choice(non_issuers)
-                targets = [a for a in acct_list if a.address != impostor.address]
-                if targets:
-                    target = choice(targets)
-                    base = _clawback_base(impostor.address, target.address, mpt.mpt_issuance_id)
-                    wallet = impostor.wallet
+        # Non-issuer clawback -> temMALFORMED. The model requires Account == issuer, so
+        # rewrite Account to the impostor and sign as it.
+        impostor = choice(targets)
+        impostor_addr = impostor.address
+
+        def _set_account(d: dict) -> None:
+            d["Account"] = impostor_addr
+
+        mutate = _set_account
+        wallet = impostor.wallet
     elif mutation == "self_clawback":
         # account == holder -> temMALFORMED. Model rejects it at construction, so build
-        # with a distinct holder and rewrite Holder to src in the dict.
-        self_addr = src.address
+        # with a distinct holder and rewrite Holder to the issuer in the dict.
+        self_addr = issuer.address
 
         def _set_self(d: dict) -> None:
             d["Holder"] = self_addr
 
         mutate = _set_self
     elif mutation == "fake_mpt_id":
-        # Issuer derived from a random id won't equal src -> temMALFORMED before preclaim read.
-        base = _clawback_base(src.address, holder.address, params.fake_mpt_id())
+        # Issuer derived from a random id won't equal Account -> temMALFORMED before the
+        # preclaim read. The model enforces the same rule, so swap the id in the dict.
+        fake_id = params.fake_mpt_id()
+
+        def _set_id(d: dict) -> None:
+            d["MPTokenIssuanceID"] = fake_id
+
+        mutate = _set_id
     elif mutation == "invalid_flags":
         # -> temINVALID_FLAG.
         flags = params.confidential_invalid_flags()
@@ -782,8 +802,7 @@ async def _clawback_faulty(
 
         mutate = _set_flags
     else:  # non_owner -> tefBAD_AUTH.
-        impostor = choice([a for a in acct_list if a.address != src.address])
-        wallet = impostor.wallet
+        wallet = choice(targets).wallet
 
     await submit_raw("ConfidentialMPTClawback", base, client, wallet, mutate)
 
