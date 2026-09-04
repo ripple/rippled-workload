@@ -39,7 +39,8 @@ RUN <<EOF
     set -ex
     REPO_URL="${XRPLD_REPO}"
     if [ -n "${XRPLD_CREDENTIALS}" ]; then
-        REPO_URL="https://${XRPLD_CREDENTIALS}@${XRPLD_REPO#https://}"
+        # x-access-token is the form GitHub documents for App tokens; PATs work with it too.
+        REPO_URL="https://x-access-token:${XRPLD_CREDENTIALS}@${XRPLD_REPO#https://}"
     fi
     git clone --depth 1 --branch ${XRPLD_COMMIT} ${REPO_URL} ${SOURCE_DIR}
     git -C ${SOURCE_DIR} checkout ${XRPLD_COMMIT}
@@ -58,7 +59,7 @@ RUN <<EOF
     set -ex
     FUZZER_URL="${FUZZER_REPO}"
     if [ -n "${FUZZER_CREDENTIALS}" ]; then
-        FUZZER_URL="https://${FUZZER_CREDENTIALS}@${FUZZER_REPO#https://}"
+        FUZZER_URL="https://x-access-token:${FUZZER_CREDENTIALS}@${FUZZER_REPO#https://}"
     fi
     git clone --depth 1 --branch ${FUZZER_COMMIT} ${FUZZER_URL} ${FUZZER_SOURCE_DIR}
     git -C ${FUZZER_SOURCE_DIR} checkout ${FUZZER_COMMIT}
