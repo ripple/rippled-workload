@@ -207,8 +207,6 @@ def _on_vault_create(w: Workload, tx: dict, meta: dict) -> None:
     vault_id = _extract_created_id(meta, "Vault")
     if vault_id:
         asset = _parse_asset(tx.get("Asset", {}))
-        # LEVersion / VaultKind / the phase dates are protocol-written, so the
-        # created node is the only source -- and LEVersion latches the amendment.
         fields = _created_vault_fields(meta)
         lending_v1_1_compat.note_vault_le_version(fields.get("LEVersion"))
         sub = fields.get("SubscriptionDate")

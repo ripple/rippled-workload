@@ -33,15 +33,7 @@ def sha512half(name: str) -> str:
 
 
 def parse_features_macro(macro_path: Path) -> list[str]:
-    """Extract amendment names from rippled's features.macro.
-
-    Includes Supported::No amendments — Dockerfile.xrpld rewrites them to
-    Supported::Yes before building, so the binary knows them and they need
-    testing too (e.g. LendingProtocolV1_1). VoteBehavior::Obsolete is skipped:
-    enabling one leaves the node amendment-blocked.
-
-    Excludes retired amendments and comment examples.
-    """
+    """Extract non-obsolete amendments, including Supported::No entries."""
     text = "\n".join(
         line
         for line in macro_path.read_text().splitlines()
