@@ -54,7 +54,6 @@ from xrpl.models.transactions import (
 from xrpl.models.transactions.delegate_set import Permission
 from xrpl.models.transactions.deposit_preauth import Credential as XRPLCredential
 from xrpl.models.transactions.types import TransactionType
-from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
 import workload.confidential_crypto as cc
@@ -62,6 +61,7 @@ from workload import params
 from workload.assertions import assert_no_internal_error_submit
 from workload.lending_v1_1_compat import VaultCreate, VaultKind
 from workload.models import ConfidentialHolder, ConfidentialMPTIssuance, UserAccount
+from workload.role_signing import sign_loan_set_by_counterparty
 from workload.sequence import SequenceTracker
 from workload.submit import submit_tx
 
@@ -325,7 +325,7 @@ async def _submit_loan(
     )
     signed = await autofill_and_sign(txn, workload.client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
-    resp = await xrpl_submit(cosigned.tx, workload.client)
+    resp = await xrpl_submit(cosigned, workload.client)
     assert_no_internal_error_submit("LoanSet", resp.result)
     engine = resp.result.get("engine_result", "")
     ok = engine in ("tesSUCCESS", "terQUEUED", "terPRE_SEQ")

@@ -41,6 +41,7 @@ from workload.modifiers import apply_modifiers, check_modifier_coverage
 from workload.fuzz import submit_fuzzed, fuzz_mutate
 from workload.rawfuzz import escalate
 from workload.assembler import parse, reassemble
+from workload.role_signing import sign_loan_set_by_counterparty, sign_as_sponsor
 from workload.sequence import SequenceTracker
 from workload.lending_v1_1_compat import VaultCreate, VaultDelete, vault_phase, enabled
 from workload.ws_listener import start_ws_listener

@@ -14,7 +14,6 @@ from xrpl.models.transactions import (
     LoanSet,
 )
 from xrpl.models.transactions.loan_manage import LoanManageFlag
-from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
 from workload import params
@@ -23,6 +22,7 @@ from workload.fuzz import submit_fuzzed
 from workload.lending_v1_1_compat import VaultKind, VaultPhase, vault_phase
 from workload.models import Loan, LoanBroker, UserAccount, Vault
 from workload.randoms import choice, randint
+from workload.role_signing import sign_loan_set_by_counterparty
 from workload.submit import submit_tx
 
 # ── Loan Broker Set ──────────────────────────────────────────────────
@@ -473,9 +473,9 @@ async def _loan_set_valid(
     # LoanSet requires co-signing: borrower signs, then broker co-signs.
     signed = await autofill_and_sign(txn, client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
-    tx_submitting("LoanSet", cosigned.tx)
-    response = await xrpl_submit(cosigned.tx, client)
-    tx_submitted("LoanSet", cosigned.tx, response.result)
+    tx_submitting("LoanSet", cosigned)
+    response = await xrpl_submit(cosigned, client)
+    tx_submitted("LoanSet", cosigned, response.result)
 
 
 async def _loan_set_faulty(
