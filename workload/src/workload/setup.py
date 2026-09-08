@@ -49,7 +49,6 @@ from xrpl.models.transactions import (
     TicketCreate,
     Transaction,
     TrustSet,
-    VaultCreate,
     VaultDeposit,
 )
 from xrpl.models.transactions.delegate_set import Permission
@@ -59,8 +58,10 @@ from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
 import workload.confidential_crypto as cc
+from workload import lending_v1_1_compat as lv
 from workload import params
 from workload.assertions import assert_no_internal_error_submit
+from workload.lending_v1_1_compat import VaultCreate
 from workload.models import ConfidentialHolder, ConfidentialMPTIssuance, UserAccount
 from workload.sequence import SequenceTracker
 from workload.submit import submit_tx
@@ -1184,23 +1185,13 @@ async def run_setup(workload: Workload) -> dict[str, int]:
             {"phase": "conf_mpt", "error": f"{type(e).__name__}: {e}"},
         )
 
-    # ── 7. Vaults: 4 XRP (loan brokers), 2 IOU, 2 MPT ────────────────
+    # ── 7. Vaults: 2 IOU, 2 MPT. These go first because a validated Vault's
+    # LEVersion is what latches whether LendingProtocolV1_1 is active, and that
+    # decides the kind of the XRP broker vaults created in 7a.
     vault_txns = []
-    for i in range(min(8, max(0, len(accs) - 10))):
+    for i in range(4, min(8, max(0, len(accs) - 10))):
         src = accs[10 + i]
-        if i < 4:
-            vault_txns.append(
-                (
-                    "VaultCreate",
-                    VaultCreate(
-                        account=src.address,
-                        asset=xrpl.models.XRP(),
-                        assets_maximum=_VAULT_ASSETS_MAXIMUM,
-                    ),
-                    src.wallet,
-                )
-            )
-        elif i < 6:
+        if i < 6:
             gw_idx, currencies = _GATEWAYS[0]
             if gw_idx < len(accs):
                 vault_txns.append(
@@ -1239,6 +1230,39 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                     )
                 )
     summary["vaults"] = await _run_phase(workload, "vaults", vault_txns, _vault_exists)
+
+    # ── 7a. XRP vaults hosting the loan brokers ──────────────────────
+    # Under LendingProtocolV1_1 a broker may only sit on a closed-ended vault
+    # (LoanBrokerSet preclaim → tecNO_PERMISSION), and LoanSet only succeeds in
+    # the Investment phase while deposits only succeed in Subscription — so the
+    # window has to close between phase 7b and phase 13.
+    broker_closed_ended = lv.enabled()
+    sub_date, red_date = params.setup_broker_vault_dates() if broker_closed_ended else (None, None)
+    xrp_vault_txns = []
+    for i in range(min(4, max(0, len(accs) - 10))):
+        src = accs[10 + i]
+        extra = (
+            {
+                "vault_kind": int(lv.VaultKind.CLOSED_ENDED),
+                "subscription_date": sub_date,
+                "redemption_date": red_date,
+            }
+            if broker_closed_ended
+            else {}
+        )
+        xrp_vault_txns.append(
+            (
+                "VaultCreate",
+                VaultCreate(
+                    account=src.address,
+                    asset=xrpl.models.XRP(),
+                    assets_maximum=_VAULT_ASSETS_MAXIMUM,
+                    **extra,
+                ),
+                src.wallet,
+            )
+        )
+    summary["vaults"] += await _run_phase(workload, "vaults_broker", xrp_vault_txns, _vault_exists)
 
     # ── 7b. Vault deposits: owners deposit into their vaults ─────────
     # Best-effort: the second MPT vault's owner (accs[17], outside the funded
@@ -1483,6 +1507,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     await asyncio.sleep(3)
     broker_txns = []
     xrp_vaults = [v for v in workload.vaults if isinstance(v.asset, xrpl.models.XRP)]
+    if lv.enabled():
+        # LoanBrokerSet rejects a broker on an open-ended vault under V1.1.
+        xrp_vaults = [v for v in xrp_vaults if v.vault_kind == lv.VaultKind.CLOSED_ENDED]
     for vault in xrp_vaults[:4]:
         if vault.owner not in workload.accounts:
             continue

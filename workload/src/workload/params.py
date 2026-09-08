@@ -152,6 +152,19 @@ def closed_ended_dates() -> tuple[int, int]:
     return sub, sub + gap
 
 
+def setup_broker_vault_dates() -> tuple[int, int]:
+    """Dates for setup's loan-broker vaults, which must outlive the whole run.
+
+    Deposits are only legal in Subscription and LoanSet only in Investment, so
+    setup has to cross that boundary: the window has to cover vault_deposits
+    (phase 7b) and be closed by the time loans run (phase 13). Redemption sits
+    beyond any run so every loan's final payment clears kLoanRedemptionBuffer,
+    which the driver-oriented closed_ended_dates() windows are far too short for.
+    """
+    sub = _ripple_now() + 120
+    return sub, sub + 93_600
+
+
 def closed_ended_short_gap() -> tuple[int, int]:
     sub = _ripple_now() + randint(60, 600)
     return sub, sub + randint(0, _lv.MIN_INVESTMENT_PERIOD - 1)
