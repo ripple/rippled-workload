@@ -6,9 +6,9 @@ from xrpl.models.transactions import LoanSet, SponsorSignature, Transaction
 from xrpl.models.transactions.loan_set import CounterpartySignature
 from xrpl.wallet import Wallet
 
-_TX_SIGN_PREFIX = bytes.fromhex("53545800")
-_COUNTERPARTY_SIGN_PREFIX = bytes.fromhex("43505400")
-_SPONSOR_SIGN_PREFIX = bytes.fromhex("53504E00")
+_TX_SIGN_PREFIX = b"STX\0"
+_COUNTERPARTY_SIGN_PREFIX = b"CPT\0"
+_SPONSOR_SIGN_PREFIX = b"SPN\0"
 
 
 def _sign(transaction: Transaction, wallet: Wallet, prefix: bytes) -> str:

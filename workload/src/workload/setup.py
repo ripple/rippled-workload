@@ -1537,9 +1537,7 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 13. Loans (co-signed) ────────────────────────────────────────
-    subscription_dates = [v.subscription_date for v in xrp_vaults if v.subscription_date]
-    if subscription_dates:
-        await asyncio.sleep(max(0, max(subscription_dates) - params._ripple_now() + 2))
+    await asyncio.sleep(max(0, lending_subscription - params._ripple_now() + 2))
     borrower_indices = list(_HOLDER_RANGE)
     loan_attempts: list[_LoanAttempt] = []
     for idx, broker in enumerate(workload.loan_brokers[:3]):

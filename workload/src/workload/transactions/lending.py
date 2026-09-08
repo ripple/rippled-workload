@@ -439,16 +439,14 @@ async def _loan_set_valid(
     eligible = []
     for broker in loan_brokers:
         vault = vault_by_id.get(broker.vault_id)
-        if vault is None:
-            continue
         if (
-            vault_phase(vault.vault_kind, vault.subscription_date, vault.redemption_date, now)
-            != VaultPhase.INVESTMENT
+            vault is not None
+            and vault.redemption_date is not None
+            and now + pi * payment_total + 60 <= vault.redemption_date
+            and vault_phase(vault.vault_kind, vault.subscription_date, vault.redemption_date, now)
+            == VaultPhase.INVESTMENT
         ):
-            continue
-        if vault.redemption_date is None or now + pi * payment_total + 60 > vault.redemption_date:
-            continue
-        eligible.append(broker)
+            eligible.append(broker)
     if not eligible:
         return
     broker = choice(eligible)
@@ -470,7 +468,6 @@ async def _loan_set_valid(
         payment_interval=pi,
         grace_period=params.loan_grace_period(pi),
     )
-    # LoanSet requires co-signing: borrower signs, then broker co-signs.
     signed = await autofill_and_sign(txn, client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
     tx_submitting("LoanSet", cosigned)
