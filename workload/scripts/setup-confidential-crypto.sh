@@ -87,9 +87,14 @@ curl -fSL \
     "https://github.com/XRPLF/mpt-crypto/releases/download/${version}/mpt-crypto-natives-${version}.tar.gz" \
     | tar -xz -C "$natives"
 mkdir -p "$dst/libs/linux"
-cp "$natives/linux-x86-64/libmpt-crypto.so" "$dst/libs/linux/"
+# main's build_mpt_crypto.py links the static archive as an extra object and reads the
+# system libs to co-link from the manifest beside it. pre-3.3-release-group loaded the
+# shared object instead, so the .so alone leaves the link with no archive to resolve.
+cp "$natives/linux-x86-64/libmpt-crypto.a" \
+   "$natives/linux-x86-64/mpt-crypto-static.link-libs.txt" \
+   "$dst/libs/linux/"
 
-# ── Compile the cffi extension in place ($ORIGIN/libs/linux rpath finds the .so) ──
+# ── Compile the cffi extension in place (statically linked, so the result is portable) ──
 uv pip install --python "$PYTHON" cffi setuptools
 "$PYTHON" "$dst/build_mpt_crypto.py"
 
