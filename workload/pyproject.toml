@@ -9,7 +9,9 @@ dependencies = [
     "xrpl-py",
     "antithesis>=0.1.17",
     "requests>=2.32.4",
-    "anyio>=4.9.0",
+    # anyio >=4.15 imports typing_extensions.sentinel, added in 4.16. The devshell's
+    # Nix python carries 4.15.0 and shadows the venv copy, so check-imports fails.
+    "anyio>=4.9.0,<4.15",
     "ruamel-yaml>=0.18.14",
     "fastapi>=0.116.1",
     "uvicorn>=0.35.0",
