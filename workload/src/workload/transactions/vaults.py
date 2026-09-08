@@ -98,6 +98,28 @@ def _random_asset(
     return xrpl.models.XRP()
 
 
+def _new_vault_create(
+    account: str,
+    asset: IssuedCurrency | MPTCurrency | xrpl.models.XRP,
+    *,
+    assets_maximum: str | None = None,
+    data: str | None = None,
+    vault_kind: int | None = None,
+    subscription_date: int | None = None,
+    redemption_date: int | None = None,
+) -> VaultCreate:
+    """Build a VaultCreate while keeping common randomized fields in one place."""
+    return VaultCreate(
+        account=account,
+        asset=asset,
+        assets_maximum=assets_maximum or params.vault_assets_maximum(),
+        data=data or params.vault_data(),
+        vault_kind=vault_kind,
+        subscription_date=subscription_date,
+        redemption_date=redemption_date,
+    )
+
+
 async def vault_create(
     accounts: dict[str, UserAccount],
     vaults: list[Vault],
@@ -121,22 +143,15 @@ def _vault_create_base(
     asset = _random_asset(trust_lines, mpt_issuances)
     if lv.enabled() and params.should_create_closed_ended_vault():
         sub, red = params.closed_ended_dates()
-        txn = VaultCreate(
-            account=src.address,
-            asset=asset,
-            assets_maximum=params.vault_assets_maximum(),
-            data=params.vault_data(),
+        txn = _new_vault_create(
+            src.address,
+            asset,
             vault_kind=int(lv.VaultKind.CLOSED_ENDED),
             subscription_date=sub,
             redemption_date=red,
         )
     else:
-        txn = VaultCreate(
-            account=src.address,
-            asset=asset,
-            assets_maximum=params.vault_assets_maximum(),
-            data=params.vault_data(),
-        )
+        txn = _new_vault_create(src.address, asset)
     return txn, src.wallet
 
 
@@ -179,60 +194,39 @@ async def _vault_create_faulty(
         await submit_fuzzed("VaultCreate", base, client, wallet)
         return
     if mutation == "zero_max":
-        txn = VaultCreate(
-            account=src.address,
-            asset=asset,
-            assets_maximum="0",
-            data=params.vault_data(),
-        )
+        txn = _new_vault_create(src.address, asset, assets_maximum="0")
     elif mutation == "oversized_data":
         oversized = bytes(randint(0, 255) for _ in range(513)).hex()
-        txn = VaultCreate(
-            account=src.address,
-            asset=asset,
-            assets_maximum=params.vault_assets_maximum(),
-            data=oversized,
-        )
+        txn = _new_vault_create(src.address, asset, data=oversized)
     elif mutation == "xrp_with_issuer":
         bad_asset = IssuedCurrency(
             currency="XRP",
             issuer=choice(list(accounts.values())).address,
         )
-        txn = VaultCreate(
-            account=src.address,
-            asset=bad_asset,
-            assets_maximum=params.vault_assets_maximum(),
-            data=params.vault_data(),
-        )
+        txn = _new_vault_create(src.address, bad_asset)
     elif mutation == "short_gap":
         sub, red = params.closed_ended_short_gap()
-        txn = VaultCreate(
-            account=src.address,
-            asset=asset,
-            assets_maximum=params.vault_assets_maximum(),
-            data=params.vault_data(),
+        txn = _new_vault_create(
+            src.address,
+            asset,
             vault_kind=int(lv.VaultKind.CLOSED_ENDED),
             subscription_date=sub,
             redemption_date=red,
         )
     elif mutation == "expired_dates":
         sub, red = params.closed_ended_expired_dates()
-        txn = VaultCreate(
-            account=src.address,
-            asset=asset,
-            assets_maximum=params.vault_assets_maximum(),
-            data=params.vault_data(),
+        txn = _new_vault_create(
+            src.address,
+            asset,
             vault_kind=int(lv.VaultKind.CLOSED_ENDED),
             subscription_date=sub,
             redemption_date=red,
         )
     else:  # invalid_kind — dates stay well-formed so the kind is the only fault
         sub, red = params.closed_ended_dates()
-        txn = VaultCreate(
-            account=src.address,
-            asset=asset,
-            assets_maximum=params.vault_assets_maximum(),
-            data=params.vault_data(),
+        txn = _new_vault_create(
+            src.address,
+            asset,
             vault_kind=params.invalid_vault_kind(),
             subscription_date=sub,
             redemption_date=red,

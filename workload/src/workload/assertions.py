@@ -280,38 +280,42 @@ def _balance_changes(meta: dict) -> tuple[list[dict[str, object]], bool]:
     return changes[:_MAX_BALANCE_CHANGES], len(changes) > _MAX_BALANCE_CHANGES
 
 
+def _vault_fields(meta: dict, node_kinds: tuple[str, ...]) -> dict | None:
+    """Fields from the first affected Vault node of one of ``node_kinds``."""
+    for node in meta.get("AffectedNodes", []):
+        for kind in node_kinds:
+            affected = node.get(kind)
+            if not isinstance(affected, dict) or affected.get("LedgerEntryType") != "Vault":
+                continue
+            fields = affected.get("FinalFields") or affected.get("NewFields") or {}
+            return fields if isinstance(fields, dict) else {}
+    return None
+
+
 def _vault_le_version(meta: dict) -> str | None:
     """Vault.LEVersion (XLS-65 3.1.2.2, LendingProtocolV1_1) decides which accounting a
     Vault follows -- absent/0 legacy accrual-basis, 1 principal-only cash-basis -- and both
     coexist after activation, so a balance_changes row is unattributable without it. It is
     protocol-written and never a transaction field, so the meta node is the only source."""
-    for node in meta.get("AffectedNodes", []):
-        for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
-            n = node.get(kind)
-            if not isinstance(n, dict) or n.get("LedgerEntryType") != "Vault":
-                continue
-            fields = n.get("FinalFields") or n.get("NewFields") or {}
-            return str(fields.get("LEVersion", 0))
-    return None
+    fields = _vault_fields(meta, ("ModifiedNode", "CreatedNode", "DeletedNode"))
+    return None if fields is None else str(fields.get("LEVersion", 0))
 
 
 def _created_vault_kind(meta: dict) -> str | None:
     """VaultKind off a created Vault node. Absent means open-ended, so a None
     here is a legacy vault and a "0" is an explicit open-ended V1.1 one."""
-    for node in meta.get("AffectedNodes", []):
-        created = node.get("CreatedNode")
-        if isinstance(created, dict) and created.get("LedgerEntryType") == "Vault":
-            fields = created.get("NewFields") or {}
-            kind = fields.get("VaultKind")
-            return None if kind is None else str(kind)
-    return None
+    fields = _vault_fields(meta, ("CreatedNode",))
+    if fields is None:
+        return None
+    kind = fields.get("VaultKind")
+    return None if kind is None else str(kind)
 
 
 def _assert_vault_v1_1_signals(
     name: str, tx_json: dict, meta: dict, engine_result: str, le_version: str | None, tx_hash: str
 ) -> None:
     """Reachability for the XLS-65 closed-ended paths. Every one of them is gated
-    on lending_v1_1_compat.enabled(), so without these buckets the whole feature
+    on validated amendment state, so without these buckets the whole feature
     can go dark while VaultCreate's success/failure dims stay satisfied off the
     open-ended vectors. must_hit=False throughout: they only fire against an
     xrpld with LendingProtocolV1_1 active."""

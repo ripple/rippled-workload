@@ -3,9 +3,9 @@
 PR #587 adds three VaultCreate transaction fields -- sfVaultKind (UInt8, nth
 22), sfSubscriptionDate (UInt32, nth 75) and sfRedemptionDate (UInt32, nth 76)
 -- plus a Vault ledger field sfLEVersion (UInt8, nth 6). The pinned xrpl-py
-branch carries neither the codec definitions nor the model fields, so this
+revision carries neither the codec definitions nor the model fields, so this
 module injects the field headers into the live binarycodec maps and extends the
-model. TEMPORARY -- delete once xrpl-py's pre-3.3-release-group catches up,
+model. TEMPORARY -- delete once xrpl-py's main branch carries PR #1034,
 then revert imports to xrpl.models.
 
 sfLEVersion needs no codec entry: it is protocol-written, never a transaction
@@ -78,10 +78,9 @@ class VaultPhase(IntEnum):
     REDEMPTION = 3
 
 
-# Bounds on RedemptionDate - SubscriptionDate that VaultCreate preflight
-# enforces (rippled Protocol.h kMin/kMaxInvestmentPeriod): min <= gap < max.
-MIN_INVESTMENT_PERIOD = 60
-MAX_INVESTMENT_PERIOD = 946_708_560
+# Lower bound on RedemptionDate - SubscriptionDate enforced by VaultCreate
+# preflight (rippled Protocol.h kMinInvestmentPeriod).
+MIN_INVESTMENT_PERIOD = 180
 
 
 def vault_phase(
