@@ -3,6 +3,7 @@
 from xrpl.models.transactions import SponsorshipTransferFlag
 
 from workload import confidential_crypto as _cc
+from workload import lending_v1_1_compat as _lv
 from workload.randoms import choice, randint, random
 
 
@@ -127,14 +128,38 @@ def vault_withdraw_amount() -> str:
     return str(randint(100_000, 50_000_000))
 
 
-def vault_data() -> str:
-    """Max 256 bytes per spec."""
-    length = randint(1, 256)
+def vault_data(min_length: int = 1, max_length: int = 256) -> str:
+    length = randint(min_length, max_length)
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
 def vault_assets_maximum() -> str:
     return str(randint(100_000_000, 10_000_000_000))
+
+
+# ── Closed-ended Vaults (XLS-65, LendingProtocolV1_1) ────────────────
+def should_create_closed_ended_vault() -> bool:
+    return random() < 0.25
+
+
+def closed_ended_dates() -> tuple[int, int]:
+    if random() < 0.3:
+        sub = _ripple_now() + randint(5, 30)
+        gap = randint(_lv.MIN_INVESTMENT_PERIOD, _lv.MIN_INVESTMENT_PERIOD + 120)
+    else:
+        sub = _ripple_now() + randint(600, 1800)
+        gap = randint(_lv.MIN_INVESTMENT_PERIOD, 3600)
+    return sub, sub + gap
+
+
+def closed_ended_short_gap() -> tuple[int, int]:
+    sub = _ripple_now() + randint(60, 600)
+    return sub, sub + randint(0, _lv.MIN_INVESTMENT_PERIOD - 1)
+
+
+def closed_ended_expired_dates() -> tuple[int, int]:
+    sub = _ripple_now() - randint(3600, 86_400)
+    return sub, sub + randint(_lv.MIN_INVESTMENT_PERIOD, 3600)
 
 
 # ── Permissioned Domains ─────────────────────────────────────────────

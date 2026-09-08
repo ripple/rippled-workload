@@ -33,19 +33,21 @@ def sha512half(name: str) -> str:
 
 
 def parse_features_macro(macro_path: Path) -> list[str]:
-    """Extract supported amendment names from rippled's features.macro.
-
-    Excludes retired amendments and comment examples.
-    """
-    text = "\n".join(line for line in macro_path.read_text().splitlines() if not line.lstrip().startswith("//"))
+    """Extract non-obsolete amendments, including Supported::No entries."""
+    text = "\n".join(
+        line
+        for line in macro_path.read_text().splitlines()
+        if not line.lstrip().startswith("//") and "VoteBehavior::Obsolete" not in line
+    )
     amendments = []
 
     # rippled renamed Supported::yes/no to Supported::Yes/No in PR #6571
     # (clang-tidy readability check). Match both cases.
-    for m in re.finditer(r"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*Supported::[Yy]es\s*,", text):
+    supported = r"Supported::(?:[Yy]es|[Nn]o)"
+    for m in re.finditer(rf"XRPL_FEATURE\s*\(\s*(\w+)\s*,\s*{supported}\s*,", text):
         amendments.append(m.group(1))
 
-    for m in re.finditer(r"XRPL_FIX\s*\(\s*(\w+)\s*,\s*Supported::[Yy]es\s*,", text):
+    for m in re.finditer(rf"XRPL_FIX\s*\(\s*(\w+)\s*,\s*{supported}\s*,", text):
         amendments.append("fix" + m.group(1))
 
     return sorted(amendments)

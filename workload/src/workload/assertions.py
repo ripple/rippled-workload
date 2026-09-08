@@ -218,49 +218,68 @@ def _redact_tx(raw: dict) -> dict:
     return {k: scrub(v) for k, v in raw.items() if k not in _SIG_FIELDS}
 
 
-# Ledger entries whose balance movement matters for conservation/rounding analysis.
-_BALANCE_FIELDS = {
-    "AccountRoot": "Balance",
-    "RippleState": "Balance",
-    "MPToken": "MPTAmount",
-    "MPTokenIssuance": "OutstandingAmount",
+# Fields used for conservation and lending-accounting analysis.
+_BALANCE_FIELDS: dict[str, tuple[str, ...]] = {
+    "AccountRoot": ("Balance",),
+    "RippleState": ("Balance",),
+    "MPToken": ("MPTAmount",),
+    "MPTokenIssuance": ("OutstandingAmount",),
+    "Vault": ("AssetsTotal", "AssetsAvailable", "LossUnrealized"),
+    "LoanBroker": ("DebtTotal",),
 }
 _MAX_BALANCE_CHANGES = 25
 
 
 def _balance_changes(meta: dict) -> tuple[list[dict[str, object]], bool]:
     """Per-entry balance before/after from meta AffectedNodes. Values stay faithful
-    (XRP drops as strings; IOU/MPT as amount objects) so the reader does the math.
-    This is the on-ledger effect that conservation/rounding failures turn on."""
+    (XRP drops as strings; IOU/MPT as amount objects); one row per changed field."""
     changes: list[dict[str, object]] = []
     for node in meta.get("AffectedNodes", []):
         for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
             n = node.get(kind)
             if not isinstance(n, dict):
                 continue
-            field = _BALANCE_FIELDS.get(n.get("LedgerEntryType", ""))
-            if field is None:
+            fields = _BALANCE_FIELDS.get(n.get("LedgerEntryType", ""))
+            if fields is None:
                 continue
             final = n.get("FinalFields") or n.get("NewFields") or {}
             prev = n.get("PreviousFields") or {}
-            if kind == "CreatedNode":
-                before, after = None, final.get(field)
-            elif kind == "DeletedNode":
-                before, after = final.get(field), None
-            else:
-                if field not in prev:
-                    continue  # this modification didn't touch the balance
-                before, after = prev.get(field), final.get(field)
-            changes.append(
-                {
-                    "entry": n.get("LedgerEntryType", ""),
-                    "id": n.get("LedgerIndex", ""),
-                    "account": final.get("Account", ""),
-                    "before": before,
-                    "after": after,
-                }
-            )
+            account = final.get("Account") or final.get("Owner", "")
+            for field in fields:
+                if kind == "CreatedNode":
+                    if field not in final:
+                        continue
+                    before, after = None, final.get(field)
+                elif kind == "DeletedNode":
+                    if field not in final:
+                        continue
+                    before, after = final.get(field), None
+                else:
+                    if field not in prev:
+                        continue
+                    before, after = prev.get(field), final.get(field)
+                changes.append(
+                    {
+                        "entry": n.get("LedgerEntryType", ""),
+                        "id": n.get("LedgerIndex", ""),
+                        "field": field,
+                        "account": account,
+                        "before": before,
+                        "after": after,
+                    }
+                )
     return changes[:_MAX_BALANCE_CHANGES], len(changes) > _MAX_BALANCE_CHANGES
+
+
+def _vault_le_version(meta: dict) -> str | None:
+    for node in meta.get("AffectedNodes", []):
+        for kind in ("ModifiedNode", "CreatedNode", "DeletedNode"):
+            affected = node.get(kind)
+            if not isinstance(affected, dict) or affected.get("LedgerEntryType") != "Vault":
+                continue
+            fields = affected.get("FinalFields") or affected.get("NewFields") or {}
+            return str(fields.get("LEVersion", 0))
+    return None
 
 
 def _emit_catalog_entry(message: str, assert_type: str, display_type: str, must_hit: bool) -> None:
@@ -644,6 +663,9 @@ def tx_result(name: str, result: dict) -> None:
         details["balance_changes"] = changes
         if truncated:
             details["balance_changes_truncated"] = True
+    le_version = _vault_le_version(meta)
+    if le_version is not None:
+        details["vault_le_version"] = le_version
     send_event(f"workload::result : {name}", details)
 
     assert_raw(

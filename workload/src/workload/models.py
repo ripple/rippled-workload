@@ -106,6 +106,9 @@ class Vault:
     asset: IssuedCurrency | MPTCurrency | xrpl.models.XRP | None = None
     balance: int = 0
     shareholders: set[str] = field(default_factory=set)
+    vault_kind: int = 0
+    subscription_date: int | None = None
+    redemption_date: int | None = None
 
 
 @dataclass
