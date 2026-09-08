@@ -49,7 +49,6 @@ from xrpl.models.transactions import (
     TicketCreate,
     Transaction,
     TrustSet,
-    VaultCreate,
     VaultDeposit,
 )
 from xrpl.models.transactions.delegate_set import Permission
@@ -61,6 +60,7 @@ from xrpl.wallet import Wallet
 import workload.confidential_crypto as cc
 from workload import params
 from workload.assertions import assert_no_internal_error_submit
+from workload.lending_v1_1_compat import VaultCreate, VaultKind
 from workload.models import ConfidentialHolder, ConfidentialMPTIssuance, UserAccount
 from workload.sequence import SequenceTracker
 from workload.submit import submit_tx
@@ -81,6 +81,8 @@ _LOAN_INTEREST = 1000  # 1% annualized
 _LOAN_INTERVAL = 3600  # 1 hour
 _LOAN_TOTAL = 3  # 3 payments
 _LOAN_GRACE = 600  # 10 minutes
+_LENDING_SUBSCRIPTION_DELAY = 5 * 60
+_LENDING_INVESTMENT_PERIOD = 30 * 24 * 60 * 60
 
 # Verify-and-retry bound: each phase re-submits its shortfall and re-polls
 # tracked state for up to _RETRY_ROUNDS rounds of _SETTLE_TIMEOUT each (~60s).
@@ -1186,6 +1188,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
 
     # ── 7. Vaults: 4 XRP (loan brokers), 2 IOU, 2 MPT ────────────────
     vault_txns = []
+    lending_subscription = params._ripple_now() + _LENDING_SUBSCRIPTION_DELAY
+    lending_redemption = lending_subscription + _LENDING_INVESTMENT_PERIOD
     for i in range(min(8, max(0, len(accs) - 10))):
         src = accs[10 + i]
         if i < 4:
@@ -1196,6 +1200,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
                         account=src.address,
                         asset=xrpl.models.XRP(),
                         assets_maximum=_VAULT_ASSETS_MAXIMUM,
+                        vault_kind=int(VaultKind.CLOSED_ENDED),
+                        subscription_date=lending_subscription,
+                        redemption_date=lending_redemption,
                     ),
                     src.wallet,
                 )
@@ -1482,7 +1489,11 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     # XRP vaults only: setup loans/cover are XRP, owners always hold enough.
     await asyncio.sleep(3)
     broker_txns = []
-    xrp_vaults = [v for v in workload.vaults if isinstance(v.asset, xrpl.models.XRP)]
+    xrp_vaults = [
+        v
+        for v in workload.vaults
+        if isinstance(v.asset, xrpl.models.XRP) and v.vault_kind == int(VaultKind.CLOSED_ENDED)
+    ]
     for vault in xrp_vaults[:4]:
         if vault.owner not in workload.accounts:
             continue
@@ -1526,6 +1537,9 @@ async def run_setup(workload: Workload) -> dict[str, int]:
     )
 
     # ── 13. Loans (co-signed) ────────────────────────────────────────
+    subscription_dates = [v.subscription_date for v in xrp_vaults if v.subscription_date]
+    if subscription_dates:
+        await asyncio.sleep(max(0, max(subscription_dates) - params._ripple_now() + 2))
     borrower_indices = list(_HOLDER_RANGE)
     loan_attempts: list[_LoanAttempt] = []
     for idx, broker in enumerate(workload.loan_brokers[:3]):
