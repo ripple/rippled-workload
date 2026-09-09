@@ -1,2 +1,4 @@
 .git/
 **/.venv/
+workload/tests/
+**/__pycache__/

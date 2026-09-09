@@ -22,6 +22,7 @@ _TF_INNER_BATCH_TXN = int(TransactionFlag.TF_INNER_BATCH_TXN)
 _TF_HYBRID = 0x00100000  # OfferCreateFlag.TF_HYBRID
 _TF_SPONSORSHIP_DELETE_OBJECT = 0x00100000  # SponsorshipSetFlag.TF_DELETE_OBJECT
 _TF_SPONSOR_CREATED_ACCOUNT = 0x00080000  # PaymentFlag.TF_SPONSOR_CREATED_ACCOUNT
+_MPT_SET_CAPABILITY_MASK = 0x1FC
 
 # Object-creating types the sponsor Modifier attaches reserve sponsors to; a
 # tesSUCCESS on one may carry a Sponsor on the created ledger entry, which
@@ -47,6 +48,19 @@ def _amount_is_mpt(amt: object) -> bool:
 def _delivered_amount(tx: dict) -> object:
     """api_version 2 renames Payment Amount→DeliverMax and drops Amount; fall back for v1."""
     return tx.get("DeliverMax", tx.get("Amount"))
+
+
+def _is_dynamic_mpt_set(workload: Workload, tx: dict) -> bool:
+    if tx.get("TransactionType") != "MPTokenIssuanceSet" or not (
+        int(tx.get("Flags", 0) or 0) & _MPT_SET_CAPABILITY_MASK
+        or tx.get("MPTokenMetadata") is not None
+        or tx.get("TransferFee") is not None
+        or tx.get("ImmutableFlags") is not None
+    ):
+        return False
+    mpt_id = tx.get("MPTokenIssuanceID")
+    tracked = next((m for m in workload.mpt_issuances if m.mpt_issuance_id == mpt_id), None)
+    return tracked is None or tracked.dynamic
 
 
 def _on_reserve_sponsored_create(w: Workload, tx: dict, meta: dict) -> None:
@@ -135,6 +149,9 @@ def _handle_validated_tx(workload: Workload, msg: dict) -> None:
         tx_result("SponsorshipSetDelete", result)
     elif tx_type == "SponsorshipTransfer" and not tx.get("ObjectID"):
         tx_result("SponsorshipTransferAccount", result)
+
+    if _is_dynamic_mpt_set(workload, tx):
+        tx_result("DynamicMPTSet", result)
 
     if engine_result == "tesSUCCESS":
         if tx_type in _RESERVE_SPONSOR_TX_TYPES:

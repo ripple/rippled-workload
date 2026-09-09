@@ -17,6 +17,11 @@ from workload.models import MPTokenIssuance, UserAccount
 from workload.randoms import choice, random
 from workload.submit import submit_raw, submit_tx
 
+_LOCK_FLAGS = (
+    MPTokenIssuanceSetFlag.TF_MPT_LOCK,
+    MPTokenIssuanceSetFlag.TF_MPT_UNLOCK,
+)
+
 # ── Create ───────────────────────────────────────────────────────────
 
 
@@ -230,7 +235,7 @@ def _mpt_issuance_set_base(
     if mpt.issuer not in accounts:
         return None
     issuer = accounts[mpt.issuer]
-    flag = choice(list(MPTokenIssuanceSetFlag))
+    flag = choice(_LOCK_FLAGS)
     txn = MPTokenIssuanceSet(
         account=issuer.address,
         mptoken_issuance_id=mpt.mpt_issuance_id,
@@ -266,7 +271,7 @@ async def _mpt_issuance_set_faulty(
         await submit_fuzzed("MPTokenIssuanceSet", base, client, wallet)
         return
 
-    flag = choice(list(MPTokenIssuanceSetFlag))
+    flag = choice(_LOCK_FLAGS)
 
     if mutation == "fake_issuance":
         # Set flags on an issuance that does not exist -> tecOBJECT_NOT_FOUND.

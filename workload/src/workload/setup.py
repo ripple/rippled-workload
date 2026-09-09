@@ -37,6 +37,7 @@ from xrpl.models.transactions import (
     MPTokenAuthorize,
     MPTokenIssuanceCreate,
     MPTokenIssuanceCreateFlag,
+    MPTokenIssuanceImmutableFlag,
     MPTokenIssuanceSet,
     MPTokenIssuanceSetFlag,
     NFTokenCreateOffer,
@@ -100,6 +101,20 @@ _GATEWAYS = [
 # Accounts that receive IOU/MPT balances
 _HOLDER_RANGE = range(62, 72)  # accounts[62..71]
 _VAULT_RANGE = range(10, 17)  # accounts[10..16]
+
+_DYNAMIC_MPT_RANGE = range(53, 56)
+_IMMUTABLE_MPT_RANGE = range(56, 59)
+_DYNAMIC_IMMUTABLE_FLAGS = (
+    MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_LOCK
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_REQUIRE_AUTH
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_ESCROW
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_TRADE
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_TRANSFER
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_CLAWBACK
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_CAN_HOLD_CONFIDENTIAL_BALANCE
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_METADATA
+    | MPTokenIssuanceImmutableFlag.TIF_MPT_TRANSFER_FEE
+)
 
 # Confidential MPT (XLS-0096): issuers + holders on indices unused elsewhere.
 _CONF_ISSUER_RANGE = range(7, 9)  # accounts[7..8]
@@ -969,6 +984,8 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         | set(range(30, 36))
         | set(range(40, 43))
         | set(range(50, 53))
+        | set(_DYNAMIC_MPT_RANGE)
+        | set(_IMMUTABLE_MPT_RANGE)
         | set(range(60, 72))
         | set(range(72, 77))
         # Cross-resource pool (Phase 4): rich accts + their delegates/sponsors must
@@ -1094,6 +1111,37 @@ async def run_setup(workload: Workload) -> dict[str, int]:
         ],
         _mpt_issuance_exists,
     )
+
+    dynamic_txns: list[tuple[str, Transaction, Wallet]] = []
+    for i in _DYNAMIC_MPT_RANGE:
+        if i < len(accs):
+            dynamic_txns.append(
+                (
+                    "MPTokenIssuanceCreate",
+                    MPTokenIssuanceCreate(account=accs[i].address, flags=_LOCK | _XFER),
+                    accs[i].wallet,
+                )
+            )
+    for i in _IMMUTABLE_MPT_RANGE:
+        if i < len(accs):
+            dynamic_txns.append(
+                (
+                    "MPTokenIssuanceCreate",
+                    MPTokenIssuanceCreate(
+                        account=accs[i].address,
+                        flags=_LOCK | _XFER,
+                        immutable_flags=_DYNAMIC_IMMUTABLE_FLAGS,
+                    ),
+                    accs[i].wallet,
+                )
+            )
+    summary["dynamic_mpt_issuances"] = await _run_phase(
+        workload, "dynamic_mpt", dynamic_txns, _mpt_issuance_exists
+    )
+    dynamic_issuers = {txn.account for _, txn, _ in dynamic_txns}
+    for mpt in workload.mpt_issuances:
+        if mpt.issuer in dynamic_issuers:
+            mpt.dynamic = True
 
     # ── 5. MPT authorization: holders authorize for each issuance ────
     mpt_auth_txns = []

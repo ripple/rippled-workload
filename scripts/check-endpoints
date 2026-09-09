@@ -55,6 +55,7 @@ try:
         '/mpt/create/random',
         '/mpt/authorize/random',
         '/mpt/set/random',
+        '/mpt/set/dynamic/random',
         '/mpt/destroy/random',
         '/loan/broker/set/random',
         '/loan/broker/delete/random',
