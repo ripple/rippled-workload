@@ -14,14 +14,15 @@ from xrpl.models.transactions import (
     LoanSet,
 )
 from xrpl.models.transactions.loan_manage import LoanManageFlag
-from xrpl.transaction.counterparty_signer import sign_loan_set_by_counterparty
 from xrpl.wallet import Wallet
 
 from workload import params
 from workload.assertions import tx_submitted, tx_submitting
 from workload.fuzz import submit_fuzzed
+from workload.lending_v1_1_compat import VaultKind, VaultPhase, vault_phase
 from workload.models import Loan, LoanBroker, UserAccount, Vault
 from workload.randoms import choice, randint
+from workload.role_signing import sign_loan_set_by_counterparty
 from workload.submit import submit_tx
 
 # ── Loan Broker Set ──────────────────────────────────────────────────
@@ -41,10 +42,17 @@ async def loan_broker_set(
 def _loan_broker_set_base(
     accounts: dict[str, UserAccount],
     vaults: list[Vault],
+    loan_brokers: list[LoanBroker],
 ) -> tuple[LoanBrokerSet, Wallet] | None:
-    if not vaults:
+    attached = {b.vault_id for b in loan_brokers}
+    eligible = [
+        v
+        for v in vaults
+        if v.vault_kind == int(VaultKind.CLOSED_ENDED) and v.vault_id not in attached
+    ]
+    if not eligible:
         return None
-    vault = choice(vaults)
+    vault = choice(eligible)
     if vault.owner not in accounts:
         return None
     owner = accounts[vault.owner]
@@ -67,7 +75,7 @@ async def _loan_broker_set_valid(
     loan_brokers: list[LoanBroker],
     client: AsyncJsonRpcClient,
 ) -> None:
-    built = _loan_broker_set_base(accounts, vaults)
+    built = _loan_broker_set_base(accounts, vaults, loan_brokers)
     if built is None:
         return
     txn, wallet = built
@@ -86,7 +94,7 @@ async def _loan_broker_set_faulty(
     mutation = choice(["fuzz", "nonexistent_vault", "cover_rate_asymmetry", "non_vault_owner"])
 
     if mutation == "fuzz":
-        built = _loan_broker_set_base(accounts, vaults)
+        built = _loan_broker_set_base(accounts, vaults, loan_brokers)
         if built is None:
             return
         base, wallet = built
@@ -407,24 +415,41 @@ async def _loan_broker_cover_withdraw_faulty(
 
 async def loan_set(
     accounts: dict[str, UserAccount],
+    vaults: list[Vault],
     loan_brokers: list[LoanBroker],
     loans: list[Loan],
     client: AsyncJsonRpcClient,
 ) -> None:
     if params.should_send_faulty():
         return await _loan_set_faulty(accounts, loan_brokers, loans, client)
-    return await _loan_set_valid(accounts, loan_brokers, loans, client)
+    return await _loan_set_valid(accounts, vaults, loan_brokers, loans, client)
 
 
 async def _loan_set_valid(
     accounts: dict[str, UserAccount],
+    vaults: list[Vault],
     loan_brokers: list[LoanBroker],
     loans: list[Loan],
     client: AsyncJsonRpcClient,
 ) -> None:
-    if not loan_brokers:
+    pi = params.loan_payment_interval()
+    payment_total = params.loan_payment_total()
+    now = params._ripple_now()
+    vault_by_id = {v.vault_id: v for v in vaults}
+    eligible = []
+    for broker in loan_brokers:
+        vault = vault_by_id.get(broker.vault_id)
+        if (
+            vault is not None
+            and vault.redemption_date is not None
+            and now + pi * payment_total + 60 <= vault.redemption_date
+            and vault_phase(vault.vault_kind, vault.subscription_date, vault.redemption_date, now)
+            == VaultPhase.INVESTMENT
+        ):
+            eligible.append(broker)
+    if not eligible:
         return
-    broker = choice(loan_brokers)
+    broker = choice(eligible)
     if broker.owner not in accounts:
         return
     broker_wallet = accounts[broker.owner].wallet
@@ -433,23 +458,21 @@ async def _loan_set_valid(
         return
     borrower_id = choice(other_accounts)
     borrower = accounts[borrower_id]
-    pi = params.loan_payment_interval()
     txn = LoanSet(
         account=borrower.address,
         loan_broker_id=broker.loan_broker_id,
         counterparty=broker.owner,
         principal_requested=params.loan_principal(),
         interest_rate=params.loan_interest_rate(),
-        payment_total=params.loan_payment_total(),
+        payment_total=payment_total,
         payment_interval=pi,
         grace_period=params.loan_grace_period(pi),
     )
-    # LoanSet requires co-signing: borrower signs, then broker co-signs.
     signed = await autofill_and_sign(txn, client, borrower.wallet)
     cosigned = sign_loan_set_by_counterparty(broker_wallet, signed)
-    tx_submitting("LoanSet", cosigned.tx)
-    response = await xrpl_submit(cosigned.tx, client)
-    tx_submitted("LoanSet", cosigned.tx, response.result)
+    tx_submitting("LoanSet", cosigned)
+    response = await xrpl_submit(cosigned, client)
+    tx_submitted("LoanSet", cosigned, response.result)
 
 
 async def _loan_set_faulty(

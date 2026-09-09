@@ -34,7 +34,6 @@ from xrpl.models.transactions import (
     SponsorshipSetFlag,
     SponsorshipTransfer,
 )
-from xrpl.transaction import sign_as_sponsor
 from xrpl.wallet import Wallet
 
 from workload import params
@@ -50,6 +49,7 @@ from workload.models import (
     UserAccount,
 )
 from workload.randoms import choice, randint, random, sample
+from workload.role_signing import sign_as_sponsor
 from workload.submit import submit_raw, submit_tx
 
 # Populated by _payment_sponsored_account_valid, consumed by the "Payment" real-type
@@ -165,10 +165,10 @@ async def _submit_transfer_cosigned(
         flags=flag,
     )
     signed = await autofill_and_sign(txn, client, sponsee.wallet)
-    sponsor_result = sign_as_sponsor(sponsor.wallet, signed)
-    tx_submitting(name, sponsor_result.tx)
-    response = await xrpl_submit(sponsor_result.tx, client)
-    tx_submitted(name, sponsor_result.tx, response.result)
+    cosigned = sign_as_sponsor(sponsor.wallet, signed)
+    tx_submitting(name, cosigned)
+    response = await xrpl_submit(cosigned, client)
+    tx_submitted(name, cosigned, response.result)
 
 
 async def _submit_transfer_end(
@@ -985,10 +985,10 @@ async def _sponsorship_transfer_account_faulty(
             flags=params.TF_SPONSORSHIP_CREATE,
         )
         signed = await autofill_and_sign(txn, client, owner.wallet)
-        sponsor_result = sign_as_sponsor(fake_wallet, signed)
-        tx_submitting("SponsorshipTransferAccount", sponsor_result.tx)
-        response = await xrpl_submit(sponsor_result.tx, client)
-        tx_submitted("SponsorshipTransferAccount", sponsor_result.tx, response.result)
+        cosigned = sign_as_sponsor(fake_wallet, signed)
+        tx_submitting("SponsorshipTransferAccount", cosigned)
+        response = await xrpl_submit(cosigned, client)
+        tx_submitted("SponsorshipTransferAccount", cosigned, response.result)
         return
 
     if mutation == "third_party_end":

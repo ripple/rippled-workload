@@ -1476,7 +1476,7 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         "LoanSet",
         "/loan/set/random",
         loan_set,
-        lambda w: (w.accounts, w.loan_brokers, w.loans, w.client),
+        lambda w: (w.accounts, w.vaults, w.loan_brokers, w.loans, w.client),
         _on_loan_set,
     ),
     (

@@ -16,11 +16,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from xrpl.models.transactions.transaction import Transaction
-from xrpl.transaction import sign_as_sponsor
 from xrpl.wallet import Wallet
 
 from workload import params
 from workload.randoms import choice, random, sample
+from workload.role_signing import sign_as_sponsor
 from workload.transactions import TX_TYPES
 from workload.transactions.delegation import DELEGABLE_TX_TYPES, maybe_delegate
 from workload.transactions.sponsorship import _pick_reserve_sponsor, pick_prefunded_fee_sponsor
@@ -152,7 +152,7 @@ def _cosign_sponsor(sponsor_wallet: Wallet) -> Callable[[Any], Any]:
     """Post-sign hook: add the sponsor's SponsorSignature over the sponsee-signed
     canonical data. submit_tx submits the returned tx as-is (xrpl-py's submit()
     re-encodes, never re-signs), so the sponsor signature reaches rippled intact."""
-    return lambda signed: sign_as_sponsor(sponsor_wallet, signed).tx
+    return lambda signed: sign_as_sponsor(sponsor_wallet, signed)
 
 
 def _sponsor_valid(

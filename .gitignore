@@ -23,4 +23,5 @@ config/docker-compose.yml
 config/volumes/*val*
 config/volumes/*xrpld*
 local-test/
+/testnet/
 prepare-workload/testnet/
