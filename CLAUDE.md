@@ -90,6 +90,9 @@ Self-seeding families (no setup step) track state purely from validated results:
 ### MPT cohorts (XLS-82)
 Setup step 4 mints flag-distinct cohorts (one issuer each) so MPT-on-DEX paths hit valid + fault gates: `[0]/[1]` tradeable (success), `[2]` no-trade (`tecNO_PERMISSION`), `[3]` no-transfer (`tecNO_AUTH`/`tecPATH_PARTIAL`), `[4]` require-auth never authorized (`tecNO_AUTH`), `[5]` lockable→locked in `mpt_lock` (`tecLOCKED` / `tecPATH_DRY`). `MPTokenIssuance` tracks `can_trade/can_transfer/require_auth/locked/holders`. `w.amms` now holds MPT-paired AMMs — filter `isinstance(asset, IssuedCurrency)` before reading `.currency`/`.issuer`.
 
+### Dynamic MPT (XLS-0094)
+`DynamicMPTSet` submits `MPTokenIssuanceSet` against dedicated mutable and immutable setup cohorts. Valid paths enable capabilities, replace metadata, update transfer fees, and progressively set `ImmutableFlags`; faults cover fuzzing, bad ownership/IDs, immutable mutation, and oversized metadata. The legacy MPT set handler uses lock/unlock flags only. `ws_listener._is_dynamic_mpt_set` requires a dynamic field and rejects tracked regular cohorts before feeding the synthetic result bucket.
+
 ### SequenceTracker (`sequence.py`)
 Prevents `tefPAST_SEQ` cascades in setup: lazy-fetch each account's sequence, then increment in-memory. Setup batches + LoanSet co-sign use it; drivers use autofill. Gotcha: `TicketCreate` advances Sequence by `count + 1` (only tx >1), but `next_seq` counts +1 — after a setup `TicketCreate` on a reused account call `seq.advance(addr, count)`.
 

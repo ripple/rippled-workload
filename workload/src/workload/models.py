@@ -125,8 +125,11 @@ class MPTokenIssuance:
     mpt_issuance_id: str
     can_trade: bool = False
     can_transfer: bool = False
+    can_hold_confidential: bool = False
     require_auth: bool = False
     locked: bool = False
+    immutable_flags: int = 0
+    dynamic: bool = False
     holders: set[str] = field(default_factory=set)
 
 

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 import xrpl.models
 from xrpl.models import IssuedCurrency
 from xrpl.models.currencies import MPTCurrency
-from xrpl.models.transactions import MPTokenIssuanceCreateFlag
+from xrpl.models.transactions import MPTokenIssuanceCreateFlag, MPTokenIssuanceSetFlag
 
 from workload import lending_v1_1_compat, params
 from workload.models import (
@@ -79,6 +79,7 @@ from workload.transactions.lending import (
 )
 from workload.transactions.mpt import mpt_authorize, mpt_create, mpt_destroy, mpt_issuance_set
 from workload.transactions.mpt_dex import offer_create_mpt, payment_mpt
+from workload.transactions.mpt_dynamic import mpt_issuance_set_dynamic
 from workload.transactions.nft import (
     nftoken_accept_offer,
     nftoken_burn,
@@ -306,9 +307,13 @@ def _on_mpt_create(w: Workload, tx: dict, meta: dict) -> None:
             mpt_issuance_id=mpt_id,
             can_trade=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRADE)),
             can_transfer=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_TRANSFER)),
+            can_hold_confidential=bool(
+                flags & int(MPTokenIssuanceCreateFlag.TF_MPT_CAN_HOLD_CONFIDENTIAL_BALANCE)
+            ),
             require_auth=bool(flags & int(MPTokenIssuanceCreateFlag.TF_MPT_REQUIRE_AUTH)),
             # lock state set later by setup, not at create
             locked=False,
+            immutable_flags=int(tx.get("ImmutableFlags", 0) or 0),
         )
         w.mpt_issuances.append(issuance)
 
@@ -326,6 +331,26 @@ def _on_mpt_authorize(w: Workload, tx: dict, meta: dict) -> None:
         if m.mpt_issuance_id == mpt_id:
             m.holders.add(held)
             return
+
+
+def _on_mpt_issuance_set(w: Workload, tx: dict, meta: dict) -> None:
+    mpt_id = tx.get("MPTokenIssuanceID")
+    flags = int(tx.get("Flags", 0) or 0)
+    for mpt in w.mpt_issuances:
+        if mpt.mpt_issuance_id != mpt_id:
+            continue
+        mpt.immutable_flags |= int(tx.get("ImmutableFlags", 0) or 0)
+        mpt.can_trade |= bool(flags & int(MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRADE))
+        mpt.can_transfer |= bool(flags & int(MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_TRANSFER))
+        mpt.can_hold_confidential |= bool(
+            flags & int(MPTokenIssuanceSetFlag.TF_MPT_SET_CAN_HOLD_CONFIDENTIAL_BALANCE)
+        )
+        mpt.require_auth |= bool(flags & int(MPTokenIssuanceSetFlag.TF_MPT_SET_REQUIRE_AUTH))
+        if flags & int(MPTokenIssuanceSetFlag.TF_MPT_LOCK):
+            mpt.locked = True
+        elif flags & int(MPTokenIssuanceSetFlag.TF_MPT_UNLOCK):
+            mpt.locked = False
+        return
 
 
 def _on_mpt_destroy(w: Workload, tx: dict, meta: dict) -> None:
@@ -1117,6 +1142,13 @@ REGISTRY: list[tuple[str, str, Handler, ArgsFn, StateUpdater | None]] = [
         "MPTokenIssuanceSet",
         "/mpt/set/random",
         mpt_issuance_set,
+        lambda w: (w.accounts, w.mpt_issuances, w.client),
+        _on_mpt_issuance_set,
+    ),
+    (
+        "DynamicMPTSet",
+        "/mpt/set/dynamic/random",
+        mpt_issuance_set_dynamic,
         lambda w: (w.accounts, w.mpt_issuances, w.client),
         None,
     ),

@@ -200,6 +200,11 @@ def mpt_metadata() -> str:
     return bytes(randint(0, 255) for _ in range(length)).hex()
 
 
+def mpt_transfer_fee() -> int:
+    """1/10th basis points (0-50000 = 0-50%)."""
+    return randint(0, 50_000)
+
+
 # ── AMM ─────────────────────────────────────────────────────────────
 def amm_trading_fee() -> int:
     """1/100,000th (0-1000 = 0-1%)."""

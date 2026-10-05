@@ -44,3 +44,8 @@ ignore_missing_imports = true
 # Dockerfile.workload's XRPL_PY_REF on the same ref so models and proofs agree.
 [tool.uv.sources]
 xrpl-py = { git = "https://github.com/XRPLF/xrpl-py.git", branch = "main" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

@@ -22,6 +22,7 @@ from workload.transactions.deposit_preauth import deposit_preauth
 from workload.transactions.signer_list_set import signer_list_set
 from workload.transactions.did import did_set, did_delete
 from workload.transactions.mpt import mpt_create, mpt_authorize, mpt_issuance_set, mpt_destroy
+from workload.transactions.mpt_dynamic import mpt_issuance_set_dynamic
 from workload.transactions.nft import nftoken_mint, nftoken_modify
 from workload.transactions.offers import offer_create, offer_cancel
 from workload.transactions.permissioned_dex import offer_create_domain, offer_create_hybrid, payment_domain, payment_domain_xc

@@ -20,3 +20,5 @@ jobs:
             ruff format --check src/workload/ && \
             mypy && \
             basedpyright src/workload"
+      - name: unit tests
+        run: nix develop --command bash -c "cd workload && uv run pytest -q"
