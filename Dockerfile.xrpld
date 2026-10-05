@@ -106,9 +106,13 @@ RUN <<EOF
         --build missing
 EOF
 
+# Newer rippled derives its version from git (cmake/XrplVersion.cmake) and fails
+# configure without it, but the clone step drops .git (its remote URL embeds the
+# credentials). Use the dev version rippled's conanfile.py falls back to without
+# git; refs that predate FORCE_XRPLD_VERSION ignore it.
 RUN <<EOF
     set -ex
-    cmake -S ${SOURCE_DIR} -B ${BUILD_DIR} \
+    FORCE_XRPLD_VERSION=0.0.0-dev cmake -S ${SOURCE_DIR} -B ${BUILD_DIR} \
         -Dvoidstar=ON \
         -Dxrpld=ON \
         -DCMAKE_BUILD_TYPE=Debug \
