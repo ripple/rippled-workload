@@ -106,9 +106,9 @@ RUN <<EOF
         --build missing
 EOF
 
-# Newer rippled derives its version from git (cmake/XrplVersion.cmake) and fails
+# Newer xrpld derives its version from git (cmake/XrplVersion.cmake) and fails
 # configure without it, but the clone step drops .git (its remote URL embeds the
-# credentials). Use the dev version rippled's conanfile.py falls back to without
+# credentials). Use the dev version xrpld's conanfile.py falls back to without
 # git; refs that predate FORCE_XRPLD_VERSION ignore it.
 RUN <<EOF
     set -ex
